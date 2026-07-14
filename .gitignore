@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Downloaded / generated data artifacts (recreate with `python -m app.data_loader`)
+data/
+!data/.gitkeep
+
+# Runtime / logs
+server.log
+*.log
+
+# Generated screenshots from headless tests
+scripts/shot_*.png
+scripts/_*.json
+
+# OS
+.DS_Store
+Thumbs.db

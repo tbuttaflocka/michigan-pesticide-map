@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Michigan Pesticide Application Heat Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="branding">
+    <h1>Michigan Pesticide Application Heat Map</h1>
+    <p class="subtitle">Data sourced from USGS, USDA NASS, and Michigan MDARD</p>
+  </div>
+  <div class="header-actions">
+    <div class="view-switch" id="view-switch">
+      <button data-view="map" class="active">Heat map</button>
+      <button data-view="correlation">CWD correlation</button>
+      <button data-view="respiratory">Respiratory</button>
+      <button data-view="cancer">Cancer</button>
+    </div>
+    <input id="search" type="search" placeholder="Search county or compound…" autocomplete="off" />
+    <div id="search-results" class="search-dropdown hidden"></div>
+    <button id="open-sources" class="btn-ghost" title="Data sources">Data&nbsp;sources</button>
+  </div>
+</header>
+
+<main class="app-body" id="view-map">
+  <aside class="sidebar left">
+    <section class="panel layer-control">
+      <h2>Map layers</h2>
+
+      <div class="active-layer" id="active-layer-indicator">
+        <span class="al-k">Currently showing</span>
+        <strong id="active-layer-name">Pesticide</strong>
+      </div>
+
+      <div class="layer-group">
+        <div class="layer-group-head">County coloring <span class="lg-hint">choose one</span></div>
+        <label class="layer-radio"><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
+        <label class="layer-radio"><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
+        <label class="layer-radio"><input type="radio" name="choropleth" value="cwd" /> <span class="lr-dot cwd"></span> <span>CWD-positive counties</span></label>
+        <label class="layer-radio"><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
+        <label class="layer-radio"><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
+        <label class="layer-radio"><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
+      </div>
+
+      <div class="layer-divider"></div>
+
+      <div class="layer-group">
+        <div class="layer-group-head">Overlays <span class="lg-hint">stack freely</span></div>
+        <label class="cwd-toggle"><input type="checkbox" id="cwd-markers" checked /> <span>CWD wild-deer markers</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="cwd-farmed" /> <span>Farmed-cervid facilities</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="cwd-surv" /> <span>CWD surveillance zones</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
+        <div class="contam-subtoggles" id="contam-subtoggles">
+          <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
+          <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
+          <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
+          <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
+        </div>
+        <label class="cwd-toggle"><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
+        <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
+        <label class="cwd-toggle"><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
+        <label class="cwd-toggle"><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Filters</h2>
+      <label class="field">
+        <span>Compound category</span>
+        <select id="filter-category">
+          <option value="all">All compounds</option>
+          <option value="herbicide">Herbicides</option>
+          <option value="insecticide">Insecticides</option>
+          <option value="fungicide">Fungicides</option>
+          <option value="growth_regulator">Growth regulators</option>
+          <option value="other">Other / fumigants</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Specific compound</span>
+        <select id="filter-compound">
+          <option value="">— none —</option>
+        </select>
+      </label>
+
+      <div class="featured-compounds" id="featured-compounds"></div>
+
+      <label class="field">
+        <span>Estimate</span>
+        <div class="seg">
+          <button data-val="low">Low</button>
+          <button data-val="avg" class="active">Average</button>
+          <button data-val="high">High</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span>Normalization</span>
+        <div class="seg" id="seg-normalize">
+          <button data-val="total" class="active">Total lbs</button>
+          <button data-val="per_sq_mile">lbs / mi²</button>
+        </div>
+      </label>
+    </section>
+
+    <section class="panel">
+      <h2>CWD data</h2>
+      <p class="muted small">Enable <em>CWD-positive counties</em> under Map layers to color the map.</p>
+      <p class="muted small" id="cwd-stats">—</p>
+    </section>
+
+    <section class="panel">
+      <h2>Water contamination</h2>
+      <label class="field">
+        <span>Filter to compound</span>
+        <select id="wq-compound">
+          <option value="">— all pesticides —</option>
+        </select>
+      </label>
+      <label class="small"><input type="checkbox" id="wq-match-main" /> Match the main map's compound</label>
+      <p class="muted small" id="wq-stats">—</p>
+    </section>
+
+    <section class="panel">
+      <h2>Respiratory health</h2>
+      <p class="muted small">Choose <em>Respiratory health</em> under Map layers to color the map by this metric.</p>
+      <label class="field" style="margin-top:8px">
+        <span>Metric</span>
+        <select id="resp-metric">
+          <option value="combined">All Respiratory (combined)</option>
+          <option value="asthma_ed">Asthma — ED Visits</option>
+          <option value="asthma_hosp">Asthma — Hospitalizations</option>
+          <option value="copd_ed">COPD — ED Visits</option>
+          <option value="copd_hosp">COPD — Hospitalizations</option>
+          <option value="acute_bronchitis">Acute Bronchitis</option>
+          <option value="pneumonia_influenza">Pneumonia &amp; Influenza</option>
+          <option value="upper_respiratory">Upper Respiratory Infections</option>
+          <option value="all_respiratory_mort">All Respiratory Mortality</option>
+        </select>
+      </label>
+      <p class="resp-meta" id="resp-meta">—</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Cancer incidence</h2>
+        <button id="cancer-evidence-btn" class="info-btn" title="Pesticide–cancer evidence">ℹ️</button>
+      </div>
+      <p class="muted small">Choose <em>Cancer incidence</em> under Map layers to color the map by this type.</p>
+      <label class="field" style="margin-top:8px">
+        <span>Cancer type</span>
+        <select id="cancer-type"></select>
+      </label>
+      <label class="field" style="margin-top:8px">
+        <span>Measure</span>
+        <div class="seg" id="seg-cancer-dtype">
+          <button data-val="incidence" class="active">Incidence</button>
+          <button data-val="mortality">Mortality</button>
+        </div>
+      </label>
+      <p class="resp-meta" id="cancer-meta">—</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Industrial contamination</h2>
+      </div>
+      <p class="muted small">Site markers &amp; impact zones are under Map layers → Overlays.
+        For county coloring, choose <em>Contamination site density</em>.</p>
+      <p class="muted small" id="contam-stats">—</p>
+    </section>
+
+    <section class="panel">
+      <h2>Year</h2>
+      <div class="year-row">
+        <span id="year-label" class="year-label">—</span>
+        <button id="play-btn" class="btn-ghost" title="Animate years">▶</button>
+      </div>
+      <input id="year-slider" type="range" min="0" max="0" step="1" />
+      <div class="year-ends">
+        <span id="year-min">—</span>
+        <span id="year-max">—</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Legend</h2>
+      <div id="legend"></div>
+      <p class="legend-note" id="legend-units">lbs applied</p>
+    </section>
+  </aside>
+
+  <div id="map"></div>
+
+  <aside class="sidebar right">
+    <section class="panel statewide">
+      <h2 id="state-heading">Statewide summary</h2>
+      <div class="big-stats">
+        <div><strong id="stat-total">—</strong><span>total lbs applied</span></div>
+        <div><strong id="stat-compounds">—</strong><span>active compounds</span></div>
+        <div><strong id="stat-counties">—</strong><span>counties with data</span></div>
+      </div>
+
+      <h3>Top counties</h3>
+      <ol id="top-counties" class="top-list"></ol>
+
+      <h3>Top compounds</h3>
+      <ol id="top-compounds" class="top-list"></ol>
+
+      <h3>Statewide trend (avg lbs/year)</h3>
+      <div class="chart-box trend"><canvas id="chart-statewide-trend"></canvas></div>
+
+      <h3>Category breakdown</h3>
+      <div class="chart-box doughnut"><canvas id="chart-category"></canvas></div>
+    </section>
+
+    <section class="panel county-panel hidden" id="county-panel">
+      <button class="close" id="county-close">×</button>
+      <h2 id="county-name">—</h2>
+      <p class="county-meta"><span id="county-fips"></span> · <span id="county-area"></span></p>
+
+      <div id="county-cwd-badge" class="cwd-badge hidden"></div>
+
+      <div class="big-stats">
+        <div><strong id="county-total">—</strong><span>lbs applied</span></div>
+        <div><strong id="county-density">—</strong><span>lbs / mi²</span></div>
+        <div><strong id="county-cwd-positives">—</strong><span>CWD positives</span></div>
+      </div>
+
+      <h3>Top 10 compounds</h3>
+      <div class="chart-box bar"><canvas id="chart-county-compounds"></canvas></div>
+
+      <h3>By category</h3>
+      <div class="chart-box doughnut"><canvas id="chart-county-category"></canvas></div>
+
+      <h3>Year-over-year trend</h3>
+      <div class="chart-box trend"><canvas id="chart-county-trend"></canvas></div>
+
+      <h3>Crop acreage</h3>
+      <table id="county-crops" class="crops"></table>
+
+      <h3>Respiratory health</h3>
+      <table class="resp-table" id="county-resp-table">
+        <thead>
+          <tr><th>Metric</th><th class="num">Rate</th><th class="num">vs MI</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted small" id="county-resp-note"></p>
+
+      <h3>Cancer incidence <span class="muted small" id="county-cancer-ru"></span></h3>
+      <table class="resp-table cancer-table" id="county-cancer-table">
+        <thead>
+          <tr>
+            <th data-tip="Cancer type. Those near the top have the strongest research links to pesticide exposure.">Cancer</th>
+            <th class="num" data-tip="New cases diagnosed per 100,000 people per year in this county, age-adjusted, averaged over 2018-2022.">Rate</th>
+            <th class="num" data-tip="How this county compares to the Michigan state average. &#9650; = higher than state average, &#9660; = lower.">vs MI</th>
+            <th class="num" data-tip="National average rate (SEER+NPCR) for comparison.">US</th>
+            <th class="num" data-tip="Whether the rate is rising, falling, or stable over recent years.">Trend</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted small" id="county-cancer-note"></p>
+
+      <h3>Industrial contamination <span class="muted small" id="county-contam-count"></span></h3>
+      <div id="county-contam-list" class="contam-county-list"></div>
+
+      <p class="county-links">
+        <a id="county-inspector" target="_blank" rel="noopener">MDARD inspector for this county →</a>
+      </p>
+    </section>
+  </aside>
+</main>
+
+<!-- ===================== Correlation view ===================== -->
+<section class="app-body correlation-view hidden" id="view-correlation">
+  <div class="correlation-grid">
+
+    <div class="panel disclaimer-panel">
+      <h2>Important context</h2>
+      <ul class="disclaimer">
+        <li><strong>CWD is caused by infectious prions, not pesticides.</strong>
+          Prion transmission occurs deer-to-deer and through environmental contamination.</li>
+        <li>CWD prevalence and pesticide use are both concentrated in agricultural
+          regions of Michigan's Lower Peninsula. This creates an inherent
+          geographic confound.</li>
+        <li>Surveillance effort varies dramatically by county and year —
+          counties with more testing naturally detect more cases.</li>
+        <li>The initial detection cluster (Ingham/Clinton/Montcalm) drives much
+          of the geographic pattern through proximity-based spread.</li>
+        <li>Deer population density, habitat type, farmed cervid facility
+          proximity, and hunter-harvest density are all major confounding variables.</li>
+        <li>This tool is for <strong>exploratory visualization only</strong> and
+          does not constitute scientific evidence of causation.</li>
+      </ul>
+    </div>
+
+    <div class="panel scatter-panel">
+      <div class="panel-head">
+        <h2>Pesticide use vs CWD positives</h2>
+        <select id="scatter-metric">
+          <option value="total">Total pesticide lbs</option>
+          <option value="per_sq_mile">lbs per square mile</option>
+          <option value="herbicide">Herbicides only</option>
+          <option value="insecticide">Insecticides only</option>
+          <option value="fungicide">Fungicides only</option>
+        </select>
+      </div>
+      <div class="chart-box scatter"><canvas id="chart-scatter"></canvas></div>
+      <div id="scatter-fit" class="muted small fit-line"></div>
+    </div>
+
+    <div class="panel stats-panel">
+      <h2>Statistical summary</h2>
+      <div class="big-stats">
+        <div><strong id="stats-mean-pos">—</strong><span>mean lbs · CWD+</span></div>
+        <div><strong id="stats-mean-neg">—</strong><span>mean lbs · CWD−</span></div>
+        <div><strong id="stats-t">—</strong><span>Welch t</span></div>
+        <div><strong id="stats-p">—</strong><span>two-tailed p</span></div>
+        <div><strong id="stats-r">—</strong><span>Pearson r</span></div>
+        <div><strong id="stats-r2">—</strong><span>R²</span></div>
+      </div>
+      <p id="stats-interp" class="stats-interp"></p>
+    </div>
+
+    <div class="panel compounds-panel">
+      <h2>Featured compounds · mean lbs per county</h2>
+      <div class="chart-box bar tall"><canvas id="chart-compounds"></canvas></div>
+      <p class="muted small">CWD-positive vs CWD-negative counties, latest available year.
+        Statistical comparison is per-compound Welch's t-test (significance shown by ★).</p>
+    </div>
+
+    <div class="panel table-panel">
+      <div class="panel-head">
+        <h2>County comparison</h2>
+        <label class="small"><input type="checkbox" id="only-cwd" /> only CWD-positive</label>
+      </div>
+      <div class="table-wrap">
+        <table id="corr-table">
+          <thead>
+            <tr>
+              <th data-sort="county" class="sortable">County</th>
+              <th data-sort="total_pesticide_lbs" class="sortable right">Total lbs</th>
+              <th data-sort="pesticide_per_sq_mile" class="sortable right">lbs/mi²</th>
+              <th data-sort="herbicide_lbs" class="sortable right">Herb lbs</th>
+              <th data-sort="insecticide_lbs" class="sortable right">Insect lbs</th>
+              <th data-sort="fungicide_lbs" class="sortable right">Fung lbs</th>
+              <th data-sort="cwd_positives_count" class="sortable right">CWD+</th>
+              <th data-sort="cwd_farmed_facilities" class="sortable right">Farms</th>
+              <th data-sort="cwd_positive" class="sortable">CWD status</th>
+            </tr>
+          </thead>
+          <tbody id="corr-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===================== Respiratory view ===================== -->
+<section class="app-body correlation-view hidden" id="view-respiratory">
+  <div class="correlation-grid">
+
+    <details class="panel disclaimer-panel resp collapsible" id="resp-caveats">
+      <summary><span class="info-icon">ℹ️</span>&nbsp;<strong>Important context</strong> — click to expand</summary>
+      <ul class="disclaimer">
+        <li><strong>Urban counties</strong> (Wayne / Oakland / Macomb / Genesee /
+          Saginaw) have high asthma rates driven by air pollution, poverty,
+          housing conditions, and industrial emissions — <em>not</em>
+          agricultural pesticides.</li>
+        <li>Asthma and COPD have many causes: smoking, indoor allergens, air
+          quality, genetics, occupational exposures, socioeconomic factors.</li>
+        <li>Pesticide <em>applicators</em> have direct occupational exposure
+          risk; that differs from ambient community exposure.</li>
+        <li>Pesticide and respiratory data are <strong>annual and county-level</strong>.
+          Monthly seasonal correlation isn't possible at the county grain.</li>
+        <li>Broader ICD-10 categories (J00-J06, J20-J22, J60-J70) use Michigan
+          statewide baselines because no county-level breakdowns are published.</li>
+        <li>This tool is for <strong>exploratory visualization only</strong> —
+          it does not constitute epidemiological evidence.</li>
+      </ul>
+    </details>
+
+    <div class="panel scatter-panel wide">
+      <div class="panel-head">
+        <h2>Pesticide use vs respiratory rate</h2>
+        <div class="controls-row">
+          <select id="resp-scatter-pest">
+            <option value="per_sq_mile">lbs / mi²</option>
+            <option value="total">Total lbs</option>
+            <option value="herbicide">Herbicides</option>
+            <option value="insecticide">Insecticides</option>
+            <option value="fungicide">Fungicides</option>
+          </select>
+          <select id="resp-scatter-resp">
+            <option value="asthma_ed">All Respiratory (asthma ED proxy)</option>
+            <option value="asthma_hosp">Asthma — Hospitalizations</option>
+            <option value="copd_ed">COPD — ED</option>
+            <option value="copd_hosp">COPD — Hospitalizations</option>
+            <option value="prevalence">Adult asthma prevalence (%)</option>
+          </select>
+          <label class="small"><input type="checkbox" id="exclude-wayne" /> exclude Wayne</label>
+        </div>
+      </div>
+      <div class="chart-box scatter tall"><canvas id="chart-resp-scatter"></canvas></div>
+      <p class="quartile-summary" id="resp-summary">—</p>
+    </div>
+
+    <div class="panel trend-panel wide">
+      <h2>Year-over-year respiratory rate (statewide average)</h2>
+      <div class="chart-box trend"><canvas id="chart-resp-trend"></canvas></div>
+      <p class="muted small">Average of the four CDC Tracking county-level measures
+        (asthma + COPD, ED + hospitalization, age-adjusted per 10,000).</p>
+    </div>
+
+    <div class="panel table-panel resp">
+      <div class="panel-head">
+        <h2>County rankings · pesticide use & respiratory rate</h2>
+        <span class="muted small">Highlighted rows rank in the top 20 for <em>both</em>.</span>
+      </div>
+      <div class="table-wrap">
+        <table id="resp-table">
+          <thead>
+            <tr>
+              <th data-sort="rank_pest"        class="sortable right">#&nbsp;Pest</th>
+              <th data-sort="county"           class="sortable">County</th>
+              <th data-sort="is_urban"         class="sortable">Type</th>
+              <th data-sort="pest_lbs"         class="sortable right">Total lbs</th>
+              <th data-sort="asthma_ed_rate"   class="sortable right">Asthma ED</th>
+              <th data-sort="asthma_hosp_rate" class="sortable right">Asthma hosp.</th>
+              <th data-sort="copd_ed_rate"     class="sortable right">COPD ED</th>
+              <th data-sort="copd_hosp_rate"   class="sortable right">COPD hosp.</th>
+              <th data-sort="rank_resp"        class="sortable right">#&nbsp;Resp</th>
+            </tr>
+          </thead>
+          <tbody id="resp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===================== Cancer view ===================== -->
+<section class="app-body correlation-view hidden" id="view-cancer">
+  <div class="correlation-grid">
+
+    <div class="panel scatter-panel wide">
+      <div class="panel-head">
+        <h2>Pesticide use vs cancer incidence</h2>
+        <div class="controls-row">
+          <select id="cancer-scatter-cancer"></select>
+          <select id="cancer-scatter-pest">
+            <option value="all">Total pesticide</option>
+            <option value="herbicide">Herbicides</option>
+            <option value="insecticide">Insecticides</option>
+            <option value="fungicide">Fungicides</option>
+            <option value="per_sq_mile">lbs / mi²</option>
+            <option value="compound:GLYPHOSATE">Glyphosate</option>
+            <option value="compound:ATRAZINE">Atrazine</option>
+            <option value="compound:2,4-D">2,4-D</option>
+            <option value="compound:METOLACHLOR">Metolachlor</option>
+            <option value="compound:CHLORPYRIFOS">Chlorpyrifos</option>
+            <option value="compound:DICAMBA">Dicamba</option>
+            <option value="compound:CHLOROTHALONIL">Chlorothalonil</option>
+            <option value="contamination">Contamination sites (count)</option>
+            <option value="contamination:npl">Superfund NPL sites (count)</option>
+          </select>
+          <select id="cancer-scatter-dtype">
+            <option value="incidence">Incidence</option>
+            <option value="mortality">Mortality</option>
+          </select>
+        </div>
+      </div>
+      <div class="controls-row cancer-confounds">
+        <label class="small"><input type="checkbox" id="cancer-exclude-urban" /> exclude urban (&gt;100k)</label>
+        <label class="small"><input type="checkbox" id="cancer-rural-only" /> rural only</label>
+        <label class="small"><input type="checkbox" id="cancer-control-smoking" /> control for smoking</label>
+      </div>
+      <div class="chart-box scatter tall"><canvas id="chart-cancer-scatter"></canvas></div>
+      <p class="deep-dive" id="cancer-deep-dive">—</p>
+    </div>
+
+    <div class="panel stats-panel">
+      <h2>Statistical summary</h2>
+      <div class="big-stats">
+        <div><strong id="cancer-stat-r">—</strong><span>Pearson r</span></div>
+        <div><strong id="cancer-stat-p">—</strong><span>p-value</span></div>
+        <div><strong id="cancer-stat-rho">—</strong><span>Spearman ρ</span></div>
+        <div><strong id="cancer-stat-n">—</strong><span>counties</span></div>
+        <div><strong id="cancer-stat-top">—</strong><span>top-25% mean</span></div>
+        <div><strong id="cancer-stat-bot">—</strong><span>bottom-25% mean</span></div>
+      </div>
+      <p id="cancer-stat-sig" class="sig-line"></p>
+      <p id="cancer-stat-interp" class="stats-interp"></p>
+      <p id="cancer-smoking-note" class="muted small"></p>
+    </div>
+
+    <div class="panel matrix-panel wide">
+      <div class="panel-head">
+        <h2>Compound × cancer correlation matrix</h2>
+        <button id="cancer-matrix-evidence" class="info-btn" title="Evidence reference">ℹ️ evidence</button>
+      </div>
+      <p class="muted small">Cell = Pearson r across Michigan counties (blue = negative, red = positive).
+        Cells with a dot ● have documented epidemiological evidence — hover for the IARC class.
+        Click any cell to load it in the scatter above.</p>
+      <div id="cancer-matrix" class="cancer-matrix"></div>
+      <div class="matrix-legend">
+        <span>−1</span><span class="matrix-scale"></span><span>+1</span>
+      </div>
+    </div>
+
+    <div class="panel quartile-panel">
+      <h2>Cancer rate by pesticide-use quartile</h2>
+      <div class="chart-box bar"><canvas id="chart-cancer-quartiles"></canvas></div>
+      <p class="muted small" id="cancer-quartile-note">Counties split into quartiles by the
+        selected pesticide metric; bars show the mean cancer rate in each quartile.</p>
+    </div>
+
+    <details class="panel disclaimer-panel collapsible" id="cancer-caveats">
+      <summary><span class="info-icon">ℹ️</span>&nbsp;<strong>Important context</strong> — click to expand</summary>
+      <ul class="disclaimer">
+        <li><strong>Cancer has long latency (10–30 years).</strong> Current rates may reflect
+          exposures from decades ago, not today's application levels.</li>
+        <li>The pesticide data (through ~2019) and NCI cancer data (2018–2022) cover
+          overlapping but not identical periods.</li>
+        <li>This is an <strong>ecological</strong> comparison — it compares county populations,
+          not individuals. Individual exposure data would be needed for causal links
+          (the ecological fallacy).</li>
+        <li>Major confounders: smoking, alcohol, obesity, occupational/industrial exposure,
+          socioeconomic status, healthcare/screening access, age structure, and other
+          contaminants (PFAS, industrial pollution).</li>
+        <li>Urban counties have different cancer profiles for reasons unrelated to agriculture —
+          urban/rural stratification is essential.</li>
+        <li>Some agricultural counties may have <em>lower</em> overall cancer rates (younger,
+          healthier, lower-smoking populations) — this does not mean pesticides are protective.</li>
+        <li>Data suppression in low-population counties (&lt;16 cases) creates gaps that can
+          bias the analysis.</li>
+        <li>This tool is for <strong>exploratory visualization only</strong>. It does not
+          constitute epidemiological evidence of causation.</li>
+      </ul>
+    </details>
+
+  </div>
+</section>
+
+<!-- ===================== Cancer evidence modal ===================== -->
+<div id="cancer-evidence-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <button class="close" id="cancer-evidence-close">×</button>
+    <h2>Pesticide–cancer evidence</h2>
+    <p class="muted">Literature-based associations (IARC monographs + Agricultural Health Study).
+      This is the scientific basis behind the compounds shown in the matrix — separate from the
+      ecological correlations computed from Michigan county data.</p>
+    <table id="cancer-evidence-table"></table>
+    <p class="muted small">IARC groups: 1 = carcinogenic; 2A = probably; 2B = possibly;
+      3 = not classifiable. Evidence strength reflects epidemiological weight, not regulatory status.</p>
+  </div>
+</div>
+
+<div id="sources-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <button class="close" id="sources-close">×</button>
+    <h2>Data sources</h2>
+    <p class="muted">All data is fetched live from the sources listed below. Where a source
+      is unavailable or requires registration, it is marked accordingly and excluded from the
+      map until configured.</p>
+    <table id="sources-table"></table>
+    <p class="muted small">Data limitations: USGS EPest values are <em>estimates</em> derived
+      from proprietary sale data and crop-extent models. Low/high bracket the uncertainty —
+      see USGS Data Series 907 for methodology. County totals include only crop-protection
+      use; lawn, golf, and aquatic non-agricultural use are <em>not</em> included.</p>
+  </div>
+</div>
+
+<div id="loading" class="loading hidden"><div class="spinner"></div></div>
+<div id="tooltip" class="hover-tooltip hidden"></div>
+
+<footer class="app-footer">
+  <div>
+    Pesticide use: <a href="https://water.usgs.gov/nawqa/pnsp/usage/maps/county-level/" target="_blank" rel="noopener">USGS NAWQA EPest</a> ·
+    Boundaries: <a href="https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html" target="_blank" rel="noopener">US Census TIGER</a> ·
+    Crops: <a href="https://quickstats.nass.usda.gov/" target="_blank" rel="noopener">USDA NASS</a> ·
+    Regulator: <a href="https://www.michigan.gov/mdard" target="_blank" rel="noopener">MDARD</a>
+  </div>
+  <div class="muted small">For research and educational use. Pesticide-use figures are county-level estimates with documented uncertainty. USGS publishes values in kilograms; this app converts to pounds (1 kg = 2.20462 lbs) for display.</div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
