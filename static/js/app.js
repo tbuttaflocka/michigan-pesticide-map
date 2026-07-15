@@ -34,6 +34,7 @@
     showCwdSurv: false,
     correlation: { rows: [], sortKey: 'total_pesticide_lbs', sortDir: 'desc', onlyCwd: false },
     explore: { vars: null, wired: false, chart: null },
+    trend: { sw: null, cty: null },
     water: {
       sitesLayer: null, heatLayer: null, wsLayer: null,
       showSites: false, showHeat: false, showWatersheds: false,
@@ -169,6 +170,14 @@
       },
     ).addTo(state.map);
 
+    // Clicking empty map (not a county polygon) returns to the statewide view.
+    // County-polygon clicks stamp state._skipMapClick so the accompanying map
+    // 'click' event doesn't undo the selection that click just made.
+    state.map.on('click', () => {
+      if (state._skipMapClick && Date.now() - state._skipMapClick < 150) return;
+      if (state.selectedFips) closeCountyPanel();
+    });
+
     // Watershed polygons sit just above the county choropleth (overlayPane
     // z400) so their fill is visible and they receive hover/click, but below
     // the marker panes so point overlays stay clickable on top.
@@ -301,13 +310,42 @@
     }
   }
 
+  // Make the county panel the primary sidebar view (replacing the statewide
+  // panel) and bring it clearly into view, so clicking a county immediately
+  // shows that county — no scrolling to find it.
+  function showCountyPanel() {
+    hide($('statewide-panel'));
+    show($('county-panel'));
+    const p = $('county-panel');
+    if (window.innerWidth <= 900) {
+      // Stacked mobile layout: the right sidebar is below the map — scroll to it.
+      try { p.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    } else {
+      const sb = p.closest('.sidebar');
+      if (sb) sb.scrollTop = 0;   // county panel is now first in the sidebar
+    }
+    // Brief header flash so it's obvious where attention should go.
+    p.classList.remove('flash');
+    void p.offsetWidth;           // reflow to restart the animation
+    p.classList.add('flash');
+  }
+
+  // Return to the statewide overview and clear the county selection.
+  function closeCountyPanel() {
+    hide($('county-panel'));
+    show($('statewide-panel'));
+    clearSelectedCounty();
+    clearDriftZone();
+  }
+
   // Clicking the map polygon toggles selection; search/list clicks call
   // openCounty directly (which also selects).
   function onCountyClick(fips) {
+    // Mark the moment so the map-background 'click' that also fires for this
+    // same tap doesn't immediately deselect the county (see initMap).
+    state._skipMapClick = Date.now();
     if (state.selectedFips === fips) {
-      clearSelectedCounty();
-      clearDriftZone();
-      hide($('county-panel'));
+      closeCountyPanel();          // clicking the selected county again → back to statewide
     } else {
       openCounty(fips);
     }
@@ -1085,6 +1123,150 @@
     fill($('cancer-scatter-cancer'));
   }
 
+  // ---------- composition trend chart (statewide + county) ----------
+  const TREND_CAT_COLORS = {
+    herbicide: '#3fb950', insecticide: '#f85149',
+    fungicide: '#58a6ff', other: '#f0b429',
+  };
+  const TREND_COMPOUND_COLORS = [
+    '#3fb950', '#f85149', '#58a6ff', '#f0b429', '#bc8cff',
+    '#ff9e64', '#2ac3de', '#e0af68', '#9ece6a', '#f7768e',
+  ];
+  const TREND_OTHER_COLOR = '#6b7280';
+
+  function hexA(hex, a) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  // A self-contained trend panel: fetches /api/trend for a scope (statewide or a
+  // county fips) and renders it in one of four view modes, with a mode toggle,
+  // clickable legend, and a breakdown tooltip. Reused for both trend charts.
+  function createTrendPanel({ canvasId, modesId, scopeId, chartKey }) {
+    let mode = 'category';
+    let data = null;
+
+    function buildSpec() {
+      if (mode === 'total') {
+        return {
+          stacked: false, pct: false,
+          datasets: [{
+            label: 'Total pesticide', data: data.total,
+            borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.15)',
+            fill: true, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.25,
+          }],
+        };
+      }
+      if (mode === 'compounds') {
+        const ds = data.compounds.map((c, i) => {
+          const color = c.name === 'All others'
+            ? TREND_OTHER_COLOR
+            : TREND_COMPOUND_COLORS[i % TREND_COMPOUND_COLORS.length];
+          return {
+            label: c.name, data: c.values, borderColor: color,
+            backgroundColor: hexA(color, 0.5),
+            fill: i === 0 ? 'origin' : '-1',
+            borderWidth: 1, pointRadius: 0, tension: 0.2,
+          };
+        });
+        return { stacked: true, pct: false, datasets: ds };
+      }
+      // category or percent (both built from the 4 category bands)
+      const cats = data.categories;
+      const pct = mode === 'percent';
+      const ds = cats.map((c, i) => {
+        const vals = pct
+          ? c.values.map((v, yr) => {
+              const denom = cats.reduce((s, cc) => s + cc.values[yr], 0);
+              return denom ? (v / denom * 100) : 0;
+            })
+          : c.values;
+        const color = TREND_CAT_COLORS[c.key] || '#9aa4b2';
+        return {
+          label: c.label, data: vals, borderColor: color,
+          backgroundColor: hexA(color, 0.5),
+          fill: i === 0 ? 'origin' : '-1',
+          borderWidth: 1.2, pointRadius: 0, tension: 0.2,
+        };
+      });
+      return { stacked: true, pct, datasets: ds };
+    }
+
+    function render() {
+      const ctx = document.getElementById(canvasId);
+      if (!ctx || !data) return;
+      const spec = buildSpec();
+      const totals = data.total;
+      PMCharts.destroyIfExists(state.charts[chartKey]);
+      state.charts[chartKey] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: data.years, datasets: spec.datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              display: mode !== 'total', position: 'bottom',
+              labels: { boxWidth: 10, boxHeight: 10, padding: 6,
+                        font: { size: 10 }, usePointStyle: true },
+            },
+            tooltip: {
+              callbacks: {
+                title: (items) => `${items[0].label}`,
+                label: (item) => {
+                  const v = item.parsed.y;
+                  if (spec.pct) return `${item.dataset.label}: ${v.toFixed(1)}%`;
+                  const yt = totals[item.dataIndex] || 0;
+                  const p = yt ? (v / yt * 100) : 0;
+                  return `${item.dataset.label}: ${PMCharts.fmtLbs(v)} (${p.toFixed(0)}%)`;
+                },
+                footer: (items) => spec.pct ? ''
+                  : `Total: ${PMCharts.fmtLbs(totals[items[0].dataIndex])}`,
+              },
+            },
+          },
+          scales: {
+            x: { grid: { color: 'rgba(154,164,178,.08)' },
+                 ticks: { maxRotation: 0, autoSkip: true, font: { size: 10 } } },
+            y: { stacked: spec.stacked, beginAtZero: true,
+                 grid: { color: 'rgba(154,164,178,.08)' },
+                 ...(spec.pct ? { min: 0, max: 100 } : {}),
+                 ticks: { font: { size: 10 },
+                   callback: (v) => spec.pct ? v + '%' : PMCharts.fmtLbs(v) } },
+          },
+        },
+      });
+    }
+
+    // Wire the mode toggle once.
+    const bar = $(modesId);
+    if (bar && !bar._wired) {
+      bar._wired = true;
+      bar.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('click', () => {
+          mode = b.dataset.mode;
+          bar.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+          render();
+        });
+      });
+    }
+
+    async function load(fips) {
+      data = await api('/api/trend', {
+        fips: fips || '', estimate: state.estimate, category: state.category,
+      });
+      if (scopeId) {
+        $(scopeId).textContent = data.scope
+          + (data.category_filter ? ` · ${data.category_filter}` : '');
+      }
+      render();
+    }
+    return { load };
+  }
+
   // ---------- statewide panel ----------
   async function refreshStatewide() {
     const data = await api('/api/statewide', { year: state.year, estimate: state.estimate });
@@ -1118,13 +1300,13 @@
       topX.appendChild(li);
     }
 
-    PMCharts.destroyIfExists(state.charts.statewideTrend);
-    state.charts.statewideTrend = PMCharts.lineChart(
-      'chart-statewide-trend',
-      data.trend.map((p) => p.year),
-      data.trend.map((p) => p.lbs),
-      '#3fb950',
-    );
+    if (!state.trend.sw) {
+      state.trend.sw = createTrendPanel({
+        canvasId: 'chart-statewide-trend', modesId: 'trend-modes-sw',
+        scopeId: 'trend-scope-sw', chartKey: 'statewideTrend',
+      });
+    }
+    state.trend.sw.load(null);
 
     PMCharts.destroyIfExists(state.charts.category);
     const catLabels = data.by_category.map((r) => r.category);
@@ -1163,7 +1345,7 @@
   }
 
   async function openCounty(fips) {
-    show($('county-panel'));
+    showCountyPanel();     // county panel becomes the primary view, brought into view
     selectCounty(fips);    // persistent gold outline
     showDriftZone(fips);   // no-op unless the drift-zone toggle is on
     const data = await api(`/api/county/${fips}`, { year: state.year, estimate: state.estimate });
@@ -1250,13 +1432,13 @@
       data.by_category.map((r) => PMCharts.CATEGORY_COLORS[r.category] || '#9aa4b2'),
     );
 
-    PMCharts.destroyIfExists(state.charts.countyTrend);
-    state.charts.countyTrend = PMCharts.lineChart(
-      'chart-county-trend',
-      data.trend.map((p) => p.year),
-      data.trend.map((p) => p.lbs),
-      '#f0b429',
-    );
+    if (!state.trend.cty) {
+      state.trend.cty = createTrendPanel({
+        canvasId: 'chart-county-trend', modesId: 'trend-modes-cty',
+        scopeId: 'trend-scope-cty', chartKey: 'countyTrend',
+      });
+    }
+    state.trend.cty.load(fips);
 
     const tbl = $('county-crops');
     if (data.crops.length === 0) {
@@ -1815,11 +1997,8 @@
       });
     });
 
-    $('county-close').addEventListener('click', () => {
-      hide($('county-panel'));
-      clearSelectedCounty();
-      clearDriftZone();
-    });
+    $('county-close').addEventListener('click', closeCountyPanel);
+    $('county-back').addEventListener('click', closeCountyPanel);
     $('open-sources').addEventListener('click', openSources);
     $('sources-close').addEventListener('click', () => hide($('sources-modal')));
     $('sources-modal').addEventListener('click', (e) => {
@@ -2698,6 +2877,8 @@
     if (cmp && [...cmpEl.options].some((o) => o.value === cmp)) {
       state.compound = cmp; cmpEl.value = cmp;
     }
+    const cty = p.get('county');
+    if (cty && /^\d{5}$/.test(cty)) state._pendingCounty = cty;
   }
 
   async function boot() {
@@ -2743,6 +2924,9 @@
       await loadWaterCompounds();
       bindFilters();
       await refreshAll();
+
+      // Shareable deep link to a specific county (?county=26077) opens its panel.
+      if (state._pendingCounty) { openCounty(state._pendingCounty); state._pendingCounty = null; }
     } catch (e) {
       console.error(e);
       alert('Failed to load app: ' + e.message +

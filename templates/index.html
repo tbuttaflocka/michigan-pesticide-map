@@ -209,7 +209,7 @@
   <div id="map"></div>
 
   <aside class="sidebar right">
-    <section class="panel statewide">
+    <section class="panel statewide" id="statewide-panel">
       <h2 id="state-heading">Statewide summary</h2>
       <div class="big-stats">
         <div><strong id="stat-total">—</strong><span>total lbs applied</span></div>
@@ -223,15 +223,26 @@
       <h3>Top compounds</h3>
       <ol id="top-compounds" class="top-list"></ol>
 
-      <h3>Statewide trend (avg lbs/year)</h3>
-      <div class="chart-box trend"><canvas id="chart-statewide-trend"></canvas></div>
+      <h3>Pesticide mix over time
+        <span class="scope-tag" id="trend-scope-sw">Statewide</span>
+        <span class="info-i" data-tip="A stacked area chart: each colored band is a pesticide type, and the band's thickness is how many pounds were applied that year. The bands stack, so the total height is the overall total — you can see both how much was used and how the mix changed.">?</span>
+      </h3>
+      <div class="trend-modes seg" id="trend-modes-sw">
+        <button data-mode="category" class="active" data-tip="Stacked bands by pesticide type: herbicides, insecticides, fungicides, and other.">By category</button>
+        <button data-mode="total" data-tip="A single line of the overall total pounds applied each year.">Total</button>
+        <button data-mode="compounds" data-tip="The top individual chemicals as their own bands, so you can watch specific ones (e.g. glyphosate) rise and fall.">Top compounds</button>
+        <button data-mode="percent" data-tip="Each type's share of the yearly total (0–100%), so you can see the mix shift even when totals change.">% share</button>
+      </div>
+      <div class="chart-box trend tall"><canvas id="chart-statewide-trend"></canvas></div>
 
       <h3>Category breakdown</h3>
       <div class="chart-box doughnut"><canvas id="chart-category"></canvas></div>
     </section>
 
     <section class="panel county-panel hidden" id="county-panel">
-      <button class="close" id="county-close">×</button>
+      <button class="back-to-statewide" id="county-back" type="button"
+        data-tip="Return to the statewide overview and deselect this county.">← Back to statewide</button>
+      <button class="close" id="county-close" aria-label="Close county panel">×</button>
       <h2 id="county-name">—</h2>
       <p class="county-meta"><span id="county-fips"></span> · <span id="county-area"></span></p>
 
@@ -251,8 +262,17 @@
       <h3>By category</h3>
       <div class="chart-box doughnut"><canvas id="chart-county-category"></canvas></div>
 
-      <h3>Year-over-year trend</h3>
-      <div class="chart-box trend"><canvas id="chart-county-trend"></canvas></div>
+      <h3>Pesticide mix over time
+        <span class="scope-tag" id="trend-scope-cty"></span>
+        <span class="info-i" data-tip="A stacked area chart: each colored band is a pesticide type, and its thickness is how many pounds were applied that year in this county. The bands stack to the county's total.">?</span>
+      </h3>
+      <div class="trend-modes seg" id="trend-modes-cty">
+        <button data-mode="category" class="active" data-tip="Stacked bands by pesticide type: herbicides, insecticides, fungicides, and other.">By category</button>
+        <button data-mode="total" data-tip="A single line of this county's total pounds applied each year.">Total</button>
+        <button data-mode="compounds" data-tip="The top individual chemicals in this county as their own bands.">Top compounds</button>
+        <button data-mode="percent" data-tip="Each type's share of the county's yearly total (0–100%).">% share</button>
+      </div>
+      <div class="chart-box trend tall"><canvas id="chart-county-trend"></canvas></div>
 
       <h3>Crop acreage</h3>
       <table id="county-crops" class="crops"></table>

@@ -516,11 +516,79 @@ a:hover { text-decoration: underline; }
   height: 100% !important;
 }
 .chart-box.trend    { height: 180px; }
+.chart-box.trend.tall { height: 250px; }   /* composition trend: room for legend */
 .chart-box.doughnut { height: 220px; }
 .chart-box.bar      { height: 220px; }
 .chart-box.bar.tall { height: 260px; }
 .chart-box.scatter  { height: 320px; }
 .chart-box.scatter.tall { height: 400px; }
+
+/* composition-trend mode toggle */
+.trend-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 8px;
+}
+.trend-modes button {
+  flex: 1 1 auto;
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.trend-modes button.active {
+  background: var(--accent);
+  color: #0b1f10;
+  font-weight: 600;
+  border-color: var(--accent);
+}
+.trend-modes button:hover:not(.active) { color: var(--text); }
+
+/* "Statewide" / "[County]" scope pill next to a trend heading */
+.scope-tag {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: none;
+  color: var(--link);
+  background: rgba(88, 166, 255, .12);
+  border-radius: 999px;
+  padding: 1px 8px;
+  vertical-align: middle;
+}
+
+/* ---------- county panel: back button + attention flash ---------- */
+.back-to-statewide {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--link);
+  background: rgba(88, 166, 255, .1);
+  border: 1px solid rgba(88, 166, 255, .3);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.back-to-statewide:hover { background: rgba(88, 166, 255, .2); }
+
+/* Briefly flash the county name when the panel opens, so it's obvious what
+   changed and where to look. */
+@keyframes countyFlash {
+  0%   { background: rgba(88, 166, 255, .28); }
+  100% { background: transparent; }
+}
+.county-panel.flash #county-name {
+  animation: countyFlash 1s ease-out 1;
+  border-radius: 6px;
+}
 
 /* ---------- view switch ---------- */
 .view-switch {

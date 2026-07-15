@@ -579,6 +579,129 @@ def api_statewide():
     })
 
 
+_TREND_CATS = [
+    ("herbicide", "Herbicides"),
+    ("insecticide", "Insecticides"),
+    ("fungicide", "Fungicides"),
+    ("other", "Other"),
+]
+_TREND_TOP_N = 9   # top individual compounds; the rest fold into "All others"
+
+
+@app.route("/api/trend")
+def api_trend():
+    """Year-over-year pesticide composition (pounds per year) for the statewide
+    total or one county, split by category and by top individual compounds.
+
+    Query params: fips (optional — statewide if omitted), estimate, category
+    (optional — scopes the 'top compounds' set to that category).
+    Returns years[], categories[] (4 stacked bands), compounds[] (top N + "All
+    others"), total[], and a scope label.
+    """
+    fips = (request.args.get("fips") or "").strip()
+    estimate = request.args.get("estimate", "avg")
+    category = request.args.get("category", "all")
+    col = estimate_column(estimate)
+
+    conn = db()
+    cur = conn.cursor()
+    base_cond = ""
+    base_params: list = []
+    scope = "Statewide"
+    if fips:
+        row = cur.execute("SELECT name FROM counties WHERE fips = ?", (fips,)).fetchone()
+        if row:
+            base_cond = "WHERE pu.county_fips = ?"
+            base_params = [fips]
+            scope = f"{row['name']} County"
+
+    years = [r[0] for r in cur.execute(
+        f"SELECT DISTINCT year FROM pesticide_use pu {base_cond} ORDER BY year",
+        base_params)]
+    yi = {y: i for i, y in enumerate(years)}
+    n = len(years)
+
+    def to_lbs(kg):
+        return (kg or 0.0) * KG_TO_LB
+
+    # --- per-year totals ---
+    total = [0.0] * n
+    for r in cur.execute(
+        f"SELECT pu.year AS y, SUM({col}) AS kg FROM pesticide_use pu "
+        f"{base_cond} GROUP BY pu.year", base_params):
+        total[yi[r["y"]]] = to_lbs(r["kg"])
+
+    # --- per-year by category (folding growth_regulator etc. into 'other') ---
+    cat_series = {k: [0.0] * n for k, _ in _TREND_CATS}
+    for r in cur.execute(
+        f"""SELECT pu.year AS y, COALESCE(pc.category,'other') AS cat, SUM({col}) AS kg
+              FROM pesticide_use pu
+         LEFT JOIN pesticide_categories pc ON pc.compound = pu.compound
+            {base_cond} GROUP BY pu.year, cat""", base_params):
+        bucket = r["cat"] if r["cat"] in ("herbicide", "insecticide", "fungicide") else "other"
+        cat_series[bucket][yi[r["y"]]] += to_lbs(r["kg"])
+    categories = [{"key": k, "label": lbl,
+                   "values": [round(v, 1) for v in cat_series[k]]}
+                  for k, lbl in _TREND_CATS]
+
+    # --- top individual compounds (optionally scoped to a category filter) ---
+    valid_cat = {"herbicide", "insecticide", "fungicide"}
+    if category in valid_cat:
+        cat_cond = "AND COALESCE(pc.category,'other') = ?"
+        cat_p = [category]
+        ref_total = cat_series[category]
+    elif category in ("other", "growth_regulator"):
+        cat_cond = "AND COALESCE(pc.category,'other') NOT IN ('herbicide','insecticide','fungicide')"
+        cat_p = []
+        ref_total = cat_series["other"]
+    else:
+        cat_cond, cat_p, ref_total = "", [], total
+
+    where_for_top = base_cond if base_cond else "WHERE 1=1"
+    top = cur.execute(
+        f"""SELECT pu.compound AS c, SUM({col}) AS kg
+              FROM pesticide_use pu
+         LEFT JOIN pesticide_categories pc ON pc.compound = pu.compound
+            {where_for_top} {cat_cond}
+             GROUP BY pu.compound ORDER BY kg DESC NULLS LAST LIMIT ?""",
+        [*base_params, *cat_p, _TREND_TOP_N]).fetchall()
+    top_names = [r["c"] for r in top]
+
+    compounds = []
+    if top_names:
+        comp_series = {name: [0.0] * n for name in top_names}
+        placeholders = ",".join("?" * len(top_names))
+        comp_cond = f"pu.compound IN ({placeholders})"
+        comp_params = list(top_names)
+        if fips:
+            comp_cond += " AND pu.county_fips = ?"
+            comp_params.append(fips)
+        for r in cur.execute(
+            f"SELECT pu.year AS y, pu.compound AS c, SUM({col}) AS kg "
+            f"FROM pesticide_use pu WHERE {comp_cond} GROUP BY pu.year, pu.compound",
+            comp_params):
+            comp_series[r["c"]][yi[r["y"]]] += to_lbs(r["kg"])
+        compounds = [{"name": name.title(),
+                      "values": [round(v, 1) for v in comp_series[name]]}
+                     for name in top_names]
+        others = [max(0.0, ref_total[i] - sum(comp_series[nm][i] for nm in top_names))
+                  for i in range(n)]
+        if any(v > 0 for v in others):
+            compounds.append({"name": "All others",
+                              "values": [round(v, 1) for v in others]})
+
+    conn.close()
+    return jsonify({
+        "scope": scope,
+        "fips": fips or None,
+        "category_filter": category if category != "all" else None,
+        "years": years,
+        "total": [round(v, 1) for v in total],
+        "categories": categories,
+        "compounds": compounds,
+    })
+
+
 @app.route("/api/compound/<compound>")
 def api_compound(compound: str):
     """Statewide trend for one compound, plus per-county breakdown for the latest year."""
