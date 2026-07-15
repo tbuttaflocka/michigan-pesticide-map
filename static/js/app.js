@@ -168,6 +168,12 @@
       },
     ).addTo(state.map);
 
+    // Watershed polygons sit just above the county choropleth (overlayPane
+    // z400) so their fill is visible and they receive hover/click, but below
+    // the marker panes so point overlays stay clickable on top.
+    state.map.createPane('watersheds');
+    state.map.getPane('watersheds').style.zIndex = 410;
+
     // Dedicated pane for water-monitoring markers, above the choropleth
     // (overlayPane z400) and default markerPane (z600) so county polygons can
     // never intercept clicks meant for the site markers.
@@ -246,6 +252,66 @@
     return { weight: 2.2, color: '#f0b429', fillOpacity: 0.92 };
   }
 
+  // ---------- persistent selected-county outline ----------
+  // Distinct from the hover highlight: a brighter, thicker gold border that
+  // stays until another county is clicked (or the same one clicked again).
+  const SELECTED_STYLE = { color: '#ffd23f', weight: 4, opacity: 1, dashArray: null };
+
+  function layerForFips(fips) {
+    let found = null;
+    if (state.geoLayer) {
+      state.geoLayer.eachLayer((l) => {
+        if (l.feature && l.feature.id === fips) found = l;
+      });
+    }
+    return found;
+  }
+
+  // Reset to the base choropleth style, then draw the bold selection border on
+  // top and raise it so the outline is always visible above the fill.
+  function applySelectedBorder(layer) {
+    if (!layer || !state.geoLayer) return;
+    state.geoLayer.resetStyle(layer);
+    layer.setStyle(SELECTED_STYLE);
+    layer.bringToFront();
+  }
+
+  // Re-apply the selection after any full restyle (setStyle wipes it).
+  function restyleSelection() {
+    if (state.selectedFips) applySelectedBorder(layerForFips(state.selectedFips));
+  }
+
+  function selectCounty(fips) {
+    const prev = state.selectedFips;
+    if (prev && prev !== fips) {
+      const pl = layerForFips(prev);
+      if (pl) state.geoLayer.resetStyle(pl);
+    }
+    state.selectedFips = fips;
+    applySelectedBorder(layerForFips(fips));
+  }
+
+  function clearSelectedCounty() {
+    const prev = state.selectedFips;
+    state.selectedFips = null;
+    if (prev) {
+      const pl = layerForFips(prev);
+      if (pl) state.geoLayer.resetStyle(pl);
+    }
+  }
+
+  // Clicking the map polygon toggles selection; search/list clicks call
+  // openCounty directly (which also selects).
+  function onCountyClick(fips) {
+    if (state.selectedFips === fips) {
+      clearSelectedCounty();
+      clearDriftZone();
+      hide($('county-panel'));
+    } else {
+      openCounty(fips);
+    }
+  }
+
   function renderChoropleth() {
     if (!state.geojson) return;
     if (state.geoLayer) state.geoLayer.remove();
@@ -253,19 +319,24 @@
       style: styleFor,
       onEachFeature: (feature, layer) => {
         layer.on('mouseover', (e) => {
-          e.target.setStyle(highlightStyle());
-          e.target.bringToFront();
+          // Don't hover-highlight the selected county — keep its bold outline.
+          if (feature.id !== state.selectedFips) {
+            e.target.setStyle(highlightStyle());
+            e.target.bringToFront();
+          }
           showTooltip(feature, e.originalEvent);
         });
         layer.on('mousemove', (e) => showTooltip(feature, e.originalEvent));
         layer.on('mouseout', (e) => {
-          state.geoLayer.resetStyle(e.target);
+          if (feature.id === state.selectedFips) applySelectedBorder(e.target);
+          else state.geoLayer.resetStyle(e.target);
           hide($('tooltip'));
         });
-        layer.on('click', () => openCounty(feature.id));
+        layer.on('click', () => onCountyClick(feature.id));
       },
     }).addTo(state.map);
     state.map.fitBounds(state.geoLayer.getBounds(), { padding: [10, 10] });
+    restyleSelection();
   }
 
   // Tooltip shows only the metric for the active choropleth, so the county
@@ -444,10 +515,21 @@
       $('legend-units').after(mk);
     }
     const active = MARKER_KEYS.filter((k) => k.on());
-    mk.innerHTML = active.length
+    let html = active.length
       ? '<div class="mk-title">Overlays on top</div>' + active.map((k) =>
           `<div class="mk"><span class="mk-dot" style="background:${k.c}"></span>${k.t}</div>`).join('')
       : '';
+    // Watershed color-scale legend (the layer is a choropleth by detections).
+    if (state.water.showWatersheds) {
+      html += '<div class="mk-title" style="margin-top:8px">Watersheds · pesticide detections</div>' +
+        '<div class="ws-legend">' +
+        '<span class="ws-sw" style="background:rgba(110,118,129,0.35)"></span>none' +
+        '<span class="ws-sw" style="background:rgba(56,142,201,0.45)"></span>low' +
+        '<span class="ws-sw" style="background:rgba(56,142,201,0.8)"></span>high' +
+        '<span class="ws-sw" style="background:rgba(248,81,73,0.72)"></span>MCL exc.' +
+        '</div>';
+    }
+    mk.innerHTML = html;
   }
 
   // "Currently showing" indicator — in the layer panel and floating over the map.
@@ -481,6 +563,7 @@
     }
 
     if (state.geoLayer) state.geoLayer.setStyle(styleFor);
+    restyleSelection();   // setStyle wiped the selection border — re-apply it
     renderLegend();
     updateActiveIndicator();
 
@@ -506,6 +589,7 @@
       state.breaks = computeBreaks(values, state.palette.length);
       state.pestStats = data.stats;
       if (state.geoLayer) state.geoLayer.setStyle(styleFor);
+      restyleSelection();
       renderLegend();
       updateActiveIndicator();
     } catch (e) {
@@ -699,8 +783,11 @@
         fillColor: WQ_COLOR[s.severity] || WQ_COLOR.no_data,
         fillOpacity: 0.92,
       });
-      // Bind the click handler per marker (every one, not just a subset).
-      m.on('click', () => openWaterPopup(m, s));
+      // Bind a popup once (with a placeholder) and fill it with the fetched
+      // detail each time it opens. Leaflet then owns open/close/reopen, so the
+      // same marker reopens reliably instead of only working on the first click.
+      m.bindPopup('<div class="wq-popup muted">Loading…</div>', { maxWidth: 340 });
+      m.on('popupopen', () => openWaterPopup(m, s));
       grp.addLayer(m);
       if (s.severity === 'exceeds_mcl') exceeds++;
       else if (s.severity === 'detected') detected++;
@@ -714,6 +801,8 @@
   }
 
   async function openWaterPopup(layer, site) {
+    // Reuse already-fetched detail on reopen (no refetch, no "Loading…" flash).
+    if (layer._wqBody) { layer.setPopupContent(layer._wqBody); return; }
     const detail = await api(`/api/water/site/${encodeURIComponent(site.site_id)}`);
     const rows = (detail.compound_summary || []).slice(0, 8);
     const body =
@@ -737,7 +826,9 @@
           ${site.organization || ''} · source ${site.source}
         </div>
       </div>`;
-    layer.bindPopup(body, { maxWidth: 340 }).openPopup();
+    layer._wqBody = body;
+    // The popup is already open (bound with a placeholder); just fill it in.
+    layer.setPopupContent(body);
   }
 
   async function refreshWaterHeat() {
@@ -754,47 +845,64 @@
     }).addTo(state.map);
   }
 
+  // Fill a watershed by pesticide detections in its water samples (red tint
+  // when there are MCL exceedances); grey when nothing was detected.
+  function watershedFill(d, e, maxDet) {
+    const intensity = maxDet > 0 ? Math.sqrt(d / maxDet) : 0;
+    if (e > 0) return `rgba(248,81,73,${(0.35 + 0.5 * intensity).toFixed(2)})`;
+    if (d > 0) return `rgba(56,142,201,${(0.28 + 0.5 * intensity).toFixed(2)})`;
+    return 'rgba(110,118,129,0.10)';
+  }
+
+  function watershedPopupHtml(p) {
+    const row = (k, v) => `<div class="row"><span class="k">${k}</span> ${v}</div>`;
+    const exc = p.exceedances || 0;
+    return `<div class="ws-popup">
+      <h4>${p.name || 'Watershed'}</h4>
+      <div class="ws-meta">HUC-8 ${p.huc8}</div>
+      ${row('Pesticide detections (water):', `<b>${p.detections || 0}</b>` +
+        (exc ? ` · <span class="exc">${exc} MCL exceedance${exc > 1 ? 's' : ''}</span>` : ''))}
+      ${row('Monitoring sites:', `${p.total_sites || 0} (${p.sites_with_detections || 0} with detections)`)}
+      ${row('Contamination sites:', `${p.contam_sites || 0}${p.contam_npl ? ` (${p.contam_npl} Superfund NPL)` : ''}`)}
+      ${row('Pesticide applied (approx):', fmtLbs(p.pesticide_lbs || 0))}
+      <div class="ws-note">Detections/exceedances are exact; pesticide use is
+        approximated from the counties overlapping this watershed.</div>
+    </div>`;
+  }
+
   async function refreshWaterWatersheds() {
-    if (state.water.wsLayer) state.water.wsLayer.remove();
-    state.water.wsLayer = null;
-    if (!state.water.showWatersheds) return;
-    const compound = activeWaterCompound();
-    const fc = await api('/api/water/watersheds', compound ? { compound } : {});
-    if (!fc.features || !fc.features.length) return;
-    let maxDet = 1;
-    for (const f of fc.features) maxDet = Math.max(maxDet, f.properties.detections || 0);
-    state.water.wsLayer = L.geoJSON(fc, {
-      style: (f) => {
-        const d = f.properties.detections || 0;
-        const e = f.properties.exceedances || 0;
-        const intensity = Math.sqrt(d / maxDet);
-        const fill = e > 0
-          ? `rgba(248,81,73,${0.15 + 0.5 * intensity})`
-          : (d > 0 ? `rgba(141,176,255,${0.15 + 0.45 * intensity})`
-                   : 'rgba(110,118,129,.05)');
-        return {
-          fillColor: fill, fillOpacity: 1.0,
-          color: '#5474c9', weight: 0.9, dashArray: '3 3',
-        };
-      },
-      onEachFeature: (feat, lyr) => {
-        const p = feat.properties;
-        lyr.bindTooltip(
-          `<strong>${p.name}</strong> (HUC-8 ${p.huc8})<br>` +
-          `detections: ${p.detections || 0} · MCL exceedances: ${p.exceedances || 0}<br>` +
-          `sites: ${p.sites_with_detections || 0}`,
-          { sticky: true, className: 'wq-ws-tip' },
-        );
-      },
-    }).addTo(state.map);
-    // Watersheds live in the overlayPane (below the choropleth); nudge the
-    // choropleth back above them. Point overlays sit in higher panes, so they
-    // stay on top regardless — no bringToFront gymnastics needed for markers.
-    state.water.wsLayer.bringToBack();
-    if (state.geoLayer) state.geoLayer.bringToFront();
-    if (state.layers.cwdMarkers && state.layers.cwdMarkers.bringToFront) {
-      state.layers.cwdMarkers.bringToFront();
+    if (state.water.wsLayer) { state.water.wsLayer.remove(); state.water.wsLayer = null; }
+    if (!state.water.showWatersheds) { renderMarkerKeys(); return; }
+    try {
+      const compound = activeWaterCompound();
+      const fc = await api('/api/water/watersheds', compound ? { compound } : {});
+      if (!fc.features || !fc.features.length) { renderMarkerKeys(); return; }
+      let maxDet = 1;
+      for (const f of fc.features) maxDet = Math.max(maxDet, f.properties.detections || 0);
+      state.water._wsMaxDet = maxDet;
+      const baseStyle = (f) => ({
+        fillColor: watershedFill(f.properties.detections || 0, f.properties.exceedances || 0, maxDet),
+        fillOpacity: 1.0, color: '#8db0ff', weight: 1, dashArray: '3 3',
+      });
+      // Explicit renderer bound to the watersheds pane so the SVG paths land
+      // there (above the county fill, below markers) and remain clickable.
+      if (!state.water._wsRenderer) state.water._wsRenderer = L.svg({ pane: 'watersheds' });
+      const layer = L.geoJSON(fc, {
+        pane: 'watersheds',
+        renderer: state.water._wsRenderer,
+        style: baseStyle,
+        onEachFeature: (feat, lyr) => {
+          const p = feat.properties;
+          lyr.bindPopup(watershedPopupHtml(p), { maxWidth: 300, className: 'ws-popup-wrap' });
+          lyr.on('mouseover', () => lyr.setStyle({ weight: 3, color: '#ffd23f', dashArray: null }));
+          lyr.on('mouseout', () => { if (state.water.wsLayer) state.water.wsLayer.resetStyle(lyr); });
+        },
+      }).addTo(state.map);
+      state.water.wsLayer = layer;
+    } catch (e) {
+      console.error('watershed layer failed:', e && e.message, e);
     }
+    renderMarkerKeys();
   }
 
   function refreshAllWaterLayers() {
@@ -1018,9 +1126,35 @@
   }
 
   // ---------- county detail ----------
+  // Full "show all N compounds" list under the top-10 chart (collapsed default).
+  function renderCountyCompoundsList(compounds) {
+    const list = $('county-compounds-all');
+    const btn = $('county-compounds-toggle');
+    if (!list || !btn) return;
+    const n = compounds.length;
+    list.innerHTML = compounds.map((r) => {
+      const col = PMCharts.CATEGORY_COLORS[r.category] || '#9aa4b2';
+      return `<div class="cl-row"><span class="cl-dot" style="background:${col}"></span>` +
+        `<span class="cl-name">${r.compound}</span>` +
+        `<span class="cl-val">${fmtLbs(r.lbs || 0)}</span></div>`;
+    }).join('');
+    list.classList.add('hidden');
+    const setLabel = (open) => {
+      btn.textContent = open ? 'Hide full compound list' : `Show all ${n} compounds ▾`;
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    setLabel(false);
+    // Chart already shows the top 10; only offer the toggle when there's more.
+    btn.style.display = n > 10 ? '' : 'none';
+    btn.onclick = () => {
+      const nowHidden = list.classList.toggle('hidden');
+      setLabel(!nowHidden);
+    };
+  }
+
   async function openCounty(fips) {
     show($('county-panel'));
-    state.selectedFips = fips;
+    selectCounty(fips);    // persistent gold outline
     showDriftZone(fips);   // no-op unless the drift-zone toggle is on
     const data = await api(`/api/county/${fips}`, { year: state.year, estimate: state.estimate });
     $('county-name').textContent = `${data.name} County`;
@@ -1096,6 +1230,7 @@
         (r) => PMCharts.CATEGORY_COLORS[r.category] || '#9aa4b2',
       ),
     );
+    renderCountyCompoundsList(data.top_compounds);
 
     PMCharts.destroyIfExists(state.charts.countyCategory);
     state.charts.countyCategory = PMCharts.doughnut(
@@ -1182,8 +1317,10 @@
           iconSize: [size, size], iconAnchor: [size / 2, size / 2],
         }),
       });
-      m.on('click', () => m.bindPopup(contamPopupHtml(s),
-        { maxWidth: 360, className: 'contam-popup-wrap' }).openPopup());
+      // Bind the popup once so Leaflet handles open/close/reopen. (Binding on
+      // every click installed a second toggle handler that cancelled the next
+      // open, so a closed marker wouldn't reopen until you clicked elsewhere.)
+      m.bindPopup(contamPopupHtml(s), { maxWidth: 360, className: 'contam-popup-wrap' });
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -1199,8 +1336,38 @@
     const acounties = (s.affected_counties || []).length
       ? row('Affected counties:', s.affected_counties.join(', ')) : '';
     const hrs = s.hrs_score != null ? row('HRS score:', `${s.hrs_score.toFixed(2)} / 100`) : '';
-    const epa = s.epa_profile_url
-      ? `<a href="${s.epa_profile_url}" target="_blank" rel="noopener">EPA Superfund profile →</a>` : '';
+    const generated = s.desc_source === 'generated';
+    const fetched = s.narrative_source === 'fetched' && s.narrative;
+
+    // Body: a fetched narrative (if any) leads; the structured EPA-field summary
+    // follows as a separate section for generated sites.
+    let body = '';
+    if (fetched) {
+      body += `<p class="cp-desc">${s.narrative}</p>`;
+      if (generated && s.description) {
+        body += `<p class="cp-record"><span class="k">Site record:</span> ${s.description}</p>`;
+      }
+    } else if (s.description) {
+      body += `<p class="cp-desc">${s.description}</p>`;
+    }
+
+    // Source line / provenance.
+    let provenance = '';
+    if (fetched) {
+      const refs = (s.narrative_refs || []).map((r) =>
+        r.url ? `<a href="${r.url}" target="_blank" rel="noopener">${r.label}</a>` : r.label);
+      const epa = s.epa_profile_url
+        ? `<a href="${s.epa_profile_url}" target="_blank" rel="noopener">EPA profile →</a>` : '';
+      const parts = refs.concat(epa ? [epa] : []);
+      provenance = `<p class="cp-generated">Sources: ${parts.join(' · ')}</p>`;
+    } else if (generated) {
+      const link = s.epa_profile_url
+        ? ` <a href="${s.epa_profile_url}" target="_blank" rel="noopener">See full profile →</a>` : '';
+      provenance = `<p class="cp-generated">No detailed public narrative found — summary generated from the EPA site record.${link}</p>`;
+    } else if (s.epa_profile_url) {
+      provenance = `<a href="${s.epa_profile_url}" target="_blank" rel="noopener">EPA Superfund profile →</a>`;
+    }
+
     return `<div class="contam-popup">
       <div class="cp-status" style="background:${s.status_color}">${s.status_label}</div>
       ${s.company ? `<div class="cp-company">${s.company}</div>` : ''}
@@ -1208,8 +1375,8 @@
       <div class="cp-meta">${s.category_label}${s.city ? ' · ' + s.city : ''}${s.county ? ', ' + s.county + ' Co.' : ''}${s.epa_id ? ' · ' + s.epa_id : ''}</div>
       ${row('Operated:', s.years_active)}${hrs}
       ${chips ? `<div class="chips">${chips}</div>` : ''}
-      ${s.description ? `<p class="cp-desc">${s.description}</p>` : ''}
-      ${water}${acounties}${epa}
+      ${body}
+      ${water}${acounties}${provenance}
     </div>`;
   }
 
@@ -1645,7 +1812,11 @@
       });
     });
 
-    $('county-close').addEventListener('click', () => hide($('county-panel')));
+    $('county-close').addEventListener('click', () => {
+      hide($('county-panel'));
+      clearSelectedCounty();
+      clearDriftZone();
+    });
     $('open-sources').addEventListener('click', openSources);
     $('sources-close').addEventListener('click', () => hide($('sources-modal')));
     $('sources-modal').addEventListener('click', (e) => {

@@ -1162,6 +1162,83 @@ a:hover { text-decoration: underline; }
   font-size: 10.5px; padding: 1px 7px; border-radius: 10px;
   background: rgba(219,63,121,.16); color: #f98bbd;
 }
+.contam-popup .cp-generated {
+  margin: 7px 0 0;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted);
+}
+.contam-popup .cp-generated a { font-style: normal; }
+.contam-popup .cp-record {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.contam-popup .cp-record .k { color: var(--muted); font-weight: 600; }
+
+/* ---------- county "show all compounds" list ---------- */
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--link);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 0;
+  margin: 2px 0 0;
+}
+.link-btn:hover { text-decoration: underline; }
+.compound-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 4px;
+  background: var(--bg-2);
+}
+.compound-list .cl-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+.compound-list .cl-row:last-child { border-bottom: none; }
+.compound-list .cl-dot { width: 9px; height: 9px; border-radius: 2px; }
+.compound-list .cl-name { color: var(--text); }
+.compound-list .cl-val {
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- watershed popup + legend ---------- */
+.ws-popup-wrap .leaflet-popup-content-wrapper { background: var(--bg-2); color: var(--text); }
+.ws-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.ws-popup { max-width: 290px; font-size: 12.5px; }
+.ws-popup h4 { margin: 0 0 2px; font-size: 14px; color: var(--text); }
+.ws-popup .ws-meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.ws-popup .row { margin: 3px 0; }
+.ws-popup .row .k { color: var(--muted); }
+.ws-popup .exc { color: #f85149; font-weight: 600; }
+.ws-popup .ws-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+.legend-markers .ws-legend {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  font-size: 10.5px; color: var(--muted); margin-top: 3px;
+}
+.legend-markers .ws-sw {
+  width: 14px; height: 11px; border-radius: 2px;
+  border: 1px solid rgba(141,176,255,.5); margin-left: 6px;
+}
+.legend-markers .ws-sw:first-of-type { margin-left: 0; }
 
 .contam-county-list { display: flex; flex-direction: column; gap: 4px; }
 .contam-li {

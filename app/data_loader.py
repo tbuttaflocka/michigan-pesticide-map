@@ -1724,7 +1724,43 @@ def _contam_slug(name: str) -> str:
     return s
 
 
-def _insert_contam(cur, key, rec, source, name_to_fips):
+def _epa_structured_description(rec) -> str:
+    """Build a factual one-paragraph description for an EPA NPL site purely from
+    the fields the ArcGIS feed returns (the feed's "narrative" is only a link to
+    a PDF, not prose). No contaminants/health-effects are invented — those are
+    left to the linked EPA profile. See instruction #4: do not fabricate."""
+    name = rec.get("site_name") or "This site"
+    city = rec.get("city")
+    county = rec.get("county")
+    status = (rec.get("status") or "").lower()
+    loc = ", ".join(p for p in (city, f"{county} County" if county else None) if p)
+
+    if "delet" in status:
+        listing = ("was placed on and has since been deleted from the National "
+                   "Priorities List, indicating EPA considers cleanup goals met")
+    elif "propos" in status:
+        listing = "has been proposed for the National Priorities List"
+    else:
+        listing = "is on the National Priorities List of federal Superfund sites"
+
+    s = f"{name} is a federal Superfund site"
+    if loc:
+        s += f" in {loc}, Michigan"
+    s += f". It {listing}"
+    if rec.get("npl_date"):
+        s += f" (listed {rec['npl_date']})"
+    if rec.get("hrs_score") is not None:
+        try:
+            s += f", with a Hazard Ranking System score of {float(rec['hrs_score']):.2f}"
+        except (TypeError, ValueError):
+            pass
+    s += (". Specific contaminants, the responsible parties, and current cleanup "
+          "status are documented in the linked EPA site profile.")
+    return s
+
+
+def _insert_contam(cur, key, rec, source, name_to_fips, desc_source="narrative",
+                   narrative_source="hardcoded"):
     contaminants = rec.get("contaminants") or []
     waterways = rec.get("affected_waterways") or []
     counties = rec.get("affected_counties") or []
@@ -1739,8 +1775,9 @@ def _insert_contam(cur, key, rec, source, name_to_fips):
              site_key, company, site_name, latitude, longitude, county,
              county_fips, city, epa_id, status, status_class, years_active,
              contaminants, description, impact_area_miles, affected_waterways,
-             affected_counties, npl_listed, npl_date, hrs_score, category, source)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             affected_counties, npl_listed, npl_date, hrs_score, category, source,
+             desc_source, narrative_source)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (key, rec.get("company"), rec.get("site_name"),
          rec.get("lat"), rec.get("lng"), county, fips, rec.get("city"),
          rec.get("epa_id"), rec.get("status"), status_class,
@@ -1749,8 +1786,33 @@ def _insert_contam(cur, key, rec, source, name_to_fips):
          rec.get("impact_area_miles"),
          json.dumps(waterways), json.dumps(counties),
          1 if rec.get("npl_listed") else 0, rec.get("npl_date"),
-         rec.get("hrs_score"), rec.get("category", "other"), source),
+         rec.get("hrs_score"), rec.get("category", "other"), source,
+         desc_source, narrative_source),
     )
+
+
+def apply_curated_narratives(conn: sqlite3.Connection) -> int:
+    """Write the hand-researched narratives from app/contamination_narratives.py
+    onto matching generated sites (by EPA id). Shared by the loader and the
+    standalone enrich_narratives.py so a full reload never loses enrichment.
+    Only touches desc_source='generated' rows — hardcoded narratives are safe."""
+    from .contamination_narratives import FETCHED_NARRATIVES
+    cur = conn.cursor()
+    applied = 0
+    for epa_id, rec in FETCHED_NARRATIVES.items():
+        narrative = (rec.get("narrative") or "").strip()
+        if not narrative:
+            continue
+        refs = json.dumps(rec.get("refs") or [])
+        res = cur.execute(
+            """UPDATE contamination_sites
+                  SET narrative = ?, narrative_refs = ?, narrative_source = 'fetched'
+                WHERE epa_id = ? AND desc_source = 'generated'""",
+            (narrative, refs, epa_id),
+        )
+        applied += res.rowcount
+    conn.commit()
+    return applied
 
 
 def load_contamination_data(conn: sqlite3.Connection) -> int:
@@ -1770,7 +1832,8 @@ def load_contamination_data(conn: sqlite3.Connection) -> int:
     for src_dict in (contamination_data.MICHIGAN_INDUSTRIAL_CONTAMINATION,
                      contamination_data.PFAS_SITES):
         for key, rec in src_dict.items():
-            _insert_contam(cur, key, rec, "compiled", name_to_fips)
+            _insert_contam(cur, key, rec, "compiled", name_to_fips,
+                           narrative_source="hardcoded")
             compiled += 1
             if rec.get("epa_id"):
                 seen_epa.add(rec["epa_id"].strip().upper())
@@ -1805,11 +1868,14 @@ def load_contamination_data(conn: sqlite3.Connection) -> int:
                 "npl_listed": "delet" not in (a.get("Status") or "").lower(),
                 "npl_date": _epa_ms_to_iso(a.get("Listing_Date")),
                 "hrs_score": a.get("Site_Score"),
-                "description": (a.get("Site_Listing_Narrative") or "").strip() or None,
                 "category": "other",
             }
+            # The feed's "Site_Listing_Narrative" is only an <a href> to a PDF,
+            # not prose — so synthesize a factual description from the fields.
+            rec["description"] = _epa_structured_description(rec)
             key = "epa_" + (epa_id or _contam_slug(name))
-            _insert_contam(cur, key, rec, "EPA_SEMS_NPL", name_to_fips)
+            _insert_contam(cur, key, rec, "EPA_SEMS_NPL", name_to_fips,
+                           desc_source="generated", narrative_source=None)
             seen_slug.add(_contam_slug(name))
             epa_added += 1
         conn.commit()
@@ -1818,6 +1884,14 @@ def load_contamination_data(conn: sqlite3.Connection) -> int:
             f"(rest already in compiled set)", level="ok")
     except Exception as e:
         log(f"  EPA NPL fetch failed: {e}", level="warn")
+
+    # Re-apply the hand-researched narratives so a full reload keeps them.
+    try:
+        enriched = apply_curated_narratives(conn)
+        if enriched:
+            log(f"  applied {enriched} curated narratives", level="ok")
+    except Exception as e:
+        log(f"  curated-narrative apply failed: {e}", level="warn")
 
     total = compiled + epa_added
     record_source(
@@ -2004,6 +2078,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if cols and "asthma_ed_rate" not in cols:
         log("schema migration: dropping correlation_analysis to pick up new columns", level="warn")
         conn.execute("DROP TABLE correlation_analysis")
+        conn.commit()
+
+    # contamination_sites: add desc_source column (rows are rebuilt each run, so
+    # a non-destructive ALTER is enough to make the new INSERT columns valid).
+    ccols = {r[1] for r in conn.execute("PRAGMA table_info(contamination_sites)")}
+    if ccols and "desc_source" not in ccols:
+        log("schema migration: adding contamination_sites.desc_source", level="warn")
+        conn.execute("ALTER TABLE contamination_sites ADD COLUMN desc_source TEXT DEFAULT 'narrative'")
+        conn.commit()
+    if ccols and "narrative" not in ccols:
+        log("schema migration: adding contamination_sites narrative columns", level="warn")
+        conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative TEXT")
+        conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative_source TEXT")
+        conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative_refs TEXT")
         conn.commit()
 
 

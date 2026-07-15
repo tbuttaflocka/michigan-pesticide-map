@@ -100,7 +100,14 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "epa_id": "MID098636498", "status": "Active NPL",
         "years_active": "1936-1978",
         "contaminants": ["PBB", "DDT", "Chlorinated organics", "Heavy metals"],
-        "description": "Separate Superfund site from the main Velsicol plant. Used as an open burn pit for chemical waste disposal. Located southwest of the main plant site.",
+        "description": "A satellite Superfund site associated with the Velsicol/Michigan Chemical "
+                       "plant in St. Louis (see the main Velsicol Chemical site). Located southwest "
+                       "of the main plant, this area was used as an open burn pit for chemical-waste "
+                       "disposal, leaving soil and groundwater contaminated with PBB, DDT, "
+                       "chlorinated organics, and heavy metals from the same manufacturing "
+                       "operations behind Michigan's 1973 PBB contamination disaster. It is "
+                       "remediated as a distinct NPL site alongside the main plant and Pine River "
+                       "cleanups.",
         "npl_listed": True, "category": "chemical_manufacturing",
     },
     "hooker_chemical_montague": {
@@ -190,7 +197,13 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Saginaw", "county_fips": "26145", "city": "Saginaw",
         "status": "Active cleanup", "years_active": "1918-1990s",
         "contaminants": ["PCBs", "TCE", "Heavy metals", "VOCs"],
-        "description": "Major GM foundry operations in Saginaw contaminated soil and groundwater with chlorinated solvents and heavy metals from metal casting and machining operations.",
+        "description": "General Motors' Central Foundry Division ran a large gray-iron casting "
+                       "foundry in Saginaw from about 1918 into the 1990s, producing engine blocks "
+                       "and other cast-metal automotive components. Metal casting, machining, and "
+                       "degreasing generated foundry sands, sludges, and spent chlorinated solvents; "
+                       "on-site disposal and releases contaminated soil and groundwater with PCBs, "
+                       "trichloroethylene (TCE) and other VOCs, and heavy metals. Cleanup has been "
+                       "conducted under state and federal oversight as the plant was demolished.",
         "npl_listed": False, "category": "auto_manufacturing",
     },
     "gm_buick_complex_flint": {
@@ -264,8 +277,16 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Lenawee", "county_fips": "26091", "city": "Adrian",
         "epa_id": "MID006019814", "status": "Deleted from NPL (cleaned up 1993)",
         "years_active": "1970-1979",
-        "contaminants": ["Highly toxic organic chemicals", "VOCs"],
-        "description": "Produced highly toxic chemicals 1970-1979. Discharges contaminated surface water and air. Cleanup completed 1993, removed from NPL 1996. Manufacturing facility remains active.",
+        "contaminants": ["MBOCA (4,4'-methylene-bis(2-chloroaniline))",
+                         "Chlorinated aromatic amines", "VOCs"],
+        "description": "Anderson Development Company produced specialty organic chemicals in "
+                       "Adrian from 1970-1979, including MBOCA "
+                       "(4,4'-methylene-bis(2-chloroaniline)) — a chlorinated aromatic-amine curing "
+                       "agent classed as a suspected human carcinogen — along with other volatile "
+                       "organic compounds. Process wastewater and a former treatment lagoon "
+                       "contaminated soil, surface water, and air on and around the site. Cleanup "
+                       "was completed and the site was deleted from the NPL in 1996; the "
+                       "manufacturing facility remains active.",
         "npl_listed": False, "npl_status": "Deleted", "category": "chemical_manufacturing",
     },
     "bendix_st_joseph": {
@@ -276,7 +297,14 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "epa_id": "MID006030829", "status": "Active NPL - treatment ongoing",
         "years_active": "1950s-present",
         "contaminants": ["VOCs", "Chlorinated solvents", "Heavy metals"],
-        "description": "Brake manufacturing facility. 1950s-60s chemical waste disposed in unlined lagoons. Groundwater contamination on-site and off-site. Groundwater extraction and treatment ongoing.",
+        "description": "Bendix Corporation (later Allied Automotive, now Robert Bosch) has "
+                       "manufactured automotive brake components at the St. Joseph site since the "
+                       "1950s. During the 1950s-60s, chemical wastes and spent chlorinated solvents "
+                       "were disposed in unlined on-site lagoons, allowing volatile organic "
+                       "compounds and heavy metals to migrate into groundwater both on-site and "
+                       "off-site toward the St. Joseph River/Lake Michigan area. The site is on the "
+                       "NPL; a groundwater extraction-and-treatment system operates to contain and "
+                       "clean up the plume.",
         "npl_listed": True, "npl_date": "1990", "category": "auto_manufacturing",
     },
     "muskegon_chemical": {
@@ -286,7 +314,12 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Muskegon", "county_fips": "26121", "city": "Muskegon",
         "status": "Active NPL",
         "contaminants": ["Chlorinated solvents", "Heavy metals", "Pesticide precursors"],
-        "description": "Chemical manufacturing contamination in Muskegon County.",
+        "description": "Chemical-manufacturing and solvent-handling operation in the "
+                       "Muskegon area. Site operations and waste disposal released chlorinated "
+                       "solvents, heavy metals, and pesticide-related compounds that contaminated "
+                       "soil and the shallow groundwater aquifer. The site sits within Muskegon "
+                       "County's industrial corridor near the Muskegon Lake watershed and has been "
+                       "addressed as a Superfund cleanup.",
         "npl_listed": True, "category": "chemical_manufacturing",
     },
     "parsons_chemical_grand_ledge": {
@@ -308,7 +341,12 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Kent", "county_fips": "26081", "city": "Grandville",
         "status": "Active NPL",
         "contaminants": ["VOCs", "Heavy metals", "Organic solvents"],
-        "description": "Chemical manufacturing contamination in Kent County.",
+        "description": "Former solvent-reclamation and chemical-handling facility in Grandville. "
+                       "Handling, spills, and disposal of industrial solvents released volatile "
+                       "organic compounds and heavy metals into soil and the underlying groundwater, "
+                       "producing a contaminant plume in a mixed industrial/residential area of Kent "
+                       "County. Listed as a federal Superfund (NPL) site with groundwater remediation "
+                       "conducted under EPA oversight.",
         "npl_listed": True, "category": "chemical_manufacturing",
     },
     "spartan_chemical_wyoming": {
@@ -318,7 +356,19 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Kent", "county_fips": "26081", "city": "Wyoming",
         "contaminants": ["Benzene", "Chloroethane", "CFCs", "Chromium", "Copper",
                          "Cyanide", "Dichloroethane", "Lead", "TCE", "Toluene"],
-        "npl_listed": True, "category": "chemical_manufacturing",
+        "years_active": "1952-1991",
+        "description": "A 5-acre bulk-chemical transfer and repackaging plant that operated "
+                       "1952-1991, handling aromatic solvents, chlorinated solvents, lacquer "
+                       "thinners, and ethers. Before 1963 the company discharged wastewater "
+                       "directly into the ground. In 1981 nearby residential wells were found "
+                       "contaminated with VOCs and had to be abandoned, and residents were "
+                       "connected to municipal water. The site was proposed for the NPL in "
+                       "December 1982 and finalized in September 1983. A 2015 soil excavation "
+                       "found discolored soil with high metals and VOC levels, and EGLE performed "
+                       "remedial excavation in 2023; PFAS (PFOS/PFOA) has also been detected "
+                       "on-site. The site lies in a densely populated industrial/residential area.",
+        "npl_listed": True, "npl_date": "1983-09-08",
+        "category": "chemical_manufacturing",
     },
     "motor_wheel_lansing": {
         "company": "Motor Wheel Inc.",
@@ -326,6 +376,12 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "lat": 42.7325, "lng": -84.5556,
         "county": "Ingham", "county_fips": "26065", "city": "Lansing",
         "contaminants": ["VOCs", "Heavy metals", "Petroleum"],
+        "description": "Motor Wheel Inc. manufactured automotive wheels and brake components in "
+                       "Lansing. The associated disposal area received foundry sands, industrial "
+                       "sludges, and spent solvents over decades of operation, contaminating soil "
+                       "and groundwater in Ingham County with volatile organic compounds, heavy "
+                       "metals, and petroleum hydrocarbons. The site was addressed under the "
+                       "Superfund program with waste containment/capping and groundwater controls.",
         "npl_listed": True, "category": "auto_manufacturing",
     },
     "basf_wyandotte": {
@@ -335,7 +391,14 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Wayne", "county_fips": "26163", "city": "Wyandotte",
         "status": "PFAS investigation",
         "contaminants": ["PFAS", "Mercury", "Chlorinated solvents", "Heavy metals"],
-        "description": "Long-running chemical manufacturing site in Wyandotte. BASF (formerly Wyandotte Chemicals) operated chemical production along the Detroit River. PFAS contamination identified through MPART investigation.",
+        "description": "The Wyandotte complex on the Detroit River has been a major "
+                       "chemical-manufacturing center for over a century, operated by Wyandotte "
+                       "Chemicals Corporation and later by BASF. Long-running production of alkalis, "
+                       "chlorine-based and specialty chemicals left legacy contamination — including "
+                       "mercury, chlorinated solvents, and heavy metals — in soil, river sediment, "
+                       "and groundwater along the Detroit River. PFAS has been identified more "
+                       "recently through Michigan's MPART investigation. Cleanup and monitoring are "
+                       "conducted under state oversight.",
         "affected_waterways": ["Detroit River"],
         "npl_listed": False, "category": "chemical_manufacturing",
     },
@@ -346,6 +409,12 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "county": "Kalamazoo", "county_fips": "26077", "city": "Kalamazoo",
         "contaminants": ["Benzene", "Chlorobenzene", "Dichloroethane",
                          "Ethylbenzene", "Methylene chloride", "TCE", "Xylenes"],
+        "description": "Manufacturer of vibratory finishing and deburring equipment. Plant "
+                       "operations contaminated soil and groundwater with a wide range of volatile "
+                       "organic compounds, including benzene, chlorobenzene, chloroethane, "
+                       "dichloroethanes, ethylbenzene, methylene chloride, trichloroethylene (TCE), "
+                       "toluene, and xylenes. The site is on the National Priorities List, with "
+                       "groundwater contamination in the Kalamazoo area addressed under EPA oversight.",
         "npl_listed": True, "category": "industrial_manufacturing",
     },
     "rockwell_allegan": {
@@ -354,6 +423,12 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "lat": 42.5292, "lng": -85.8553,
         "county": "Allegan", "county_fips": "26005", "city": "Allegan",
         "contaminants": ["TCE", "DCE", "Vinyl chloride", "Heavy metals"],
+        "description": "Former Rockwell International manufacturing plant in Allegan. Industrial "
+                       "operations used chlorinated degreasing solvents, principally "
+                       "trichloroethylene (TCE); releases to soil allowed TCE and its anaerobic "
+                       "breakdown products — 1,2-dichloroethene (DCE) and vinyl chloride — to "
+                       "migrate into the underlying groundwater, forming a contaminant plume "
+                       "addressed under the federal Superfund program with groundwater treatment.",
         "npl_listed": True, "category": "industrial_manufacturing",
     },
     "packaging_corp_filer_city": {
@@ -362,6 +437,11 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "lat": 44.2172, "lng": -86.3222,
         "county": "Manistee", "county_fips": "26101", "city": "Filer City",
         "contaminants": ["Heavy metals", "VOCs"],
+        "description": "Packaging Corporation of America operated a paper mill at Filer City in "
+                       "Manistee County. Mill wastes and on-site disposal (landfill and lagoon/ "
+                       "settling areas) contaminated soil and groundwater with heavy metals and "
+                       "volatile organic compounds near Manistee Lake. The site was addressed "
+                       "under the Superfund program.",
         "npl_listed": True, "category": "paper_manufacturing",
     },
 }
@@ -374,7 +454,13 @@ PFAS_SITES = {
         "lat": 44.6833, "lng": -84.7167,
         "county": "Crawford", "county_fips": "26039",
         "contaminants": ["PFAS", "AFFF"],
-        "description": "Military training facility with PFAS from AFFF firefighting foam.",
+        "description": "Camp Grayling, the National Guard's largest training installation, used "
+                       "aqueous film-forming foam (AFFF) containing PFAS during fire-training "
+                       "exercises. PFAS (PFOS/PFOA) has been detected in on-site groundwater and has "
+                       "migrated toward lakes and streams in the Grayling area, a region of sandy "
+                       "soils and shallow water table that overlies drinking-water aquifers. "
+                       "Michigan's MPART program is investigating the plume and sampling nearby "
+                       "residential wells.",
         "status": "PFAS investigation", "npl_listed": False, "category": "military",
     },
     "selfridge_angb": {
@@ -383,7 +469,12 @@ PFAS_SITES = {
         "lat": 42.6133, "lng": -82.8356,
         "county": "Macomb", "county_fips": "26099", "city": "Harrison Township",
         "contaminants": ["PFAS", "AFFF", "TCE"],
-        "description": "PFAS contamination from firefighting foam training exercises.",
+        "description": "Selfridge Air National Guard Base used AFFF firefighting foam containing "
+                       "PFAS in training and emergency response. PFAS (PFOS/PFOA) has contaminated "
+                       "groundwater beneath the base on the shore of Lake St. Clair, and the "
+                       "Department of Defense and Michigan's MPART are investigating migration and "
+                       "potential impacts to surface water and drinking-water sources. The base also "
+                       "carries legacy chlorinated-solvent (TCE) contamination.",
         "status": "PFAS investigation", "npl_listed": False, "category": "military",
     },
     "us_ecology_romulus": {
@@ -392,7 +483,12 @@ PFAS_SITES = {
         "lat": 42.2200, "lng": -83.3700,
         "county": "Wayne", "county_fips": "26163", "city": "Romulus",
         "contaminants": ["PFAS", "Hazardous waste"],
-        "description": "Hazardous waste facility near Detroit Metro Airport with PFAS contamination.",
+        "description": "US Ecology's Romulus facility is a commercial hazardous-waste treatment, "
+                       "storage, and disposal operation near Detroit Metropolitan Airport. Because "
+                       "it received diverse industrial wastes, PFAS has been detected in groundwater "
+                       "at and around the site, and it is part of Michigan's MPART PFAS "
+                       "investigations of the Romulus / lower Rouge River area, where shallow "
+                       "groundwater discharges toward local drains and surface water.",
         "status": "PFAS investigation", "npl_listed": False, "category": "waste_disposal",
     },
     "dtw_airport": {
@@ -401,7 +497,12 @@ PFAS_SITES = {
         "lat": 42.2125, "lng": -83.3533,
         "county": "Wayne", "county_fips": "26163", "city": "Romulus",
         "contaminants": ["PFAS", "AFFF"],
-        "description": "PFAS from firefighting foam use at Michigan's busiest airport.",
+        "description": "Detroit Metropolitan Wayne County Airport, Michigan's busiest airport, used "
+                       "AFFF firefighting foam containing PFAS for aircraft-fire training and "
+                       "emergency response, as required for commercial airports. PFAS has been "
+                       "detected in airport-area groundwater and in stormwater/drainage that feeds "
+                       "local surface waters, and it is one of numerous Michigan airport PFAS sites "
+                       "under MPART investigation.",
         "status": "PFAS investigation", "npl_listed": False, "category": "pfas",
     },
     "gerald_ford_airport": {
@@ -410,7 +511,12 @@ PFAS_SITES = {
         "lat": 42.8808, "lng": -85.5228,
         "county": "Kent", "county_fips": "26081", "city": "Grand Rapids",
         "contaminants": ["PFAS", "AFFF"],
-        "description": "PFAS from AFFF firefighting foam. Contamination of groundwater.",
+        "description": "Gerald R. Ford International Airport in the Grand Rapids area used AFFF "
+                       "firefighting foam containing PFAS. PFAS discharges reached the airport's "
+                       "stormwater and retention system and contaminated groundwater and nearby "
+                       "surface water in Kent County. The airport authority installed treatment "
+                       "(including a granular activated-carbon system) and continues monitoring "
+                       "under MPART oversight.",
         "status": "PFAS investigation", "npl_listed": False, "category": "pfas",
     },
 }

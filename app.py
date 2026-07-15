@@ -293,13 +293,14 @@ def api_county(fips: str):
             (fips,),
         ).fetchone()[0]
 
+    # All compounds applied in this county/year (sorted high→low). The panel
+    # charts the top 10 and offers a "show all" list for the full set.
     top_compounds = cur.execute(f"""
         SELECT pu.compound, pc.category, {col} AS kg
           FROM pesticide_use pu
      LEFT JOIN pesticide_categories pc ON pc.compound = pu.compound
-         WHERE pu.county_fips = ? AND pu.year = ?
+         WHERE pu.county_fips = ? AND pu.year = ? AND {col} > 0
          ORDER BY kg DESC NULLS LAST
-         LIMIT 15
     """, (fips, year)).fetchall()
 
     by_category = cur.execute(f"""
@@ -1440,9 +1441,97 @@ def api_water_heatmap():
     return jsonify({"compound": compound or None, "points": pts})
 
 
+# ---- HUC-8 watershed geometry + point-in-polygon aggregation ----
+
+_HUC_POLYS: list | None = None       # [(huc8, [outer_ring, ...])]
+_WS_EXTRA: dict | None = None        # {huc8: {contam, contam_npl, pesticide_kg, total_sites}}
+
+
+def _huc_polys() -> list:
+    """Outer rings per HUC-8, cached. Rings are [[lon, lat], ...]."""
+    global _HUC_POLYS
+    if _HUC_POLYS is not None:
+        return _HUC_POLYS
+    out: list = []
+    if MI_HUC8_GEOJSON_PATH.exists():
+        fc = json.loads(Path(MI_HUC8_GEOJSON_PATH).read_text())
+        for f in fc.get("features", []):
+            huc = (f.get("properties") or {}).get("huc8")
+            geom = f.get("geometry") or {}
+            t = geom.get("type")
+            coords = geom.get("coordinates") or []
+            polys = [coords] if t == "Polygon" else (coords if t == "MultiPolygon" else [])
+            outers = [p[0] for p in polys if p]   # outer ring of each polygon
+            if huc and outers:
+                out.append((huc, outers))
+    _HUC_POLYS = out
+    return out
+
+
+def _pip(x: float, y: float, ring: list) -> bool:
+    """Ray-casting point-in-polygon. ring = [[lon, lat], ...]."""
+    inside = False
+    n = len(ring)
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-15) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _huc_for_point(lon, lat) -> str | None:
+    if lon is None or lat is None:
+        return None
+    for huc, outers in _huc_polys():
+        for ring in outers:
+            if _pip(lon, lat, ring):
+                return huc
+    return None
+
+
+def _watershed_extra(conn) -> dict:
+    """Per-watershed aggregates that aren't keyed on huc8 in the DB — computed
+    by point-in-polygon and cached. Pesticide is an approximation: each county's
+    latest-year total is attributed to the HUC-8 its centroid falls in."""
+    global _WS_EXTRA
+    if _WS_EXTRA is not None:
+        return _WS_EXTRA
+    from collections import defaultdict
+    extra = defaultdict(lambda: {"contam": 0, "contam_npl": 0,
+                                 "pesticide_kg": 0.0, "total_sites": 0})
+    # total monitoring sites per watershed (huc8 is stored on the site)
+    for r in conn.execute("SELECT huc8, COUNT(*) c FROM water_quality_sites "
+                          "WHERE huc8 IS NOT NULL AND huc8 <> '' GROUP BY huc8"):
+        extra[r["huc8"]]["total_sites"] = r["c"]
+    # contamination / Superfund sites within each watershed (point-in-polygon)
+    for r in conn.execute("SELECT latitude lat, longitude lng, status_class "
+                          "FROM contamination_sites"):
+        huc = _huc_for_point(r["lng"], r["lat"])
+        if huc:
+            extra[huc]["contam"] += 1
+            if r["status_class"] == "npl":
+                extra[huc]["contam_npl"] += 1
+    # approximate pesticide use per watershed via county centroid → HUC
+    latest = conn.execute("SELECT MAX(year) FROM pesticide_use").fetchone()[0]
+    pest = {r["county_fips"]: (r["kg"] or 0) for r in conn.execute(
+        "SELECT county_fips, SUM((COALESCE(epest_low_kg,0)+COALESCE(epest_high_kg,0))/2.0) kg "
+        "FROM pesticide_use WHERE year = ? GROUP BY county_fips", (latest,))}
+    for fips, c in _county_centroids().items():
+        huc = _huc_for_point(c["lon"], c["lat"])
+        if huc and fips in pest:
+            extra[huc]["pesticide_kg"] += pest[fips]
+    _WS_EXTRA = dict(extra)
+    return _WS_EXTRA
+
+
 @app.route("/api/water/watersheds")
 def api_water_watersheds():
-    """HUC-8 watershed polygons + per-watershed detection counts."""
+    """HUC-8 watershed polygons with per-watershed data for the interactive
+    choropleth: pesticide detections/exceedances, monitoring-site counts,
+    contamination-site counts, and (approx) upstream pesticide use."""
     compound = (request.args.get("compound") or "").strip().upper()
     conn = db()
     cur = conn.cursor()
@@ -1466,6 +1555,7 @@ def api_water_watersheds():
              GROUP BY s.huc8
         """, args)
     }
+    extra = _watershed_extra(conn)
     conn.close()
     geojson_path = MI_HUC8_GEOJSON_PATH
     if not geojson_path.exists():
@@ -1476,7 +1566,12 @@ def api_water_watersheds():
         props = f.get("properties", {}) or {}
         huc = props.get("huc8")
         c = counts.get(huc, {"detections": 0, "exceedances": 0, "sites_with_detections": 0})
+        e = extra.get(huc, {"contam": 0, "contam_npl": 0, "pesticide_kg": 0.0, "total_sites": 0})
         props.update(c)
+        props["total_sites"] = e["total_sites"]
+        props["contam_sites"] = e["contam"]
+        props["contam_npl"] = e["contam_npl"]
+        props["pesticide_lbs"] = round((e["pesticide_kg"] or 0) * KG_TO_LB)
         f["properties"] = props
     return jsonify(fc)
 
@@ -2149,6 +2244,10 @@ def _contam_row(r) -> dict:
         "hrs_score": r["hrs_score"], "category": r["category"],
         "category_label": cat_label, "glyph": glyph, "source": r["source"],
         "epa_profile_url": epa_url,
+        "desc_source": (r["desc_source"] if "desc_source" in r.keys() else "narrative"),
+        "narrative": (r["narrative"] if "narrative" in r.keys() else None),
+        "narrative_source": (r["narrative_source"] if "narrative_source" in r.keys() else None),
+        "narrative_refs": _json(r["narrative_refs"]) if "narrative_refs" in r.keys() else [],
     }
 
 

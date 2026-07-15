@@ -330,7 +330,11 @@ CREATE TABLE IF NOT EXISTS contamination_sites (
     npl_date           TEXT,
     hrs_score          REAL,
     category           TEXT,                    -- chemical_manufacturing|steel|auto|mining|military|...
-    source             TEXT DEFAULT 'compiled'  -- compiled|EPA_SEMS_NPL
+    source             TEXT DEFAULT 'compiled', -- compiled|EPA_SEMS_NPL
+    desc_source        TEXT DEFAULT 'narrative', -- narrative (rich) | generated (from EPA fields)
+    narrative          TEXT,                    -- researched story (fetched enrichment); NULL if none
+    narrative_source   TEXT,                    -- hardcoded | fetched | none
+    narrative_refs     TEXT                     -- JSON: [{"label":..,"url":..}] source attribution
 );
 CREATE INDEX IF NOT EXISTS ix_contam_county   ON contamination_sites(county_fips);
 CREATE INDEX IF NOT EXISTS ix_contam_category ON contamination_sites(category);

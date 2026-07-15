@@ -90,7 +90,22 @@ python app.py                     # serves http://127.0.0.1:8080
   "Superfund NPL sites (count)" as X-axis options so you can compare whether a
   county's cancer rate tracks agricultural pesticides or industrial
   contamination. Federal NPL sites are pulled live from EPA's ArcGIS SEMS
-  feature service and merged (deduped) with the compiled dataset.
+  feature service and merged (deduped) with the compiled dataset. Every site
+  has a description: the ~30 major/mid-tier compiled sites carry full narratives,
+  and the EPA-API sites (whose feed only returns a PDF link, not prose) get a
+  factual auto-generated summary built from name/location/NPL status/listing
+  date/HRS score. Auto-generated popups are labelled "Summary generated from the
+  EPA site record" with a link to the full EPA profile, so it's transparent
+  which descriptions are hand-written narratives vs. structured summaries.
+  A further ~20 notable EPA-API sites (Berlin & Farro, Verona Well Field, Tar
+  Lake, Ten-Mile Drain, Bofors Nobel, G&H Landfill, etc.) carry researched
+  narratives — the real story (operator, what was dumped, when, how it was
+  found, impact, cleanup) — drawn from EPA/EGLE/news and shown with a "Sources:"
+  line in the popup. These live in `app/contamination_narratives.json` and are
+  applied by the re-runnable `enrich_narratives.py` (curated data + optional
+  Wikipedia auto-fetch; `--only`, `--force`, `--no-web`, `--list` flags). Sites
+  with no available narrative say "No detailed public narrative found" rather
+  than inventing one.
 - **Wind & pesticide-drift overlay** — three stackable overlays under Map
   layers → Overlays, built from real growing-season (Apr–Sep) hourly wind at 14
   Michigan ASOS airport stations (Iowa Environmental Mesonet). *Wind roses* plot

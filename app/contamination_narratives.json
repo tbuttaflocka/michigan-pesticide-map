@@ -1,0 +1,246 @@
+[
+  {
+    "epa_id": "MID980499966",
+    "site_name": "Springfield Township Dump",
+    "narrative": "The 4-acre Springfield Township Dump near Davisburg received unauthorized chemical-waste disposal from about 1966 to 1968. In 1978 the State of Michigan found roughly 1,500 drums on-site holding PCBs, paint sludge, solvents, oils, and greases, which had contaminated soil and groundwater with PCBs, dieldrin, heavy metals, and chlorinated solvents including trichloroethylene (TCE). Michigan did a partial cleanup in 1979 and referred the site to EPA, which placed it on the National Priorities List in September 1983; about 711 tons of contaminated soil were excavated from the disposal pits in 1979-1980. TCE remaining in groundwater is the primary contaminant of concern, and remediation continues under a 1998 Consent Decree with periodic EPA five-year reviews.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502765"},
+      {"label": "EPA Five-Year Review", "url": "https://semspub.epa.gov/work/05/994203.pdf"}
+    ]
+  },
+  {
+    "epa_id": "MID000605717",
+    "site_name": "Berlin & Farro",
+    "narrative": "The Berlin & Farro site is a roughly 40-acre former industrial-waste incinerator and landfill south of Swartz Creek, opened around 1971 after dairy farmer Charles Berlin obtained local permission to operate near residential homes. The facility accepted and stored industrial wastes for incineration, but permit violations led the state to revoke its incinerator and landfill permits in 1975, after which illegal dumping of industrial wastes continued; the operators ultimately declared bankruptcy around 1980. Hazardous materials found on site included dioxin, cyanide, PCBs, and the toxic pesticide C-56, and the site became widely described as one of Michigan's worst toxic waste dumps. In 1983 all 54 families living near the dump were temporarily evacuated so cleanup work could proceed. From 1981 to 1984, EPA, the State of Michigan, and potentially responsible parties removed the incinerator, five underground tanks and about 4,000 drums, and excavated over one million gallons of contaminated water plus thousands of cubic yards of lagoon sludge and contaminated soil; EPA deleted the site from the National Priorities List in 1998.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502172"},
+      {"label": "UPI Archives", "url": "https://www.upi.com/Archives/1983/04/21/All-54-families-living-near-Michigans-worst-toxic-waste/8805419749200/"}
+    ]
+  },
+  {
+    "epa_id": "MID006029102",
+    "site_name": "American Anodco, Inc.",
+    "narrative": "The roughly 8-acre American Anodco site in Ionia has cleaned and treated aluminum parts for the automotive industry since 1962. Past operations discharged wastewater into an on-site seepage lagoon, contaminating soil, groundwater, sediment, and surface water with hazardous chemicals. EPA added the site to the National Priorities List in 1989; earlier, in 1987, responsible parties were required to dewater the lagoons, remove sludge for off-site disposal, and monitor groundwater, and EPA issued the site close-out report in 2019. Also in 2019, EPA and the state found the active facility was using PFAS compounds and was the primary contributor of PFAS to the Ionia Wastewater Treatment Plant, and 2023 sampling identified residential wells with high PFAS levels. An automotive-parts business remains active on the site today.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502369"},
+      {"label": "EPA Superfund Sites in Reuse (Michigan)", "url": "https://www.epa.gov/superfund-redevelopment/superfund-sites-reuse-michigan"}
+    ]
+  },
+  {
+    "epa_id": "MID020883609",
+    "site_name": "Northernaire Plating",
+    "narrative": "The Northernaire Plating site in Cadillac is a former electroplating facility that operated on about 12.75 acres from 1971 to 1981. Through improper handling and faulty sewer lines, hazardous metals including chromium leaked into the soil and groundwater. The contamination surfaced in 1978 when the Michigan Department of Natural Resources received drinking-water complaints from nearby homeowners and sampling found hexavalent chromium in the tap water of two homes. EPA added the site to the National Priorities List in 1983 and has since removed waste, contaminated soil, sludges, and contaminated sewer lines, and installed a groundwater extraction and treatment system and a soil vapor extraction system; the remedy achieved its cleanup goals for hexavalent chromium. EGLE later sampled the site for PFAS in 2021-2022 and concluded Northernaire is not the source of PFAS in the surrounding Cadillac industrial area.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502440"},
+      {"label": "Michigan EGLE / PFAS Response", "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/wexford-county/cadillac-industrial-park-area-of-interest"}
+    ]
+  },
+  {
+    "epa_id": "MID980794481",
+    "site_name": "Spiegelberg Landfill",
+    "narrative": "The Spiegelberg Landfill site is a privately owned property of about 115 acres on Spicer Road in Green Oak Township, roughly five miles south of Brighton. Disposal of domestic, industrial, and septic waste took place there from 1966 until about 1977, including a paint-sludge disposal area at the base of a sand and gravel quarry. These operations contaminated soil and groundwater with hazardous chemicals. EPA added the site to the National Priorities List in 1983, and cleanup included excavation, treatment, and disposal of hazardous wastes and contaminated soils along with groundwater treatment. After EPA determined all appropriate CERCLA response actions were complete, the site was deleted from the NPL in 2011, and a sand, gravel, and peat mine operates on-site today.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0503021"},
+      {"label": "Federal Register (NPL Deletion, 2011)", "url": "https://www.federalregister.gov/documents/2011/04/13/2011-8879"}
+    ]
+  },
+  {
+    "epa_id": "MID006030373",
+    "site_name": "Bofors Nobel, Inc.",
+    "narrative": "The 85-acre Bofors Nobel site in Egelston Township near Muskegon includes a former chemical-production facility operated by Lomac, Inc. and ten abandoned sludge lagoons. Starting around 1960, the facility manufactured alcohol-based detergents, saccharin, pesticides, herbicides, and dye intermediates, and disposed of wastes in the lagoons. The production and disposal contaminated soil and groundwater, and in the 1970s contaminated groundwater discharging into Black Creek caused fish kills and damaged aquatic life; contaminants of concern include ammonia, 3,3'-dichlorobenzidine, aniline, benzidine, and chlorobenzene. A groundwater extraction system operating since the early 1980s continues to prevent site-related discharge to the creek, and some native fish populations have re-established in the previously affected stretch. The site remains in the operations-and-maintenance phase; EPA's 2023 five-year review found the remedy protective in the short term but could not make a long-term protectiveness determination.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502372"},
+      {"label": "Michigan EGLE / PFAS Response", "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/muskegon-county/bofors-nobel"}
+    ]
+  },
+  {
+    "epa_id": "MID044567162",
+    "site_name": "Thermo-Chem, Inc.",
+    "narrative": "The 50-acre Thermo-Chem, Inc. site is located in Egelston Township near Muskegon, where Thermo-Chem, Inc. and the Thomas Solvent Company operated a waste-solvent reprocessing and storage facility from 1969 until August 1980. The facility received paint waste, antifreeze waste, and spent halogenated and nonhalogenated solvents, leaving high concentrations of volatile, semi-volatile, and inorganic contaminants in soil and groundwater, with contaminated seepage degrading the adjacent Black Creek watershed. EPA finalized the site on the National Priorities List in June 1986 and conducted an emergency removal of drums and hazardous materials in late 1988. The potentially responsible parties later carried out a remedy involving debris removal, soil excavation and treatment, groundwater extraction and treatment (filtration, air stripping, and pH adjustment), and in-situ soil vapor extraction, with cleanup work continuing into the 2000s.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.docdata&id=0502486"},
+      {"label": "EPA Record of Decision (OU1, 1991)", "url": "https://www.osti.gov/biblio/7174826"}
+    ]
+  },
+  {
+    "epa_id": "MID980499842",
+    "site_name": "Rose Township Dump",
+    "narrative": "The Rose Township Dump is a roughly 100-acre former farm in Rose Township, Oakland County, where illegal waste disposal began after farming was abandoned in the 1960s. From about 1966 to 1968 an estimated 5,000 drums containing spent solvents, paint sludges, lead battery sludges, and waste oils were dumped and buried across a 12-acre area. The contamination came to official attention when the Michigan Department of Natural Resources excavated barrel fragments in September 1981 and analysis revealed paint sludges, solvents, PCBs, and oils. In 1988 a consent decree was signed by 12 potentially responsible parties and EPA to fund the cleanup. The selected remedy was on-site incineration: an infrared incinerator operated from September 1992 through October 1993, treating tens of thousands of tons of contaminated soil.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502756"},
+      {"label": "EPA CLU-IN Cost & Performance", "url": "https://clu-in.org/products/costperf/incinrtn/rosetown.htm"}
+    ]
+  },
+  {
+    "epa_id": "MID062222997",
+    "site_name": "Butterworth #2 Landfill",
+    "narrative": "The Butterworth #2 Landfill occupies about 120 acres along the Grand River in Grand Rapids and was owned and operated by the City of Grand Rapids, first as an open dump from 1950 to 1967 and then as a sanitary landfill from 1967 to 1973, when the state closed it for improper operation. The site accepted municipal and industrial wastes including heavy metals, solvents, and paint sludges, and the resulting soil and groundwater contamination led EPA to add it to the National Priorities List in 1983. EPA issued a Record of Decision in 1992, and the remedy has included capping the landfill and installing groundwater monitoring wells, with periodic five-year reviews. More recently, at Michigan EGLE's request, EPA conducted PFAS sampling; June 2024 sampling showed PFAS exceedances at the groundwater/surface-water interface along the Grand River. The site remains an active NPL Superfund site, and the capped landfill now also hosts reuse including a solar array.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502576"},
+      {"label": "Michigan EGLE PFAS Response", "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/kent-county/butterworth-landfill-superfund"},
+      {"label": "WGVU News", "url": "https://www.wgvunews.org/news/2024-10-08/grand-rapids-former-butterworth-landfill-declared-pfas-contamination-site"}
+    ]
+  },
+  {
+    "epa_id": "MID981092935",
+    "site_name": "Bay City Middlegrounds",
+    "narrative": "The Bay City Middlegrounds (also known as the Middleground Landfill) is a roughly 43-acre closed landfill on Middleground Island in the Saginaw River in Bay City. The City of Bay City owned and operated the landfill from 1956 to 1984, accepting both municipal and industrial waste, and the property was also historically used to dispose of Saginaw River dredge spoils. Waste disposal contaminated soil and groundwater with hazardous chemicals including PCBs, concentrated especially on the west side adjacent to the river, and PCB-bearing leachate began migrating toward the Saginaw River; the site was proposed for the EPA National Priorities List in February 1995. More recently, PFAS testing of the landfill leachate detected elevated PFAS, prompting Michigan EGLE to request follow-up sampling. In response, the groundwater monitoring network was expanded and a pilot reactive-barrier treatment was tested to contain PFAS, while the landfill's leachate continues to be collected and treated at the municipal plant.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0503364"},
+      {"label": "Michigan EGLE PFAS Response", "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/bay-county/middleground-landfill"}
+    ]
+  },
+  {
+    "epa_id": "MID980410823",
+    "site_name": "G&H Landfill",
+    "narrative": "The G&H Landfill is a 60-acre Superfund site near Utica in Shelby Charter Township, Macomb County, about 20 miles north of Detroit. The property was a sand and gravel quarry until the mid-1950s, after which G&H Industrial Landfill, Inc. operated it as a waste-disposal and waste-oil recovery facility from about 1955 to 1973, accepting industrial waste oil, solvents, paint sludge, and municipal refuse, with PCB-containing waste oil stored in unlined ponds. Contamination was discovered when state authorities observed PCB-contaminated groundwater seeping from the landfill; the State of Michigan referred the site to EPA, and it was placed on the National Priorities List in September 1983. Groundwater flowing toward the nearby Clinton River prompted closure of private drinking-water wells and connection of affected residents to municipal water. Under a 1990 Record of Decision, potentially responsible parties capped the landfill, installed a slurry wall and leachate/groundwater collection-and-treatment system, and restored wetlands, with construction completed in 1999; the site is now in long-term operation and maintenance.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502735"},
+      {"label": "EPA Third Five-Year Review", "url": "https://semspub.epa.gov/work/HQ/180516.pdf"}
+    ]
+  },
+  {
+    "epa_id": "MID980794473",
+    "site_name": "Shiawassee River",
+    "narrative": "The Shiawassee River site covers the former Cast Forge Company property in Howell and roughly eight miles of the Shiawassee River downstream. Beginning in 1969, Cast Forge (later Western Wheel) manufactured aluminum cast products and, until 1973, discharged wastewater contaminated with hydraulic fluids containing PCBs into the South Branch of the river; from 1973 to 1977 the wastewater went to a 400,000-gallon on-site lagoon whose discharges and overflows contaminated nearby wetlands and the river. EPA placed the site on the National Priorities List in 1983, signed a Record of Decision in 2001, and completed excavation and removal of contaminated soil and river sediments in 2005. A monitored natural-recovery remedy is now addressing remaining PCB-laden sediments, with cleanup goals aimed at protecting ecological receptors such as mink, and a fish-consumption advisory remains in place. EPA issued the fourth five-year review of the site in 2024.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0503020"},
+      {"label": "EPA Public Notice (Five-Year Review)", "url": "https://www.epa.gov/mi/epa-begins-forth-five-year-review-shiawassee-river-site"}
+    ]
+  },
+  {
+    "epa_id": "MID095402210",
+    "site_name": "Rasmussen's Dump",
+    "narrative": "Rasmussen's Dump is a 33-acre former unlicensed dump on Spicer Road in the Brighton area of Green Oak Township, Livingston County, which accepted domestic and industrial wastes during the 1960s and early 1970s. The dump was never properly capped or closed, and sand and gravel mining that began after operations ended in 1972 undermined the landfill and redistributed fill and drummed wastes, contaminating soil and groundwater. Primary contaminants include PCBs and volatile organic compounds such as benzene, TCE, toluene and xylenes, along with metals including cadmium and lead; area residents rely on the underlying aquifer for their drinking water. Short-term cleanups between 1984 and 1990 removed drums, waste and contaminated soil, and the long-term remedy included a landfill cap, in-place groundwater treatment with an ozone system, long-term monitoring, and land- and access-use restrictions. EPA completed a five-year review of the cleanup in March 2020.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502686"},
+      {"label": "EPA Record of Decision (1991)", "url": "https://www.osti.gov/biblio/5380233"}
+    ]
+  },
+  {
+    "epa_id": "MID005480900",
+    "site_name": "North Bronson Industrial Area",
+    "narrative": "The North Bronson Industrial Area, in the city of Bronson in Branch County, includes several former metal-plating and finishing facilities. Beginning in the early 1900s, metal-plating operations discharged wastewater into a county drain, and contaminated water from the facilities caused cattle and fish kills in the 1930s. To contain the waste, the city built industrial sewers and lagoons — the Western Lagoons in 1938 and, once those reached capacity, the Eastern Lagoons in 1949 — but waste disposal still contaminated soil and groundwater, including two lagoon areas and the adjacent county drain. EPA proposed the site for the National Priorities List in October 1984 and finalized it in June 1986. Cleanup includes removing contaminated soil, treating groundwater, restricting groundwater use, and installing soil-vapor mitigation systems.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502310"},
+      {"label": "USFWS Natural Resource Restoration Plan", "url": "https://www.fws.gov/sites/default/files/documents/nrdar-final-rpea-2007-north-bronson.pdf"}
+    ]
+  },
+  {
+    "epa_id": "MID005068143",
+    "site_name": "Electrovoice",
+    "narrative": "The Electro-Voice site in Buchanan, Berrien County, was home to an audio-equipment manufacturing operation that ran from 1946 until 2002, with activities including die casting, machining, assembly, painting and electroplating. Contamination resulted from the company discharging electroplating wastes into two clay-lined lagoons and disposing of paint wastes and solvents into a drywell, which contaminated groundwater with volatile organic compounds. EPA placed the site on the National Priorities List in September 1984. Construction of the long-term remedy finished in 1999 and included a clay cap over contaminated soil and active treatment via an in-place ventilation and volatilization system, followed by ongoing operation, maintenance and monitoring. Institutional controls limiting land and resource use are in place to reduce exposure to remaining contamination.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502237"},
+      {"label": "EPA Reuse Fact Sheet", "url": "https://archive.epa.gov/region5/superfund/redevelop/web/pdf/electrovoice.pdf"}
+    ]
+  },
+  {
+    "epa_id": "MID043681840",
+    "site_name": "Kysor Industrial Corp.",
+    "narrative": "The Kysor Industrial Corporation site is a large truck-parts manufacturing plant in the Cadillac Industrial Park in Cadillac, Wexford County, where the company began operations in 1959. Operators dumped barrels of spent solvent and degreaser onto the ground behind the plant, contaminating soil and groundwater, and several other facilities in the industrial park contributed to commingled groundwater contaminant plumes beneath the area. EPA added the site to the National Priorities List in 1989, and the selected remedy is a two-stage groundwater pump-and-treat system using carbon adsorption to remove chromium and air stripping with vapor-phase carbon to remove VOCs, with treated water discharged to the Clam River. The remedy also addresses groundwater contamination from the nearby Northernaire Plating Superfund site, which shares the same groundwater table. Groundwater treatment remains ongoing.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502480"},
+      {"label": "EPA Record of Decision (1989)", "url": "https://www.osti.gov/biblio/6906752"}
+    ]
+  },
+  {
+    "epa_id": "MID980274179",
+    "site_name": "Carter Industrials, Inc.",
+    "narrative": "The 3.5-acre Carter Industrials, Inc. site in Detroit was used from 1966 to 1986 for storage and salvage operations handling scrap metal, electrical capacitors and transformers. Spills, runoff and wind-blown dust contaminated on-site soil and debris, about 1.25 miles of combined sewers, and several neighboring commercial, public and residential properties, with primary contaminants including PCBs and metals such as arsenic, cadmium and lead. EPA added the site to the National Priorities List in 1989, and cleanup included demolishing contaminated buildings and excavating and disposing of contaminated soil and debris off-site; a 1995 amendment to the 1991 Record of Decision selected off-site disposal as the remedy. The site has since been deleted from the National Priorities List and requires no further cleanup action, and a trucking company now operates at the former source area.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502729"},
+      {"label": "EPA Record of Decision Amendment (1995)", "url": "https://www.osti.gov/biblio/218653"}
+    ]
+  },
+  {
+    "epa_id": "MIN000510063",
+    "site_name": "Ten-Mile Drain",
+    "narrative": "The Ten-Mile Drain site centers on an underground storm sewer in a St. Clair Shores residential neighborhood near Bon Brae Street and Harper Avenue that became heavily contaminated with polychlorinated biphenyls (PCBs). Investigators believe a historical PCB release migrated from a commercial parking lot onto adjacent properties and into the storm-sewer system, which discharges into the Lange and Revere Street canals connected to Lake St. Clair. PCBs were first discovered at the site in 2001, and EPA added it to the National Priorities List in September 2010. In 2014 EPA completed a time-critical removal of PCB-contaminated soil from nine residential properties and one commercial property, hauling about 1,500 tons of soil offsite. In January 2024 EPA issued a Record of Decision for the remaining contaminated storm sewer, calling for excavation of manhole vaults and removal of roughly 2,110 linear feet of concrete pipe along with PCB-impacted bedding; the canals provide recreational access for about 125 homes.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://www.epa.gov/superfund/ten-mile-drain"},
+      {"label": "EPA Record of Decision", "url": "https://semspub.epa.gov/work/05/956149.pdf"},
+      {"label": "Detroit News", "url": "https://www.detroitnews.com/story/news/local/macomb-county/2024/01/30/epa-superfund-site-lake-st-clair-shores-michigan-storm-10-mile-drain-pollution-pcb-pcbs-macomb/72412634007/"}
+    ]
+  },
+  {
+    "epa_id": "MID980794655",
+    "site_name": "Tar Lake",
+    "narrative": "The Tar Lake site is a 234-acre area in Mancelona Township surrounding a dry, roughly 4-acre former pond nicknamed 'Tar Lake,' about a mile south of Mancelona. From 1882 to 1945 the Antrim Iron Company operated an iron works there using the charcoal method, and beginning in 1910 produced charcoal in sealed retorts that recovered pyroligneous liquor; wastes were disposed of in the pond. This left soil, tar sludge, and groundwater contaminated with volatile organic compounds such as benzene, toluene, and xylenes, along with PAHs and phenols. The site was placed on the National Priorities List in 1983. Cleanup has proceeded in stages: EPA removed a 45-acre tailings area from the NPL in 2005 and a further 75-acre portion in 2011, and Infrastructure Investment and Jobs Act funding is being used to engage the U.S. Army Corps of Engineers to excavate roughly 215,000 tons of contaminated soil and upgrade the groundwater remediation system.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0503024"},
+      {"label": "EPA Record of Decision", "url": "https://semspub.epa.gov/work/05/180702.pdf"},
+      {"label": "Michigan Advance", "url": "https://michiganadvance.com/2022/01/21/4-michigan-superfund-sites-to-soon-receive-federal-funding-for-cleanup-projects/"}
+    ]
+  },
+  {
+    "epa_id": "MID980793806",
+    "site_name": "Verona Well Field",
+    "narrative": "The Verona Well Field is the primary drinking-water well field for the city of Battle Creek, and contaminated groundwater migrating from nearby industrial source areas threatened that supply. Routine testing in August 1981 found that 10 of the city's 30 wells contained detectable volatile organic compounds, notably trichloroethylene (TCE), an industrial degreasing solvent; contamination ultimately affected multiple aquifers and dozens of drinking-water wells. The most affected city wells were shut down, and Verona Park residents with contaminated private wells were provided bottled water until they could be connected to city mains. The site has three source areas — Thomas Solvent Raymond Road, the Thomas Solvent Annex, and the Paint Shop — with much of the contamination attributed to the Thomas Solvent Company and the nearby Grand Trunk Railroad. Cleanup by private parties and Grand Trunk has included soil vapor extraction and pump-and-treat groundwater systems; more recently, PFAS has been detected in monitoring wells at the Thomas Solvent Raymond Road source area.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0503011"},
+      {"label": "Michigan EGLE PFAS Response", "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/calhoun-county/verona-well"}
+    ]
+  },
+  {
+    "epa_id": "MID006013049",
+    "site_name": "Petoskey Municipal Well Field",
+    "narrative": "This site (also tracked by EPA as the PMC Groundwater site) stems from the Petoskey Manufacturing Co. facility on W. Lake St. in Petoskey, which ran a die-casting plant from the 1940s and a painting operation from the mid-to-late 1960s. Disposal of spent solvents and paint sludge onto the ground outside the plant contaminated soil and groundwater with VOCs including trichloroethene (TCE), semi-volatile organics, and inorganic contaminants. A contaminated groundwater plume migrated to the nearby Ingalls Shore municipal well, which supplied drinking water to city residents. EPA added the site to the National Priorities List in 1983, the company ceased operations in 2001, and the city removed the Ingalls well in 2006. EPA, working with Michigan EGLE, signed an interim Record of Decision to address contaminated groundwater, soil, and soil vapors, and is designing an air-sparging/soil-vapor-extraction system to treat the source area.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502332"},
+      {"label": "EPA Record of Decision", "url": "https://semspub.epa.gov/work/05/205549.pdf"}
+    ]
+  },
+  {
+    "epa_id": "MID980703011",
+    "site_name": "Sturgis Municipal Wells",
+    "narrative": "The Sturgis Municipal Wells site involves groundwater beneath the city of Sturgis that became contaminated with volatile organic compounds, including trichloroethylene (TCE) and tetrachloroethylene (PCE), also found in soil. The contamination was discovered in 1982, and the site was placed on the National Priorities List in 1984; the two properties identified as likely sources were the Kirsch Company Plant 1 and the former Wade Electric property. The situation strained the municipal supply — in 1983 the city asked residents to limit water use, and in 1984 it brought a new well online while contaminated wells were taken out of service. A remedial investigation by the State of Michigan from 1987 to 1991 mapped the source areas and plumes, and cleanup in the 1990s included soil vapor extraction at the Kirsch property, pump-and-treat groundwater systems, and use/access restrictions. In late 2024, PFAS sampling at both source areas found wells exceeding Michigan groundwater cleanup criteria.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0503000"},
+      {"label": "Michigan EGLE PFAS Response", "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/st-joseph-county/sturgis-municipal-wells-superfund-site"},
+      {"label": "EPA Five-Year Review", "url": "https://semspub.epa.gov/work/05/702655.pdf"}
+    ]
+  },
+  {
+    "epa_id": "MID980678627",
+    "site_name": "Cannelton Industries, Inc.",
+    "narrative": "The roughly 70-acre Cannelton Industries site in Sault Sainte Marie, in Michigan's Upper Peninsula, is a former tannery on the St. Mary's River. The Northwestern Leather Company operated a tannery and processed animal hides there from 1900 to 1958, and its waste-disposal operations contaminated soils, sediments, and surface water with heavy metals including chromium, lead, cadmium, arsenic, and mercury. The long-term remedy involved excavating and disposing of contaminated material and soil at off-site landfills, along with water treatment, monitoring, and land-use restrictions, with construction of that remedy in 1999. In 2006 and 2007, additional dredging in Tannery Bay and nearby wetlands removed over 40,000 cubic yards of contaminated sediment, including roughly one million pounds of chromium and about 70 pounds of mercury. Subsequent sampling in 2014 still detected mercury and chromium in Tannery Bay, prompting continued monitoring.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502931"},
+      {"label": "EPA Record of Decision", "url": "https://www.osti.gov/biblio/5762926"}
+    ]
+  },
+  {
+    "epa_id": "MID000722439",
+    "site_name": "Velsicol Chemical Corp.(Michigan)",
+    "narrative": "This is EPA's listing for the Velsicol Chemical (formerly Michigan Chemical) plant in St. Louis, the site of the worst chemical-contamination episode in Michigan history. In 1973 the company accidentally shipped the flame retardant PBB (FireMaster) in place of a cattle-feed supplement to farms across the state, and contaminated meat, milk, and eggs were consumed by millions of Michiganders before the mix-up was traced. The plant, which also manufactured DDT, contaminated the Pine River and groundwater and was ultimately demolished and buried on-site beneath a clay cap. PFAS has since been detected in most site monitoring wells, and multi-generational health effects are still tracked through the MDHHS PBB Registry. (See also the compiled Velsicol Chemical Corp. Superfund Site record.)",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502757"},
+      {"label": "MDHHS PBB Registry", "url": "https://www.michigan.gov/pbbregistry"}
+    ]
+  },
+  {
+    "epa_id": "MID006028062",
+    "site_name": "Rockwell International Corp. (Allegan Plant)",
+    "narrative": "Former Rockwell International manufacturing plant in Allegan. Industrial operations used chlorinated degreasing solvents, principally trichloroethylene (TCE); releases to soil allowed TCE and its anaerobic breakdown products — 1,2-dichloroethene and vinyl chloride — to migrate into the underlying groundwater, forming a contaminant plume addressed under the federal Superfund program with groundwater treatment.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502367"}
+    ]
+  },
+  {
+    "epa_id": "MID005340088",
+    "site_name": "Roto-Finish Co., Inc.",
+    "narrative": "Manufacturer of vibratory finishing and deburring equipment in Kalamazoo. Plant operations contaminated soil and groundwater with a range of volatile organic compounds, including benzene, chlorobenzene, dichloroethanes, ethylbenzene, methylene chloride, trichloroethylene (TCE), and xylenes. The site is on the National Priorities List, with groundwater contamination in the Kalamazoo area addressed under EPA oversight.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502416"}
+    ]
+  },
+  {
+    "epa_id": "MID980476907",
+    "site_name": "Parsons Chemical Works, Inc.",
+    "narrative": "Pesticide formulation and distribution facility in Grand Ledge that operated from 1945 to 1979, manufacturing and packaging DDT, chlordane, aldrin, dieldrin, and other pesticides. Waste handling contaminated soil and groundwater with pesticide residues, arsenic, heavy metals, and VOCs. The site is directly relevant to agricultural pesticide use — it is one of the places where pesticides applied to Michigan farms were formulated — and was remediated under the federal Superfund program.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502755"}
+    ]
+  }
+]
