@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import sqlite3
 import sys
 import time
@@ -90,11 +91,107 @@ def http_get(url: str, *, timeout: int = 60) -> bytes:
 
 
 def download_to(url: str, path: Path, *, timeout: int = 120) -> int:
-    """Download to disk, return byte count."""
+    """Download to disk, return byte count.
+
+    http_get reads the full response before we touch the file, so a failed
+    fetch raises and leaves any existing cache file untouched — which is what
+    makes force-refresh safe (a network blip never destroys good cached data).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     data = http_get(url, timeout=timeout)
     path.write_bytes(data)
     return len(data)
+
+
+def download_stream(
+    url: str,
+    path: Path,
+    *,
+    timeout: int = 600,
+    attempts: int = 4,
+    min_bytes: int = 1,
+    backoff: int = 5,
+) -> int:
+    """Resilient large-file download. Returns the number of bytes written.
+
+    Built for the ~230 MB Water Quality Portal result CSV, which the portal
+    generates on the fly and streams over a connection that sometimes drops near
+    the end (urllib then raises ``IncompleteRead`` and the whole in-memory read
+    is lost). This helper instead:
+
+      * streams the body to a temporary ``.part`` file in 1 MiB chunks, so a
+        huge response never has to fit in memory;
+      * verifies the byte count against ``Content-Length`` when the server sends
+        it, so a silent short read is caught;
+      * retries the *entire* transfer (with linear backoff) on any transient
+        network error;
+      * only on a clean, size-verified download does it atomically move the
+        ``.part`` file into place — a partial transfer never replaces good data.
+
+    We deliberately do NOT attempt HTTP Range "resume": the WQP result endpoint
+    regenerates the CSV per request, so stitching a byte offset from one
+    generation onto another could silently corrupt the file. A clean full retry
+    is the safe choice.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(path.name + ".part")
+    last_err: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        if part.exists():
+            try:
+                part.unlink()
+            except OSError:
+                pass
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                cl = resp.headers.get("Content-Length")
+                expected = int(cl) if cl and cl.isdigit() else None
+                written = 0
+                with part.open("wb") as fh:
+                    while True:
+                        chunk = resp.read(1 << 20)   # 1 MiB
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+                        written += len(chunk)
+            if expected is not None and written < expected:
+                raise IOError(f"short read: got {written:,} of {expected:,} bytes")
+            if written < min_bytes:
+                raise IOError(f"suspiciously small download: {written:,} bytes")
+            part.replace(path)                       # atomic within the dir
+            return written
+        except Exception as e:                        # noqa: BLE001 — retry anything transient
+            last_err = e
+            if part.exists():
+                try:
+                    part.unlink()
+                except OSError:
+                    pass
+            if attempt < attempts:
+                wait = backoff * attempt
+                log(f"  download attempt {attempt}/{attempts} failed ({e}); "
+                    f"retrying in {wait}s", level="warn")
+                time.sleep(wait)
+
+    assert last_err is not None
+    raise last_err
+
+
+# When true, cached files for *mutable* sources (currently the Water Quality
+# Portal sample CSVs) are re-downloaded instead of reused. refresh_data.py sets
+# this. Immutable/archival caches (finalized USGS EPest files, historical IEM
+# wind, watershed boundaries) are intentionally NOT force-refreshed — re-running
+# their loader still picks up any newly *configured* years without re-pulling
+# hundreds of MB that never change.
+FORCE_REFRESH = os.environ.get("REFRESH_FORCE", "") == "1"
+
+
+def _need_download(path: Path, min_size: int, *, force: bool = False) -> bool:
+    """True if the cache file is missing, implausibly small, or a force-refresh
+    of a mutable source was requested."""
+    return force or (not path.exists()) or path.stat().st_size < min_size
 
 
 # ---------- data source bookkeeping ----------
@@ -107,22 +204,48 @@ def record_source(
     status: str,
     rows_loaded: int = 0,
     notes: str = "",
+    *,
+    coverage_start: str | None = None,
+    coverage_end: str | None = None,
+    refresh_status: str | None = None,
+    refresh_interval_months: int | None = None,
+    last_success: str | None = None,
+    last_attempt: str | None = None,
 ) -> None:
+    """Upsert a data_sources row.
+
+    The seven base columns (title..last_updated) are always overwritten. The
+    optional provenance/freshness columns are only written when a non-None value
+    is supplied — otherwise the existing value is preserved via COALESCE, so an
+    ordinary loader call never clobbers freshness metadata that refresh_data.py
+    stamped on a previous run.
+    """
     conn.execute(
         """
-        INSERT INTO data_sources(source_id, title, url, status, rows_loaded, notes, last_updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO data_sources(
+            source_id, title, url, status, rows_loaded, notes, last_updated,
+            coverage_start, coverage_end, refresh_status,
+            refresh_interval_months, last_success, last_attempt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id) DO UPDATE SET
             title=excluded.title,
             url=excluded.url,
             status=excluded.status,
             rows_loaded=excluded.rows_loaded,
             notes=excluded.notes,
-            last_updated=excluded.last_updated
+            last_updated=excluded.last_updated,
+            coverage_start=COALESCE(excluded.coverage_start, data_sources.coverage_start),
+            coverage_end=COALESCE(excluded.coverage_end, data_sources.coverage_end),
+            refresh_status=COALESCE(excluded.refresh_status, data_sources.refresh_status),
+            refresh_interval_months=COALESCE(excluded.refresh_interval_months, data_sources.refresh_interval_months),
+            last_success=COALESCE(excluded.last_success, data_sources.last_success),
+            last_attempt=COALESCE(excluded.last_attempt, data_sources.last_attempt)
         """,
         (
             source_id, title, url, status, rows_loaded, notes,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            coverage_start, coverage_end, refresh_status,
+            refresh_interval_months, last_success, last_attempt,
         ),
     )
 
@@ -335,53 +458,74 @@ def load_nass_crop_acreage(conn: sqlite3.Connection) -> int:
 
     log("Querying USDA NASS Quick Stats for Michigan crop acreage...")
     inserted = 0
+    crops_ok = 0
+    # Field crops report "AREA HARVESTED"; tree/bush fruits report "AREA
+    # BEARING" (and NASS returns HTTP 400 for a param combo that matches no
+    # records), so try each category in turn and keep the first that has data.
+    stat_cats = ["AREA HARVESTED", "AREA BEARING", "AREA GROWN", "AREA PLANTED"]
     for crop in NASS_CROPS:
-        params = {
-            "key": NASS_API_KEY,
-            "source_desc": "SURVEY",
-            "sector_desc": "CROPS",
-            "commodity_desc": crop,
-            "statisticcat_desc": "AREA HARVESTED",
-            "unit_desc": "ACRES",
-            "agg_level_desc": "COUNTY",
-            "state_alpha": "MI",
-            "format": "JSON",
-        }
-        qs = "&".join(f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items())
-        url = f"{NASS_API_URL}?{qs}"
-        try:
-            raw = http_get(url, timeout=60)
-            data = json.loads(raw).get("data", [])
-        except Exception as e:
-            log(f"  NASS {crop}: {e}", level="warn")
-            continue
-        cur = conn.cursor()
-        for rec in data:
+        crop_rows = 0
+        for stat in stat_cats:
+            params = {
+                "key": NASS_API_KEY,
+                "source_desc": "SURVEY",
+                "sector_desc": "CROPS",
+                "commodity_desc": crop,
+                "statisticcat_desc": stat,
+                "unit_desc": "ACRES",
+                "agg_level_desc": "COUNTY",
+                "state_alpha": "MI",
+                "format": "JSON",
+            }
+            qs = "&".join(f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items())
+            url = f"{NASS_API_URL}?{qs}"
             try:
-                year = int(rec.get("year", 0))
-                county_code = rec.get("county_code", "")
-                if not county_code or len(county_code) != 3:
-                    continue
-                fips = f"{MICHIGAN_STATE_FIPS}{county_code}"
-                val = rec.get("Value", "").replace(",", "")
-                if val in ("(D)", "(NA)", "(Z)", ""):
-                    continue
-                acres = float(val)
-            except (ValueError, AttributeError):
+                raw = http_get(url, timeout=60)
+                data = json.loads(raw).get("data", [])
+            except urllib.error.HTTPError as e:
+                if e.code == 400:
+                    continue      # no records for this statistic — try the next
+                log(f"  NASS {crop}: {e}", level="warn")
+                break
+            except Exception as e:
+                log(f"  NASS {crop}: {e}", level="warn")
+                break
+            if not data:
                 continue
-            cur.execute(
-                """INSERT OR REPLACE INTO crop_acreage(county_fips, crop, year,
-                   acres_harvested, acres_planted) VALUES (?,?,?,?,?)""",
-                (fips, crop, year, acres, None),
-            )
-            inserted += 1
-        conn.commit()
-        log(f"  {crop}: +{len(data)} rows", level="ok")
-        time.sleep(0.4)  # be polite to the API
+            cur = conn.cursor()
+            for rec in data:
+                try:
+                    year = int(rec.get("year", 0))
+                    county_code = rec.get("county_code", "")
+                    if not county_code or len(county_code) != 3:
+                        continue
+                    fips = f"{MICHIGAN_STATE_FIPS}{county_code}"
+                    val = rec.get("Value", "").replace(",", "")
+                    if val in ("(D)", "(NA)", "(Z)", ""):
+                        continue
+                    acres = float(val)
+                except (ValueError, AttributeError):
+                    continue
+                cur.execute(
+                    """INSERT OR REPLACE INTO crop_acreage(county_fips, crop, year,
+                       acres_harvested, acres_planted) VALUES (?,?,?,?,?)""",
+                    (fips, crop, year, acres, None),
+                )
+                inserted += 1
+                crop_rows += 1
+            conn.commit()
+            log(f"  {crop} ({stat.lower()}): +{crop_rows} county rows", level="ok")
+            crops_ok += 1
+            break            # got data for this crop; don't try more categories
+        else:
+            log(f"  {crop}: no county-level acreage published by NASS", level="warn")
+        time.sleep(0.4)      # be polite to the API
 
     record_source(conn, "nass_acreage",
                   "USDA NASS Quick Stats — Michigan crop acreage",
-                  NASS_API_URL, "ok", inserted, "Survey data, county-level, area harvested.")
+                  NASS_API_URL, "ok", inserted,
+                  f"Survey data, county-level, area harvested/bearing. "
+                  f"{crops_ok} of {len(NASS_CROPS)} crops available.")
     conn.commit()
     return inserted
 
@@ -934,80 +1078,157 @@ def _seed_prevalence_baseline(conn, county_lookup: dict[str, str]) -> None:
 
 # ---------- 8. Water quality (Water Quality Portal + watersheds + NAWQA) ----------
 
-def load_water_quality(conn: sqlite3.Connection) -> tuple[int, int]:
-    """Download MI pesticide sample data from the USGS/EPA Water Quality
-    Portal, ingest stations + results into SQLite, plus hardcoded NAWQA
-    stream sites. Returns (sites_loaded, results_loaded)."""
-    log("Loading water quality (Water Quality Portal + USGS NAWQA streams)...")
+# When true, load_water_quality ignores any existing data and re-pulls the full
+# WQP result set (used to backfill samples uploaded late for old dates, which a
+# date-bounded incremental pull would miss). refresh_data.py --full sets this.
+WQP_FULL_REBUILD = os.environ.get("WQP_FULL_REBUILD", "") == "1"
+
+# Real WQP sample dates are ISO YYYY-MM-DD; the hardcoded NAWQA rows use the
+# literal '2002-2005' range, so this GLOB isolates genuine WQP-sourced dates
+# (used to compute the incremental watermark).
+_WQP_ISO_GLOB = "[12][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+
+
+def _wqp_date(iso: str) -> str:
+    """Convert an ISO 'YYYY-MM-DD' date to WQP's 'MM-DD-YYYY' query format."""
+    y, m, d = iso.split("-")
+    return f"{m}-{d}-{y}"
+
+
+def load_water_quality(conn: sqlite3.Connection, *,
+                       incremental: bool | None = None) -> tuple[int, int]:
+    """Download MI pesticide sample data from the USGS/EPA Water Quality Portal,
+    ingest stations + results, plus hardcoded NAWQA stream sites. Returns
+    (total_sites, total_results).
+
+    If the database already holds WQP results this runs **incrementally**: it
+    downloads only samples on/after the latest sample date already stored
+    (WQP ``startDateLo``) and appends them, instead of re-pulling the full
+    ~230 MB result set. This keeps each refresh to a few MB and avoids the
+    portal's rate-limiting of big bursts. Pass ``incremental=False`` (or set the
+    WQP_FULL_REBUILD flag) to force a full rebuild.
+
+    Caveat: date-bounded pulls key off the *sample* date, so a sample collected
+    before the watermark but uploaded to WQP later can be missed. Run a periodic
+    full rebuild (``refresh_data.py --source water_quality --full``) to backfill.
+    """
     cur = conn.cursor()
-    cur.execute("DELETE FROM water_quality_sites")
-    cur.execute("DELETE FROM water_quality_results")
-    conn.commit()
+    existing = cur.execute(
+        f"SELECT COUNT(*), MAX(sample_date) FROM water_quality_results "
+        f"WHERE sample_date GLOB '{_WQP_ISO_GLOB}'"
+    ).fetchone()
+    have_wqp = (existing[0] or 0) > 0
+    if incremental is None:
+        incremental = have_wqp and not WQP_FULL_REBUILD
+    watermark = existing[1] if incremental else None
 
-    sites_loaded = 0
-    results_loaded = 0
+    mode = f"incremental since {watermark}" if incremental else "full rebuild"
+    log(f"Loading water quality ({mode}; WQP + NAWQA streams)...")
 
-    # --- WQP stations ---
+    if not incremental:
+        cur.execute("DELETE FROM water_quality_sites")
+        cur.execute("DELETE FROM water_quality_results")
+        conn.commit()
+
+    new_results = 0
+    wqp_fetch_ok = False
+
+    # --- WQP stations (small; pulled fresh on incremental, idempotent upsert) ---
     stations_path = DATA_DIR / "wqp_stations.csv"
     try:
-        if not stations_path.exists() or stations_path.stat().st_size < 1000:
-            size = download_to(WQP_STATION_URL, stations_path, timeout=300)
+        if incremental or _need_download(stations_path, 1000, force=FORCE_REFRESH):
+            size = download_stream(WQP_STATION_URL, stations_path,
+                                   timeout=300, attempts=5, backoff=15, min_bytes=1000)
             log(f"  WQP stations: fetched {size/1024:.0f} KB", level="ok")
         else:
             log(f"  WQP stations: cached ({stations_path.stat().st_size/1024:.0f} KB)")
-        sites_loaded = _ingest_wqp_stations(conn, stations_path)
-        log(f"  inserted {sites_loaded:,} WQP stations", level="ok")
+        n = _ingest_wqp_stations(conn, stations_path)
+        log(f"  upserted {n:,} WQP stations", level="ok")
     except Exception as e:
-        log(f"  WQP station download failed: {e}", level="warn")
+        log(f"  WQP station download failed (keeping existing): {e}", level="warn")
 
-    # --- WQP results (can be large) ---
-    results_path = DATA_DIR / "wqp_results.csv"
-    try:
-        if not results_path.exists() or results_path.stat().st_size < 1000:
-            size = download_to(WQP_RESULT_URL, results_path, timeout=600)
-            log(f"  WQP results: fetched {size/1_000_000:.1f} MB", level="ok")
-        else:
-            log(f"  WQP results: cached ({results_path.stat().st_size/1_000_000:.1f} MB)")
-        results_loaded = _ingest_wqp_results(conn, results_path)
-        log(f"  inserted {results_loaded:,} WQP result rows", level="ok")
-    except Exception as e:
-        log(f"  WQP result download failed: {e}", level="warn")
+    # --- WQP results ---
+    if incremental and watermark:
+        # Fetch only samples on/after the watermark day. Re-fetch that whole day
+        # (delete its existing rows first) so a day that was only partially
+        # loaded last time can't leave duplicates or gaps.
+        delta_path = DATA_DIR / "wqp_results_delta.csv"
+        url = WQP_RESULT_URL + f"&startDateLo={_wqp_date(watermark)}"
+        try:
+            size = download_stream(url, delta_path, timeout=600,
+                                   attempts=6, backoff=30, min_bytes=1)
+            log(f"  WQP delta (samples >= {watermark}): fetched {size/1024:.0f} KB", level="ok")
+            wqp_fetch_ok = True
+            cur.execute("DELETE FROM water_quality_results WHERE sample_date = ?",
+                        (watermark,))
+            conn.commit()
+            new_results = _ingest_wqp_results(conn, delta_path)
+            log(f"  appended {new_results:,} WQP result rows since {watermark}", level="ok")
+            try:
+                delta_path.unlink()
+            except OSError:
+                pass
+        except Exception as e:
+            log(f"  WQP delta download failed (keeping existing): {e}", level="warn")
+    else:
+        results_path = DATA_DIR / "wqp_results.csv"
+        try:
+            if _need_download(results_path, 1000, force=FORCE_REFRESH):
+                # The portal generates this ~230 MB CSV on the fly and rate-limits
+                # bursts, so be patient: a longer backoff lets a throttle window
+                # clear between attempts (backoff*attempt => 30/60/.../180 s).
+                size = download_stream(WQP_RESULT_URL, results_path,
+                                       timeout=600, attempts=6, backoff=30,
+                                       min_bytes=100_000)
+                log(f"  WQP results: fetched {size/1_000_000:.1f} MB", level="ok")
+            else:
+                log(f"  WQP results: cached ({results_path.stat().st_size/1_000_000:.1f} MB)")
+            new_results = _ingest_wqp_results(conn, results_path)
+            log(f"  inserted {new_results:,} WQP result rows", level="ok")
+            wqp_fetch_ok = True
+        except Exception as e:
+            log(f"  WQP result download failed (keeping existing): {e}", level="warn")
 
     # --- NAWQA hardcoded MI stream sites (USGS SIR 2007-5077) ---
-    for s in NAWQA_MI_STREAMS:
-        cur.execute(
-            """INSERT OR REPLACE INTO water_quality_sites(
-                  site_id, site_name, site_type, latitude, longitude,
-                  huc8, organization, source)
-               VALUES (?, ?, 'Stream', ?, ?, ?, 'USGS-NAWQA', 'NAWQA_SIR_2007-5077')""",
-            (s["site_id"], s["name"], s["lat"], s["lon"], s["huc8"]),
-        )
-        for compound in s["pesticides_detected"]:
-            threshold, _ = threshold_for(compound)
+    # Only on a full rebuild: on incremental they're already present, and their
+    # result rows have no unique key so re-inserting would duplicate them.
+    if not incremental:
+        for s in NAWQA_MI_STREAMS:
             cur.execute(
-                """INSERT INTO water_quality_results(
-                      site_id, sample_date, compound, result_value, unit,
-                      detected, exceeds_mcl, mcl_value, medium)
-                   VALUES (?, '2002-2005', ?, NULL, 'unspecified',
-                           1, 0, ?, 'Water')""",
-                (s["site_id"], compound, threshold),
+                """INSERT OR REPLACE INTO water_quality_sites(
+                      site_id, site_name, site_type, latitude, longitude,
+                      huc8, organization, source)
+                   VALUES (?, ?, 'Stream', ?, ?, ?, 'USGS-NAWQA', 'NAWQA_SIR_2007-5077')""",
+                (s["site_id"], s["name"], s["lat"], s["lon"], s["huc8"]),
             )
-            results_loaded += 1
-        sites_loaded += 1
-    conn.commit()
+            for compound in s["pesticides_detected"]:
+                threshold, _ = threshold_for(compound)
+                cur.execute(
+                    """INSERT INTO water_quality_results(
+                          site_id, sample_date, compound, result_value, unit,
+                          detected, exceeds_mcl, mcl_value, medium)
+                       VALUES (?, '2002-2005', ?, NULL, 'unspecified',
+                               1, 0, ?, 'Water')""",
+                    (s["site_id"], compound, threshold),
+                )
+        conn.commit()
 
-    # --- watersheds ---
+    # --- watersheds (idempotent; cached geojson) ---
     huc8_count = load_watersheds(conn)
     log(f"  watersheds: {huc8_count} HUC-8 polygons", level="ok")
 
+    total_sites = cur.execute("SELECT COUNT(*) FROM water_quality_sites").fetchone()[0]
+    total_results = cur.execute("SELECT COUNT(*) FROM water_quality_results").fetchone()[0]
+    detail = (f"incremental (+{new_results:,} new)" if incremental
+              else "full load")
     record_source(
         conn, "wqp",
         "USGS / EPA Water Quality Portal — Michigan pesticide samples",
         "https://www.waterqualitydata.us/",
-        "ok" if results_loaded else "unavailable",
-        results_loaded,
-        f"{sites_loaded} stations, {results_loaded:,} sample-results "
-        f"(MCL-based exceedance flagging applied to known compounds).",
+        "ok" if wqp_fetch_ok else "unavailable",
+        total_results,
+        f"{total_sites} stations, {total_results:,} sample-results — {detail}. "
+        f"MCL-based exceedance flagging applied to known compounds.",
     )
     record_source(
         conn, "nawqa_streams",
@@ -1040,7 +1261,7 @@ def load_water_quality(conn: sqlite3.Connection) -> tuple[int, int]:
         "MCL-violation data accessible through SDWIS; integration not bundled.",
     )
     conn.commit()
-    return sites_loaded, results_loaded
+    return total_sites, total_results
 
 
 def _ingest_wqp_stations(conn: sqlite3.Connection, path: Path) -> int:
@@ -2093,6 +2314,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative_source TEXT")
         conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative_refs TEXT")
         conn.commit()
+
+    # data_sources: add provenance/freshness columns used by refresh_data.py.
+    dcols = {r[1] for r in conn.execute("PRAGMA table_info(data_sources)")}
+    for col, decl in (
+        ("coverage_start", "TEXT"),
+        ("coverage_end", "TEXT"),
+        ("refresh_status", "TEXT"),
+        ("refresh_interval_months", "INTEGER"),
+        ("last_success", "TEXT"),
+        ("last_attempt", "TEXT"),
+    ):
+        if dcols and col not in dcols:
+            log(f"schema migration: adding data_sources.{col}", level="warn")
+            conn.execute(f"ALTER TABLE data_sources ADD COLUMN {col} {decl}")
+    conn.commit()
 
 
 def run() -> int:

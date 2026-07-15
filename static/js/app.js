@@ -33,6 +33,7 @@
     showCwdFarmed: false,
     showCwdSurv: false,
     correlation: { rows: [], sortKey: 'total_pesticide_lbs', sortDir: 'desc', onlyCwd: false },
+    explore: { vars: null, wired: false, chart: null },
     water: {
       sitesLayer: null, heatLayer: null, wsLayer: null,
       showSites: false, showHeat: false, showWatersheds: false,
@@ -374,12 +375,15 @@
       }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
-        const valLabel = state.normalize === 'per_sq_mile' ? 'lbs / mi²' : 'Value';
-        return c
-          ? `<div><span class="muted">${valLabel}:</span> <span class="v">${fmtLbs(c.value)}</span></div>
+        const valLabel = state.normalize === 'per_sq_mile' ? 'lbs / mi²'
+          : state.normalize === 'per_acre' ? 'lbs / cropland acre' : 'Value';
+        if (!c) return '<div class="muted">No pesticide data</div>';
+        const acreLine = (state.normalize === 'per_acre' && c.cropland_acres)
+          ? `<div><span class="muted">Cropland:</span> <span class="v">${Math.round(c.cropland_acres).toLocaleString()} ac</span></div>` : '';
+        return `<div><span class="muted">${valLabel}:</span> <span class="v">${fmtLbs(c.value)}</span></div>
              <div><span class="muted">Total:</span> <span class="v">${fmtLbs(c.total_lbs)}</span></div>
-             <div><span class="muted">Compounds:</span> <span class="v">${c.compound_count}</span></div>`
-          : '<div class="muted">No pesticide data</div>';
+             ${acreLine}
+             <div><span class="muted">Compounds:</span> <span class="v">${c.compound_count}</span></div>`;
       }
     }
   }
@@ -456,7 +460,10 @@
           }
         }
         note.textContent = state.normalize === 'per_sq_mile'
-          ? 'lbs per square mile (lower → higher)' : 'lbs applied (lower → higher)';
+          ? 'lbs per square mile (lower → higher)'
+          : state.normalize === 'per_acre'
+          ? 'lbs per cropland acre — urban counties blank (lower → higher)'
+          : 'lbs applied (lower → higher)';
         break;
       }
       case 'cwd': {
@@ -813,10 +820,13 @@
           ${site.latitude.toFixed(3)}, ${site.longitude.toFixed(3)}
         </div>
         <table>
-          <tr><th></th><th class="right">Samples</th><th class="right">Detections</th><th class="right">Exc.</th></tr>
+          <tr><th></th>
+            <th class="right" data-tip="How many water samples were tested for this chemical.">Samples</th>
+            <th class="right" data-tip="How many of those samples actually contained the chemical (above the detection limit).">Detections</th>
+            <th class="right" data-tip="How many samples exceeded the EPA legal drinking-water limit (MCL).">Exc.</th></tr>
           ${rows.map((r) => `
             <tr class="${r.exceedances ? 'exceeds' : (r.detections ? 'detected' : '')}">
-              <td>${r.compound}${r.mcl ? ` <span class="wq-meta">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
+              <td>${r.compound}${r.mcl ? ` <span class="wq-meta" data-gloss="MCL">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
               <td class="right">${r.samples}</td>
               <td class="right">${r.detections}</td>
               <td class="right">${r.exceedances}</td>
@@ -1335,7 +1345,8 @@
       ? row('Affected water:', s.affected_waterways.join(', ')) : '';
     const acounties = (s.affected_counties || []).length
       ? row('Affected counties:', s.affected_counties.join(', ')) : '';
-    const hrs = s.hrs_score != null ? row('HRS score:', `${s.hrs_score.toFixed(2)} / 100`) : '';
+    const hrs = s.hrs_score != null
+      ? row('HRS score:', `${s.hrs_score.toFixed(2)} / 100 ${PMGloss.infoIcon('HRS score')}`) : '';
     const generated = s.desc_source === 'generated';
     const fetched = s.narrative_source === 'fetched' && s.narrative;
 
@@ -1777,21 +1788,13 @@
       else if (state.selectedFips) showDriftZone(state.selectedFips);
     });
 
-    // View switch (map / correlation)
+    // View switch (map / explore / correlation / …), with shareable #hash deep links.
     document.querySelectorAll('#view-switch button').forEach((b) => {
-      b.addEventListener('click', () => {
-        document.querySelectorAll('#view-switch button').forEach((x) => x.classList.remove('active'));
-        b.classList.add('active');
-        const v = b.dataset.view;
-        $('view-map').classList.toggle('hidden', v !== 'map');
-        $('view-correlation').classList.toggle('hidden', v !== 'correlation');
-        $('view-respiratory').classList.toggle('hidden', v !== 'respiratory');
-        $('view-cancer').classList.toggle('hidden', v !== 'cancer');
-        if (v === 'correlation') renderCorrelation();
-        else if (v === 'respiratory') renderRespiratory();
-        else if (v === 'cancer') renderCancer();
-        else state.map.invalidateSize();
-      });
+      b.addEventListener('click', () => switchView(b.dataset.view, true));
+    });
+    window.addEventListener('hashchange', () => {
+      const v = (location.hash || '').replace('#', '');
+      if (v && document.getElementById('view-' + v)) switchView(v, false);
     });
 
     // Correlation view interactivity
@@ -1824,6 +1827,38 @@
     });
 
     bindSearch();
+  }
+
+  // Intro modal is wired in DOMContentLoaded (not bindEvents) so its buttons
+  // work even while the map data is still loading on first visit.
+  const INTRO_KEY = 'pm_intro_seen_v1';
+  function wireIntro() {
+    $('open-intro').addEventListener('click', () => show($('intro-modal')));
+    $('intro-close').addEventListener('click', () => hide($('intro-modal')));
+    $('intro-start').addEventListener('click', dismissIntro);
+    $('intro-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'intro-modal') hide($('intro-modal'));
+    });
+    $('intro-sources-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      hide($('intro-modal'));
+      openSources();
+    });
+  }
+  function dismissIntro() {
+    // Persist dismissal only if the viewer left "don't show again" checked.
+    if ($('intro-dontshow').checked) {
+      try { localStorage.setItem(INTRO_KEY, '1'); } catch (e) {}
+    }
+    hide($('intro-modal'));
+  }
+  function maybeShowIntroOnFirstVisit() {
+    // Skip the first-visit intro when arriving via a shared deep link (query
+    // params or a #view hash) — the visitor wanted a specific view, not onboarding.
+    if (location.search.length > 1 || (location.hash && location.hash !== '#')) return;
+    let seen = false;
+    try { seen = localStorage.getItem(INTRO_KEY) === '1'; } catch (e) {}
+    if (!seen) show($('intro-modal'));
   }
 
   function markFeatured(name) {
@@ -1917,16 +1952,43 @@
 
   // ---------- sources modal ----------
   function openSources() {
+    // "Data current as of" banner — the most recent successful refresh.
+    const asOf = state.meta.data_current_as_of;
+    const banner = $('sources-asof');
+    if (banner) {
+      banner.textContent = asOf
+        ? `Data current as of ${asOf.slice(0, 10)}`
+        : 'Data has not been refreshed yet — run refresh_data.py to populate freshness.';
+    }
+
     const tbl = $('sources-table');
     tbl.innerHTML =
-      '<tr><th>Source</th><th>Status</th><th>Rows</th><th>Updated</th><th>Notes</th></tr>';
+      '<tr><th>Source</th><th>Status</th><th>Coverage</th><th>Rows</th>' +
+      '<th>Last updated</th><th>Notes</th></tr>';
     for (const s of state.meta.data_sources) {
       const tr = document.createElement('tr');
+      // Coverage window (from the refreshed data), e.g. "2018–2022".
+      const cov = s.coverage_start
+        ? (s.coverage_end && s.coverage_end !== s.coverage_start
+            ? `${s.coverage_start}–${s.coverage_end}`
+            : s.coverage_start)
+        : '';
+      // Prefer last_success (a real refresh) over last_updated for the date.
+      const updated = (s.last_success || s.last_updated || '').slice(0, 10);
+      const staleTag = s.stale
+        ? ' <span class="stale-flag" title="Older than its expected refresh '
+          + 'interval — data may be out of date">stale</span>'
+        : '';
+      const failTag = s.refresh_status === 'failed'
+        ? ' <span class="stale-flag" title="Last refresh attempt failed; '
+          + 'showing the last good data">refresh failed</span>'
+        : '';
       tr.innerHTML = `
         <td><a href="${s.url}" target="_blank" rel="noopener">${s.title}</a></td>
         <td><span class="status status-${s.status}">${s.status}</span></td>
+        <td class="muted small">${cov}</td>
         <td>${(s.rows_loaded || 0).toLocaleString()}</td>
-        <td class="muted small">${(s.last_updated || '').slice(0, 10)}</td>
+        <td class="muted small">${updated}${staleTag}${failTag}</td>
         <td class="small">${s.notes || ''}</td>`;
       tbl.appendChild(tr);
     }
@@ -1993,33 +2055,37 @@
     const data = await api('/api/correlation/scatter', { metric });
     const pos = data.points
       .filter((p) => p.cwd_positive && p.x != null && p.y != null)
-      .map((p) => ({ x: p.x, y: p.y, label: p.county }));
+      .map((p) => ({ x: p.x, y: p.y, label: p.county, ur: 'CWD-positive' }));
     const neg = data.points
       .filter((p) => !p.cwd_positive && p.x != null && p.y != null)
-      .map((p) => ({ x: p.x, y: p.y, label: p.county }));
+      .map((p) => ({ x: p.x, y: p.y, label: p.county, ur: 'CWD-negative' }));
     const datasets = [
-      { label: 'CWD-positive', data: pos, backgroundColor: '#f85149', pointRadius: 5 },
-      { label: 'CWD-negative', data: neg, backgroundColor: 'rgba(154,164,178,.6)', pointRadius: 4 },
+      { label: `CWD-positive counties (${pos.length})`, data: pos,
+        backgroundColor: '#f85149', pointRadius: 6, pointHoverRadius: 9 },
+      { label: `CWD-negative counties (${neg.length})`, data: neg,
+        backgroundColor: 'rgba(154,164,178,.7)', pointRadius: 6, pointHoverRadius: 9 },
     ];
     if (data.trend_line) {
       datasets.push({
-        label: `OLS fit (r=${data.fit.r.toFixed(2)})`,
-        data: data.trend_line,
-        type: 'line',
-        borderColor: '#3fb950',
-        backgroundColor: 'transparent',
-        borderDash: [6, 4],
-        pointRadius: 0,
-        fill: false,
+        label: 'Overall trend', data: data.trend_line, type: 'line',
+        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2,
+        backgroundColor: 'transparent', borderDash: [6, 4], pointRadius: 0, fill: false,
       });
     }
     PMCharts.destroyIfExists(state.charts.scatter);
-    state.charts.scatter = PMCharts.scatter('chart-scatter', datasets);
-    $('scatter-fit').textContent =
+    state.charts.scatter = PMCharts.scatter('chart-scatter', datasets, {
+      xLabel: 'Pesticide applied (lbs)', yLabel: 'Confirmed CWD-positive deer',
+      xName: 'Pesticide', yName: 'CWD-positive deer', yFmt: PMCharts.fmtCount,
+    });
+    // Plain-English reading of the fit, alongside the raw numbers.
+    const info = PMGloss.interpret(data.fit, 'CWD positives');
+    $('scatter-fit').innerHTML =
       data.fit.r == null
-        ? 'Insufficient data for fit.'
-        : `OLS fit: r = ${data.fit.r.toFixed(3)}, R² = ${data.fit.r2.toFixed(3)}, ` +
-          `p = ${data.fit.p_value.toExponential(2)}, n = ${data.fit.n}`;
+        ? 'Not enough data to measure a relationship.'
+        : `${info.r2Sentence} <span class="${info.significant ? 'sr-sig-yes' : 'sr-sig-no'}">`
+          + `${info.pSentence}</span> `
+          + `<span class="muted small">(r = ${data.fit.r.toFixed(3)}, R² = ${data.fit.r2.toFixed(3)}, `
+          + `p = ${fmtP(data.fit.p_value)}, n = ${data.fit.n})</span>`;
   }
 
   async function refreshStatsBox() {
@@ -2043,6 +2109,146 @@
     const sig = d.compounds.map((c) => (c.welch_t_test.p_value ?? 1) < 0.05);
     PMCharts.destroyIfExists(state.charts.compoundBars);
     state.charts.compoundBars = PMCharts.groupedBar('chart-compounds', labels, pos, neg, sig);
+  }
+
+  // Activate one of the top-level views. Central so both button clicks, #hash
+  // deep links, and boot-time restoration go through the same path.
+  const VIEWS = ['map', 'explore', 'correlation', 'respiratory', 'cancer'];
+  function switchView(v, updateHash) {
+    if (!VIEWS.includes(v)) v = 'map';
+    document.querySelectorAll('#view-switch button').forEach((x) =>
+      x.classList.toggle('active', x.dataset.view === v));
+    VIEWS.forEach((name) =>
+      $('view-' + name).classList.toggle('hidden', name !== v));
+    if (v === 'explore') renderExplore();
+    else if (v === 'correlation') renderCorrelation();
+    else if (v === 'respiratory') renderRespiratory();
+    else if (v === 'cancer') renderCancer();
+    else if (state.map) state.map.invalidateSize();
+    if (updateHash) {
+      try { history.replaceState(null, '', v === 'map' ? '#' : '#' + v); } catch (e) {}
+    }
+  }
+
+  // ---------- Unified "Explore correlations" view ----------
+  const fmtR = (v) => (v == null ? '—' : Number(v).toFixed(3));
+  const fmtP = (v) => (v == null ? '—'
+    : v < 0.001 ? Number(v).toExponential(1) : Number(v).toFixed(3));
+
+  async function renderExplore() {
+    const st = state.explore;
+    if (!st.vars) {
+      st.vars = await api('/api/explore/variables');
+      fillExploreSelect($('explore-x'), st.vars.x, st.vars.x_default);
+      fillExploreSelect($('explore-y'), st.vars.y, st.vars.y_default);
+    }
+    if (!st.wired) {
+      st.wired = true;
+      ['explore-x', 'explore-y', 'explore-rural', 'explore-exclude-missing']
+        .forEach((id) => $(id).addEventListener('change', refreshExplore));
+    }
+    await refreshExplore();
+  }
+
+  function fillExploreSelect(sel, items, def) {
+    sel.innerHTML = '';
+    const groups = {};
+    const order = [];
+    for (const it of items) {
+      if (!groups[it.group]) { groups[it.group] = []; order.push(it.group); }
+      groups[it.group].push(it);
+    }
+    for (const g of order) {
+      const og = document.createElement('optgroup');
+      og.label = g;
+      for (const it of groups[g]) {
+        const o = document.createElement('option');
+        o.value = it.key;
+        o.textContent = it.label;
+        og.appendChild(o);
+      }
+      sel.appendChild(og);
+    }
+    if (def) sel.value = def;
+  }
+
+  async function refreshExplore() {
+    const x = $('explore-x').value;
+    const y = $('explore-y').value;
+    const cohort = $('explore-rural').checked ? 'rural' : 'all';
+    const excludeMissing = $('explore-exclude-missing').checked;
+    const d = await api('/api/explore', {
+      x, y, cohort, exclude_missing: excludeMissing ? 1 : 0,
+    });
+
+    const xFmt = d.x.is_count ? PMCharts.fmtCount : PMCharts.fmtLbs;
+    const yFmt = PMCharts.fmtNum;
+    const xLbl = d.x.label, yLbl = d.y.label;
+
+    // Split dots by urban/rural for a clearly-labelled legend.
+    const rural = [], urban = [];
+    for (const p of d.points) {
+      const pt = { x: p.x, y: p.y, label: p.county, ur: p.is_urban ? 'Urban' : 'Rural' };
+      (p.is_urban ? urban : rural).push(pt);
+    }
+    const datasets = [
+      { label: `Rural counties (${rural.length})`, data: rural,
+        backgroundColor: '#3fb950', pointRadius: 6, pointHoverRadius: 9 },
+      { label: `Urban counties (${urban.length})`, data: urban,
+        backgroundColor: '#58a6ff', pointRadius: 6, pointHoverRadius: 9 },
+    ];
+    if (d.trend_line) {
+      datasets.push({
+        label: 'Overall trend', data: d.trend_line, type: 'line',
+        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2, borderDash: [6, 4],
+        pointRadius: 0, fill: false,
+      });
+    }
+    PMCharts.destroyIfExists(state.explore.chart);
+    state.explore.chart = PMCharts.scatter('chart-explore', datasets, {
+      xLabel: `${xLbl} (${d.x.unit})`,
+      yLabel: `${yLbl} — ${d.y.unit}`,
+      xName: xLbl, yName: yLbl, xFmt, yFmt,
+    });
+
+    $('explore-scatter-title').textContent = `${xLbl} vs ${yLbl}`;
+    $('explore-scatter-explainer').innerHTML =
+      `Each dot is one Michigan county. <b>Left-to-right</b> shows ${xLbl.toLowerCase()} ` +
+      `(${d.x.unit}). <b>Bottom-to-top</b> shows ${yLbl.toLowerCase()} (${d.y.unit}). ` +
+      `If dots trend upward from left to right, more ${xLbl.toLowerCase()} is associated ` +
+      `with higher ${yLbl.toLowerCase()} in this data.`;
+
+    renderExploreReadout(d);
+    $('explore-summary').textContent =
+      PMGloss.summarySentence(d.fit, xLbl.toLowerCase(), yLbl.toLowerCase(), cohort);
+    $('explore-caveat').textContent = d.caveat || '';
+  }
+
+  function renderExploreReadout(d) {
+    const el = $('explore-readout');
+    const yNoun = d.y.label.toLowerCase() + ' rates';
+    const info = PMGloss.interpret(d.fit, yNoun);
+    if (!info.ok) {
+      el.innerHTML = `<div class="sr-row">${info.r2Sentence}</div>`;
+      return;
+    }
+    const sigClass = info.significant ? 'sr-sig-yes' : 'sr-sig-no';
+    let html = '';
+    html += `<div class="sr-row"><span class="sr-strong">How strong is the pattern?</span> `
+      + `${info.r2Sentence} ${PMGloss.infoIcon('R-squared')}</div>`;
+    html += `<div class="sr-row"><span class="sr-strong">Is it likely real, or chance?</span> `
+      + `<span class="${sigClass}">${info.pSentence}</span> ${PMGloss.infoIcon('p-value')}</div>`;
+    if (d.quartiles) {
+      const q = d.quartiles;
+      html += `<div class="sr-row">Counties in the <b>top 25%</b> for ${d.x.label.toLowerCase()} `
+        + `average <b>${PMCharts.fmtNum(q.top_mean)}</b> ${d.y.unit}, versus `
+        + `<b>${PMCharts.fmtNum(q.bottom_mean)}</b> in the bottom 25%.</div>`;
+    }
+    html += `<div class="sr-row muted small">Based on ${d.fit.n} counties`
+      + (d.n_excluded_missing ? ` (${d.n_excluded_missing} left out for missing data)` : '')
+      + `. Raw statistics: correlation r = ${fmtR(d.fit.r)}, `
+      + `R² = ${fmtR(d.fit.r2)}, p-value = ${fmtP(d.fit.p_value)}.</div>`;
+    el.innerHTML = html;
   }
 
   // ---------- Respiratory tab ----------
@@ -2096,35 +2302,32 @@
         exclude_wayne: state.resp.excludeWayne ? '1' : '',
       }),
     ]);
-    const urban = scatter.points.filter((p) => p.is_urban && p.x != null && p.y != null)
-                                .map((p) => ({ x: p.x, y: p.y, label: p.county }));
-    const rural = scatter.points.filter((p) => !p.is_urban && p.x != null && p.y != null)
-                                .map((p) => ({ x: p.x, y: p.y, label: p.county }));
+    const mk = (p) => ({ x: p.x, y: p.y, label: p.county, ur: p.is_urban ? 'Urban' : 'Rural' });
+    const urban = scatter.points.filter((p) => p.is_urban && p.x != null && p.y != null).map(mk);
+    const rural = scatter.points.filter((p) => !p.is_urban && p.x != null && p.y != null).map(mk);
     const fit = scatter.fit || {};
-    const fitText = (fit.r != null)
-      ? `r=${fit.r.toFixed(2)}, R²=${fit.r2.toFixed(2)}` : 'no fit';
+    const respLabel = labelForRespMetric(state.resp.scatterResp);
+    const pestLabel = labelForPestMetric(state.resp.scatterPest);
     const datasets = [
-      { label: 'Urban (population > 100k)',
-        data: urban, backgroundColor: '#8db0ff', pointRadius: 5 },
-      { label: 'Rural',
-        data: rural, backgroundColor: '#5dd66f', pointRadius: 4 },
+      { label: `Rural counties (${rural.length})`,
+        data: rural, backgroundColor: '#3fb950', pointRadius: 6, pointHoverRadius: 9 },
+      { label: `Urban counties (${urban.length})`,
+        data: urban, backgroundColor: '#58a6ff', pointRadius: 6, pointHoverRadius: 9 },
     ];
     if (scatter.trend_line && fit.r != null) {
       datasets.push({
-        label: `OLS fit · ${fitText}`,
+        label: 'Overall trend',
         data: scatter.trend_line, type: 'line',
-        borderColor: '#bfb4f0', backgroundColor: 'transparent',
+        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2,
         borderDash: [6, 4], pointRadius: 0, fill: false,
       });
     }
     PMCharts.destroyIfExists(state.charts.respScatter);
-    state.charts.respScatter = PMCharts.scatter('chart-resp-scatter', datasets);
-    if (state.charts.respScatter) {
-      const c = state.charts.respScatter;
-      c.options.scales.y.title.text = labelForRespMetric(state.resp.scatterResp);
-      c.options.scales.x.title.text = `pesticide (${labelForPestMetric(state.resp.scatterPest)})`;
-      c.update();
-    }
+    state.charts.respScatter = PMCharts.scatter('chart-resp-scatter', datasets, {
+      xLabel: `Pesticide applied — ${pestLabel} (lbs)`,
+      yLabel: respLabel,
+      xName: 'Pesticide', yName: respLabel, yFmt: PMCharts.fmtNum,
+    });
     // One-sentence quartile summary below the chart.
     const q = stats.quartile_comparison || {};
     const summary = $('resp-summary');
@@ -2282,38 +2485,31 @@
 
   async function refreshCancerScatter() {
     const d = await api('/api/correlation/cancer', cancerScatterParams());
-    const urban = d.points.filter((p) => p.is_urban).map((p) => ({ x: p.x, y: p.y, label: p.county }));
-    const rural = d.points.filter((p) => !p.is_urban).map((p) => ({ x: p.x, y: p.y, label: p.county }));
+    const isCount = (d.x_label || '').includes('(count)');
+    const mk = (p) => ({ x: p.x, y: p.y, label: p.county, ur: p.is_urban ? 'Urban' : 'Rural' });
+    const urban = d.points.filter((p) => p.is_urban).map(mk);
+    const rural = d.points.filter((p) => !p.is_urban).map(mk);
     const fit = d.fit || {};
-    const fitText = (fit.r != null) ? `r=${fit.r.toFixed(2)}, R²=${fit.r2.toFixed(2)}` : 'no fit';
     const datasets = [
-      { label: 'Rural', data: rural, backgroundColor: '#5dd66f', pointRadius: 4 },
-      { label: 'Urban (>100k)', data: urban, backgroundColor: '#8db0ff', pointRadius: 5 },
+      { label: `Rural counties (${rural.length})`, data: rural,
+        backgroundColor: '#3fb950', pointRadius: 6, pointHoverRadius: 9 },
+      { label: `Urban counties (${urban.length})`, data: urban,
+        backgroundColor: '#58a6ff', pointRadius: 6, pointHoverRadius: 9 },
     ];
     if (d.trend_line && fit.r != null) {
       datasets.push({
-        label: `OLS fit · ${fitText}`, data: d.trend_line, type: 'line',
-        borderColor: '#f0862f', backgroundColor: 'transparent',
-        borderDash: [6, 4], pointRadius: 0, fill: false,
+        label: 'Overall trend', data: d.trend_line, type: 'line',
+        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2,
+        backgroundColor: 'transparent', borderDash: [6, 4], pointRadius: 0, fill: false,
       });
     }
     PMCharts.destroyIfExists(state.charts.cancerScatter);
-    state.charts.cancerScatter = PMCharts.scatter('chart-cancer-scatter', datasets);
-    if (state.charts.cancerScatter) {
-      const c = state.charts.cancerScatter;
-      const isCount = (d.x_label || '').includes('(count)');
-      c.options.scales.x.title.text = d.x_label;
-      c.options.scales.y.title.text = d.y_label;
-      c.options.scales.y.beginAtZero = false;
-      c.options.scales.y.ticks = { callback: (v) => Number(v).toFixed(0) };
-      c.options.scales.x.ticks = { callback: (v) => isCount ? v : PMCharts.fmtLbs(v) };
-      c.options.plugins.tooltip.callbacks.label = (ctx) => {
-        const r = ctx.raw;
-        const xf = isCount ? `${r.x} site${r.x === 1 ? '' : 's'}` : PMCharts.fmtLbs(r.x);
-        return `${r.label}: ${xf}, ${Number(r.y).toFixed(1)}/100k`;
-      };
-      c.update();
-    }
+    state.charts.cancerScatter = PMCharts.scatter('chart-cancer-scatter', datasets, {
+      xLabel: d.x_label, yLabel: d.y_label,
+      xName: d.pesticide_label || 'Pesticide', yName: d.cancer_label || 'Rate',
+      xFmt: isCount ? PMCharts.fmtCount : PMCharts.fmtLbs,
+      yFmt: PMCharts.fmtNum, yBeginAtZero: false,
+    });
     // stats box
     $('cancer-stat-r').textContent   = fit.r != null ? fit.r.toFixed(3) : '—';
     $('cancer-stat-p').textContent   = fit.p_value != null ? fit.p_value.toFixed(3) : '—';
@@ -2475,6 +2671,35 @@
     }
   }
 
+  // Apply shareable map-state query params (?normalize=&year=&category=&compound=)
+  // so a specific map view can be linked or bookmarked. Controls are synced to
+  // match. Called after the UI is populated, before the first refresh.
+  function applyUrlParams() {
+    const p = new URLSearchParams(location.search);
+    const norm = p.get('normalize');
+    if (norm && ['total', 'per_sq_mile', 'per_acre'].includes(norm)) {
+      state.normalize = norm;
+      document.querySelectorAll('#seg-normalize button').forEach((b) =>
+        b.classList.toggle('active', b.dataset.val === norm));
+    }
+    const yr = parseInt(p.get('year'), 10);
+    if (yr && state.years.includes(yr)) {
+      state.year = yr;
+      $('year-slider').value = state.years.indexOf(yr);
+      $('year-label').textContent = yr;
+    }
+    const cat = p.get('category');
+    const catEl = $('filter-category');
+    if (cat && [...catEl.options].some((o) => o.value === cat)) {
+      state.category = cat; catEl.value = cat;
+    }
+    const cmp = p.get('compound');
+    const cmpEl = $('filter-compound');
+    if (cmp && [...cmpEl.options].some((o) => o.value === cmp)) {
+      state.compound = cmp; cmpEl.value = cmp;
+    }
+  }
+
   async function boot() {
     initMap();
     loading(true);
@@ -2503,6 +2728,15 @@
       $('year-slider').value = state.years.length - 1;
       $('year-label').textContent = state.year;
 
+      applyUrlParams();
+
+      // Honor a shareable deep link like /#explore as soon as the UI is ready,
+      // without waiting for the (slower) map layers to finish loading.
+      const initial = (location.hash || '').replace('#', '');
+      if (initial && VIEWS.includes(initial) && initial !== 'map') {
+        switchView(initial, false);
+      }
+
       renderChoropleth();
       await loadCwd();
       refreshAllCwdLayers();
@@ -2518,7 +2752,20 @@
     }
   }
 
-  // ---------- hover tooltips (data-tip) ----------
+  // ---------- hover tooltips (data-tip / data-gloss) ----------
+  // Elements can carry either data-tip="literal text" or
+  // data-gloss="glossary term" (resolved to a plain-language definition via
+  // PMGloss). Info "?" icons use data-gloss so definitions stay consistent.
+  const TIP_SELECTOR = '[data-tip],[data-gloss]';
+
+  function tipText(el) {
+    const lit = el.getAttribute('data-tip');
+    if (lit) return lit;
+    const term = el.getAttribute('data-gloss');
+    if (term && window.PMGloss) return window.PMGloss.gloss(term);
+    return term || '';
+  }
+
   function setupTooltips() {
     const tip = document.createElement('div');
     tip.className = 'js-tooltip';
@@ -2527,16 +2774,17 @@
     let showTimer = null;
     let current = null;
 
-    const position = (e) => {
+    const positionXY = (cx, cy) => {
       const pad = 12;
-      let x = e.clientX + pad;
-      let y = e.clientY + pad;
+      let x = cx + pad;
+      let y = cy + pad;
       const r = tip.getBoundingClientRect();
-      if (x + r.width + 4 > window.innerWidth) x = e.clientX - r.width - pad;
-      if (y + r.height + 4 > window.innerHeight) y = e.clientY - r.height - pad;
+      if (x + r.width + 4 > window.innerWidth) x = cx - r.width - pad;
+      if (y + r.height + 4 > window.innerHeight) y = cy - r.height - pad;
       tip.style.left = Math.max(4, x) + 'px';
       tip.style.top = Math.max(4, y) + 'px';
     };
+    const position = (e) => positionXY(e.clientX, e.clientY);
 
     const hide = () => {
       clearTimeout(showTimer);
@@ -2544,16 +2792,22 @@
       tip.classList.remove('show');
     };
 
-    document.addEventListener('mouseover', (e) => {
-      const el = e.target.closest('[data-tip]');
-      if (!el || el === current) return;
+    const showFor = (el, cx, cy, delay) => {
       current = el;
       clearTimeout(showTimer);
       showTimer = setTimeout(() => {
-        tip.textContent = el.getAttribute('data-tip');
-        position(e);
+        const txt = tipText(el);
+        if (!txt) return;
+        tip.textContent = txt;
+        positionXY(cx, cy);
         tip.classList.add('show');
-      }, 350);
+      }, delay);
+    };
+
+    document.addEventListener('mouseover', (e) => {
+      const el = e.target.closest(TIP_SELECTOR);
+      if (!el || el === current) return;
+      showFor(el, e.clientX, e.clientY, 350);
     });
 
     document.addEventListener('mousemove', (e) => {
@@ -2561,13 +2815,38 @@
     });
 
     document.addEventListener('mouseout', (e) => {
-      const el = e.target.closest('[data-tip]');
+      const el = e.target.closest(TIP_SELECTOR);
       if (el && el === current && !el.contains(e.relatedTarget)) hide();
+    });
+
+    // Keyboard/touch accessibility for focusable info icons.
+    document.addEventListener('focusin', (e) => {
+      const el = e.target.closest(TIP_SELECTOR);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      showFor(el, r.right, r.bottom, 0);
+    });
+    document.addEventListener('focusout', (e) => {
+      if (e.target.closest(TIP_SELECTOR) === current) hide();
+    });
+    // Tap an info icon on touch devices to toggle its definition.
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('.info-i');
+      if (!el) return;
+      e.stopPropagation();
+      if (current === el && tip.classList.contains('show')) { hide(); return; }
+      const r = el.getBoundingClientRect();
+      showFor(el, r.right, r.bottom, 0);
     });
 
     // hide if the underlying element is scrolled away or removed
     window.addEventListener('scroll', hide, true);
   }
 
-  document.addEventListener('DOMContentLoaded', () => { setupTooltips(); boot(); });
+  document.addEventListener('DOMContentLoaded', () => {
+    setupTooltips();
+    wireIntro();
+    maybeShowIntroOnFirstVisit();
+    boot();
+  });
 })();

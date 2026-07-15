@@ -20,12 +20,14 @@
   <div class="header-actions">
     <div class="view-switch" id="view-switch">
       <button data-view="map" class="active">Heat map</button>
+      <button data-view="explore" class="primary-view">Explore correlations</button>
       <button data-view="correlation">CWD correlation</button>
       <button data-view="respiratory">Respiratory</button>
       <button data-view="cancer">Cancer</button>
     </div>
     <input id="search" type="search" placeholder="Search county or compound…" autocomplete="off" />
     <div id="search-results" class="search-dropdown hidden"></div>
+    <button id="open-intro" class="btn-ghost help-btn" title="What is this? (intro & how to use)" aria-label="Open the intro and help">?</button>
     <button id="open-sources" class="btn-ghost" title="Data sources">Data&nbsp;sources</button>
   </div>
 </header>
@@ -42,36 +44,36 @@
 
       <div class="layer-group">
         <div class="layer-group-head">County coloring <span class="lg-hint">choose one</span></div>
-        <label class="layer-radio"><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
-        <label class="layer-radio"><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
-        <label class="layer-radio"><input type="radio" name="choropleth" value="cwd" /> <span class="lr-dot cwd"></span> <span>CWD-positive counties</span></label>
-        <label class="layer-radio"><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
-        <label class="layer-radio"><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
-        <label class="layer-radio"><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
+        <label class="layer-radio" data-tip="Turn off county shading and show only the point overlays (markers, sites, wind)."><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
+        <label class="layer-radio" data-tip="Shade each county by how much agricultural pesticide is applied. Source: USGS NAWQA EPest estimates."><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
+        <label class="layer-radio" data-tip="Shade counties where Chronic Wasting Disease has been confirmed in wild deer. Source: Michigan DNR."><input type="radio" name="choropleth" value="cwd" /> <span class="lr-dot cwd"></span> <span>CWD-positive counties</span></label>
+        <label class="layer-radio" data-tip="Shade counties by asthma and COPD rates (age-adjusted). Source: CDC Environmental Public Health Tracking."><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
+        <label class="layer-radio" data-tip="Shade counties by cancer incidence (new cases per 100,000, age-adjusted). Source: NCI State Cancer Profiles."><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
+        <label class="layer-radio" data-tip="Shade counties by the number of known contaminated sites. Source: EPA Superfund + compiled records."><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
       </div>
 
       <div class="layer-divider"></div>
 
       <div class="layer-group">
         <div class="layer-group-head">Overlays <span class="lg-hint">stack freely</span></div>
-        <label class="cwd-toggle"><input type="checkbox" id="cwd-markers" checked /> <span>CWD wild-deer markers</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="cwd-farmed" /> <span>Farmed-cervid facilities</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="cwd-surv" /> <span>CWD surveillance zones</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
+        <label class="cwd-toggle" data-tip="Pins where individual CWD-positive wild deer were found. Source: Michigan DNR."><input type="checkbox" id="cwd-markers" checked /> <span>CWD wild-deer markers</span></label>
+        <label class="cwd-toggle" data-tip="Captive deer/elk farms with confirmed CWD. Source: Michigan MDARD."><input type="checkbox" id="cwd-farmed" /> <span>Farmed-cervid facilities</span></label>
+        <label class="cwd-toggle" data-tip="Areas under enhanced CWD testing and surveillance. Source: Michigan DNR."><input type="checkbox" id="cwd-surv" /> <span>CWD surveillance zones</span></label>
+        <label class="cwd-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
+        <label class="cwd-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
+        <label class="cwd-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
+        <label class="cwd-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
         <div class="contam-subtoggles" id="contam-subtoggles">
           <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
           <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
           <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
           <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
         </div>
-        <label class="cwd-toggle"><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
+        <label class="cwd-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
         <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
-        <label class="cwd-toggle"><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
-        <label class="cwd-toggle"><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
+        <label class="cwd-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
+        <label class="cwd-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
+        <label class="cwd-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
       </div>
     </section>
 
@@ -99,19 +101,20 @@
       <div class="featured-compounds" id="featured-compounds"></div>
 
       <label class="field">
-        <span>Estimate</span>
+        <span>Estimate <span class="info-i" data-tip="USGS reports pesticide use as a low–high range (the EPest estimate), because it's modeled from sales and crop data, not measured directly. Pick which end of the range to show.">?</span></span>
         <div class="seg">
-          <button data-val="low">Low</button>
-          <button data-val="avg" class="active">Average</button>
-          <button data-val="high">High</button>
+          <button data-val="low" data-tip="Lower bound of the USGS estimate — the conservative figure.">Low</button>
+          <button data-val="avg" class="active" data-tip="Midpoint of the USGS low–high estimate range.">Average</button>
+          <button data-val="high" data-tip="Upper bound of the USGS estimate — the higher figure.">High</button>
         </div>
       </label>
 
       <label class="field">
-        <span>Normalization</span>
+        <span>Normalization <span class="info-i" data-tip="Total lbs shows the raw amount applied. Per square mile divides by county area. Per cropland acre divides by farmland actually harvested — the best measure of how intensively fields are treated.">?</span></span>
         <div class="seg" id="seg-normalize">
-          <button data-val="total" class="active">Total lbs</button>
-          <button data-val="per_sq_mile">lbs / mi²</button>
+          <button data-val="total" class="active" data-tip="Raw pounds of pesticide applied in the county.">Total lbs</button>
+          <button data-val="per_sq_mile" data-tip="Pounds applied per square mile of the county — accounts for county size.">lbs / mi²</button>
+          <button data-val="per_acre" data-tip="Pounds applied per acre of harvested cropland (USDA NASS). The truest measure of application intensity — urban counties with little farmland are left uncolored.">lbs / acre</button>
         </div>
       </label>
     </section>
@@ -184,12 +187,12 @@
     </section>
 
     <section class="panel">
-      <h2>Year</h2>
+      <h2>Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></h2>
       <div class="year-row">
-        <span id="year-label" class="year-label">—</span>
-        <button id="play-btn" class="btn-ghost" title="Animate years">▶</button>
+        <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
+        <button id="play-btn" class="btn-ghost" title="Animate years" data-tip="Play an animation stepping through every available year.">▶</button>
       </div>
-      <input id="year-slider" type="range" min="0" max="0" step="1" />
+      <input id="year-slider" type="range" min="0" max="0" step="1" data-tip="Drag to change the year of pesticide data shown on the map." />
       <div class="year-ends">
         <span id="year-min">—</span>
         <span id="year-max">—</span>
@@ -197,8 +200,8 @@
     </section>
 
     <section class="panel">
-      <h2>Legend</h2>
-      <div id="legend"></div>
+      <h2>Legend <span class="info-i" data-tip="Explains the current map colors. Darker or more intense shading means a higher value; the labels show the value at each step.">?</span></h2>
+      <div id="legend" data-tip="Each color band corresponds to a range of values. Counties are shaded by which band they fall into."></div>
       <p class="legend-note" id="legend-units">lbs applied</p>
     </section>
   </aside>
@@ -288,6 +291,81 @@
   </aside>
 </main>
 
+<!-- ===================== Explore Correlations (unified) ===================== -->
+<section class="app-body correlation-view hidden" id="view-explore">
+  <div class="explore-wrap">
+
+    <div class="panel explore-controls-panel">
+      <div class="panel-head">
+        <h2>Explore the data yourself</h2>
+      </div>
+      <p class="explainer">
+        Pick <b>any two things</b> to compare across Michigan's counties and see whether
+        they tend to rise and fall together. This is a starting point for questions —
+        <b>not</b> proof that one causes the other.
+      </p>
+
+      <div class="explore-pickers">
+        <label class="explore-pick">
+          <span class="ep-label">Compare this…
+            <span class="info-i" data-tip="The measure shown left-to-right on the chart. Choose a pesticide, a specific chemical, contamination sites, or water detections.">?</span>
+          </span>
+          <select id="explore-x"></select>
+        </label>
+        <span class="explore-vs">vs</span>
+        <label class="explore-pick">
+          <span class="ep-label">…against this health measure:
+            <span class="info-i" data-tip="The measure shown bottom-to-top on the chart. Choose a cancer type, a respiratory measure, or wildlife disease.">?</span>
+          </span>
+          <select id="explore-y"></select>
+        </label>
+      </div>
+
+      <div class="explore-toggles">
+        <label class="toggle-chip">
+          <input type="checkbox" id="explore-rural" />
+          <span>Rural counties only</span>
+          <span class="info-i" data-gloss="urban vs rural">?</span>
+        </label>
+        <label class="toggle-chip">
+          <input type="checkbox" id="explore-exclude-missing" />
+          <span>Exclude counties with missing data</span>
+          <span class="info-i" data-tip="Some counties have no data for a given measure (e.g. no recorded contamination site). Turn this on to drop them instead of treating them as zero.">?</span>
+        </label>
+      </div>
+
+      <p class="explore-summary" id="explore-summary">Choose two measures above to begin.</p>
+    </div>
+
+    <div class="panel scatter-panel wide">
+      <div class="panel-head">
+        <h2 id="explore-scatter-title">Comparison</h2>
+      </div>
+      <p class="explainer" id="explore-scatter-explainer">
+        Each dot is one Michigan county.
+      </p>
+      <div class="ur-legend" id="explore-legend">
+        <span class="ur-item"><span class="ur-dot rural"></span> Rural county</span>
+        <span class="ur-item"><span class="ur-dot urban"></span> Urban county (large population)</span>
+        <span class="ur-item" style="color:var(--muted)">
+          <span class="info-i" data-gloss="urban vs rural">?</span> why this matters
+        </span>
+      </div>
+      <div class="chart-box scatter tall"><canvas id="chart-explore"></canvas></div>
+
+      <div class="stat-readout" id="explore-readout"></div>
+
+      <div class="assoc-reminder">
+        <strong>Association is not causation.</strong> A trend here does not prove one thing
+        causes the other. Counties differ in many ways — population, age, industry, smoking,
+        income — that also affect health. Use this as a starting point for questions, not an answer.
+      </div>
+      <p class="muted small" id="explore-caveat"></p>
+    </div>
+
+  </div>
+</section>
+
 <!-- ===================== Correlation view ===================== -->
 <section class="app-body correlation-view hidden" id="view-correlation">
   <div class="correlation-grid">
@@ -322,8 +400,20 @@
           <option value="fungicide">Fungicides only</option>
         </select>
       </div>
+      <p class="explainer">Each dot is one Michigan county. <b>Left-to-right</b> shows how much
+        pesticide is applied there; <b>bottom-to-top</b> shows how many deer tested positive for
+        CWD. Hover any dot for the county name and its exact values.</p>
+      <div class="ur-legend">
+        <span class="ur-item"><span class="ur-dot" style="background:#f85149"></span> CWD-positive county</span>
+        <span class="ur-item"><span class="ur-dot" style="background:rgba(154,164,178,.7)"></span> CWD-negative county</span>
+      </div>
       <div class="chart-box scatter"><canvas id="chart-scatter"></canvas></div>
       <div id="scatter-fit" class="muted small fit-line"></div>
+      <div class="assoc-reminder">
+        <strong>Association is not causation.</strong> CWD is caused by infectious prions, not
+        pesticides. Both happen to concentrate in the same farming regions — that shared geography
+        can create a trend here that means nothing biologically.
+      </div>
     </div>
 
     <div class="panel stats-panel">
@@ -355,15 +445,15 @@
         <table id="corr-table">
           <thead>
             <tr>
-              <th data-sort="county" class="sortable">County</th>
-              <th data-sort="total_pesticide_lbs" class="sortable right">Total lbs</th>
-              <th data-sort="pesticide_per_sq_mile" class="sortable right">lbs/mi²</th>
-              <th data-sort="herbicide_lbs" class="sortable right">Herb lbs</th>
-              <th data-sort="insecticide_lbs" class="sortable right">Insect lbs</th>
-              <th data-sort="fungicide_lbs" class="sortable right">Fung lbs</th>
-              <th data-sort="cwd_positives_count" class="sortable right">CWD+</th>
-              <th data-sort="cwd_farmed_facilities" class="sortable right">Farms</th>
-              <th data-sort="cwd_positive" class="sortable">CWD status</th>
+              <th data-sort="county" class="sortable" data-tip="Michigan county. Click any header to sort the table by that column.">County</th>
+              <th data-sort="total_pesticide_lbs" class="sortable right" data-tip="Total pounds of all pesticides applied in the county (USGS EPest estimate, latest year).">Total lbs</th>
+              <th data-sort="pesticide_per_sq_mile" class="sortable right" data-tip="Pounds applied per square mile — adjusts for the county's size.">lbs/mi²</th>
+              <th data-sort="herbicide_lbs" class="sortable right" data-tip="Pounds of herbicides (weed killers) applied.">Herb lbs</th>
+              <th data-sort="insecticide_lbs" class="sortable right" data-tip="Pounds of insecticides (insect killers) applied.">Insect lbs</th>
+              <th data-sort="fungicide_lbs" class="sortable right" data-tip="Pounds of fungicides (fungus/mold control) applied.">Fung lbs</th>
+              <th data-sort="cwd_positives_count" class="sortable right" data-tip="Number of wild deer that tested positive for Chronic Wasting Disease.">CWD+</th>
+              <th data-sort="cwd_farmed_facilities" class="sortable right" data-tip="Number of captive deer/elk farms in the county with confirmed CWD.">Farms</th>
+              <th data-sort="cwd_positive" class="sortable" data-tip="Whether CWD has ever been confirmed in this county's wild deer.">CWD status</th>
             </tr>
           </thead>
           <tbody id="corr-tbody"></tbody>
@@ -419,8 +509,21 @@
           <label class="small"><input type="checkbox" id="exclude-wayne" /> exclude Wayne</label>
         </div>
       </div>
+      <p class="explainer">Each dot is one Michigan county. <b>Left-to-right</b> shows pesticide
+        applied; <b>bottom-to-top</b> shows the respiratory rate. Green dots are rural counties,
+        blue are urban. Hover any dot for the county and its exact values.</p>
+      <div class="ur-legend">
+        <span class="ur-item"><span class="ur-dot rural"></span> Rural county</span>
+        <span class="ur-item"><span class="ur-dot urban"></span> Urban county</span>
+        <span class="ur-item" style="color:var(--muted)"><span class="info-i" data-gloss="urban vs rural">?</span> why this matters</span>
+      </div>
       <div class="chart-box scatter tall"><canvas id="chart-resp-scatter"></canvas></div>
       <p class="quartile-summary" id="resp-summary">—</p>
+      <div class="assoc-reminder">
+        <strong>Association is not causation.</strong> Asthma and COPD are driven mostly by air
+        quality, smoking, and industry — not farm pesticides. Urban counties differ from rural
+        ones in many such ways, so check whether any pattern holds within the green (rural) dots alone.
+      </div>
     </div>
 
     <div class="panel trend-panel wide">
@@ -439,15 +542,15 @@
         <table id="resp-table">
           <thead>
             <tr>
-              <th data-sort="rank_pest"        class="sortable right">#&nbsp;Pest</th>
-              <th data-sort="county"           class="sortable">County</th>
-              <th data-sort="is_urban"         class="sortable">Type</th>
-              <th data-sort="pest_lbs"         class="sortable right">Total lbs</th>
-              <th data-sort="asthma_ed_rate"   class="sortable right">Asthma ED</th>
-              <th data-sort="asthma_hosp_rate" class="sortable right">Asthma hosp.</th>
-              <th data-sort="copd_ed_rate"     class="sortable right">COPD ED</th>
-              <th data-sort="copd_hosp_rate"   class="sortable right">COPD hosp.</th>
-              <th data-sort="rank_resp"        class="sortable right">#&nbsp;Resp</th>
+              <th data-sort="rank_pest"        class="sortable right" data-tip="This county's rank for total pesticide use (1 = highest).">#&nbsp;Pest</th>
+              <th data-sort="county"           class="sortable" data-tip="Michigan county. Click any header to sort by that column.">County</th>
+              <th data-sort="is_urban"         class="sortable" data-tip="Whether the county is urban (large population) or rural. Urban asthma is driven mostly by air quality and industry, not farming.">Type</th>
+              <th data-sort="pest_lbs"         class="sortable right" data-tip="Total pounds of pesticide applied (USGS EPest estimate).">Total lbs</th>
+              <th data-sort="asthma_ed_rate"   class="sortable right" data-tip="Asthma emergency-room visits per 10,000 people, age-adjusted. Source: CDC Tracking.">Asthma ED</th>
+              <th data-sort="asthma_hosp_rate" class="sortable right" data-tip="Asthma hospitalizations per 10,000 people, age-adjusted.">Asthma hosp.</th>
+              <th data-sort="copd_ed_rate"     class="sortable right" data-tip="COPD (chronic lung disease) emergency-room visits per 10,000, age-adjusted.">COPD ED</th>
+              <th data-sort="copd_hosp_rate"   class="sortable right" data-tip="COPD hospitalizations per 10,000 people, age-adjusted.">COPD hosp.</th>
+              <th data-sort="rank_resp"        class="sortable right" data-tip="This county's rank for the selected respiratory measure (1 = highest).">#&nbsp;Resp</th>
             </tr>
           </thead>
           <tbody id="resp-tbody"></tbody>
@@ -494,8 +597,22 @@
         <label class="small"><input type="checkbox" id="cancer-rural-only" /> rural only</label>
         <label class="small"><input type="checkbox" id="cancer-control-smoking" /> control for smoking</label>
       </div>
+      <p class="explainer">Each dot is one Michigan county. <b>Left-to-right</b> shows the pesticide
+        (or pollution) measure; <b>bottom-to-top</b> shows the cancer rate. Green dots are rural
+        counties, blue are urban. Hover any dot for the county and its exact values.</p>
+      <div class="ur-legend">
+        <span class="ur-item"><span class="ur-dot rural"></span> Rural county</span>
+        <span class="ur-item"><span class="ur-dot urban"></span> Urban county</span>
+        <span class="ur-item" style="color:var(--muted)"><span class="info-i" data-gloss="urban vs rural">?</span> why this matters</span>
+      </div>
       <div class="chart-box scatter tall"><canvas id="chart-cancer-scatter"></canvas></div>
       <p class="deep-dive" id="cancer-deep-dive">—</p>
+      <div class="assoc-reminder">
+        <strong>Association is not causation.</strong> Cancer takes 10–30 years to develop, so
+        today's rates reflect exposures from decades ago. Smoking, age, industry, and income differ
+        between counties and affect cancer more than farming — check whether any pattern holds within
+        the green (rural) dots alone.
+      </div>
     </div>
 
     <div class="panel stats-panel">
@@ -575,13 +692,65 @@
   </div>
 </div>
 
+<!-- ===================== "Start here" intro modal ===================== -->
+<div id="intro-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+  <div class="modal-card intro-card">
+    <button class="close" id="intro-close" aria-label="Close">×</button>
+    <h2 id="intro-title">Welcome — start here</h2>
+    <p class="intro-lead">
+      This is a free tool for <strong>exploring</strong> Michigan's environmental and health data
+      on one map. It brings together pesticide use, water and industrial contamination, wildlife
+      disease, and human health data so you can look for patterns and ask better questions.
+    </p>
+
+    <div class="intro-grid">
+      <div class="intro-block">
+        <div class="intro-ico">🗺️</div>
+        <h3>Explore the map</h3>
+        <p>Use <strong>Map layers</strong> (left) to color counties by pesticide use, cancer,
+          respiratory health, or contamination, and to stack overlays like water sites and wind.
+          Hover anything with a <span class="info-i" data-tip="Like this — hover or tap a ? for a plain-language explanation.">?</span> for an explanation.</p>
+      </div>
+      <div class="intro-block">
+        <div class="intro-ico">📊</div>
+        <h3>Compare two things</h3>
+        <p>The <strong>Explore correlations</strong> tab lets you pick any two measures — say,
+          herbicide use vs. a cancer rate — and see whether they rise and fall together across
+          counties, explained in plain English.</p>
+      </div>
+      <div class="intro-block">
+        <div class="intro-ico">🔎</div>
+        <h3>What the data is</h3>
+        <p>Everything comes from public sources (USGS, EPA, CDC, NCI, Michigan DNR/EGLE). Open
+          <a href="#" id="intro-sources-link">Data sources</a> any time to see each dataset, how
+          current it is, and its limitations.</p>
+      </div>
+    </div>
+
+    <div class="intro-disclaimer">
+      <strong>Please read:</strong> This tool is for <strong>exploration and education only</strong>.
+      Any patterns it shows are <strong>associations, not proof of cause</strong> — counties differ
+      in age, income, industry, smoking, and many other ways that affect health. Nothing here is
+      medical, legal, or scientific advice. Do not use it to draw conclusions about any individual
+      person, place, or product.
+    </div>
+
+    <div class="intro-actions">
+      <label class="intro-dontshow"><input type="checkbox" id="intro-dontshow" checked /> Don't show this again</label>
+      <button id="intro-start" class="btn-primary">Start exploring</button>
+    </div>
+  </div>
+</div>
+
 <div id="sources-modal" class="modal hidden" role="dialog" aria-modal="true">
   <div class="modal-card">
     <button class="close" id="sources-close">×</button>
     <h2>Data sources</h2>
+    <p id="sources-asof" class="sources-asof"></p>
     <p class="muted">All data is fetched live from the sources listed below. Where a source
       is unavailable or requires registration, it is marked accordingly and excluded from the
-      map until configured.</p>
+      map until configured. The <strong>Coverage</strong> column shows the date range each
+      layer's data spans; <strong>Last updated</strong> shows when it was last refreshed.</p>
     <table id="sources-table"></table>
     <p class="muted small">Data limitations: USGS EPest values are <em>estimates</em> derived
       from proprietary sale data and crop-extent models. Low/high bracket the uncertainty —
@@ -608,6 +777,7 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/glossary.js') }}"></script>
 <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

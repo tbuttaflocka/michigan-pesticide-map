@@ -4,6 +4,32 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal, dependency-free .env loader.
+
+    Reads KEY=VALUE lines from a .env file at the project root and puts them in
+    the process environment. Secrets (e.g. NASS_API_KEY) live there — the file
+    is gitignored — instead of being hardcoded into tracked source. Real
+    environment variables always win, so `.env` never overrides them.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, val)
+
+
+_load_dotenv(BASE_DIR / ".env")
 DB_PATH = DATA_DIR / "michigan_pesticides.sqlite"
 GEOJSON_PATH = DATA_DIR / "michigan_counties.geojson"
 

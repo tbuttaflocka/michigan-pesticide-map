@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request, send_from_directory
@@ -146,6 +147,33 @@ def api_geojson():
     return send_from_directory(GEOJSON_PATH.parent, GEOJSON_PATH.name, mimetype="application/geo+json")
 
 
+def _annotate_source_freshness(sources: list[dict]) -> None:
+    """Add a `stale` flag and `age_days` to each data_sources row in place.
+
+    A source is stale when it has an expected refresh interval and its last
+    successful refresh is older than that interval plus a 25% grace period
+    (so a 12-month/annual source flags at ~15 months, matching the app spec).
+    Sources without an interval (reference/skipped rows) are never stale.
+    """
+    now = datetime.now(timezone.utc)
+    for s in sources:
+        s["stale"] = False
+        s["age_days"] = None
+        interval = s.get("refresh_interval_months")
+        last = s.get("last_success")
+        if not interval or not last:
+            continue
+        try:
+            ts = datetime.fromisoformat(last)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        age_days = (now - ts).days
+        s["age_days"] = age_days
+        s["stale"] = age_days > interval * 30.44 * 1.25
+
+
 @app.route("/api/meta")
 def api_meta():
     """Bootstrap data the frontend needs on first load."""
@@ -165,9 +193,16 @@ def api_meta():
         for r in cur.execute("SELECT fips, name FROM counties ORDER BY name")
     ]
     sources = [dict(r) for r in cur.execute(
-        "SELECT source_id, title, url, status, rows_loaded, notes, last_updated FROM data_sources"
+        "SELECT source_id, title, url, status, rows_loaded, notes, last_updated, "
+        "coverage_start, coverage_end, refresh_status, refresh_interval_months, "
+        "last_success, last_attempt FROM data_sources"
     )]
     conn.close()
+    _annotate_source_freshness(sources)
+    data_current_as_of = max(
+        (s["last_success"] for s in sources if s.get("last_success")),
+        default=None,
+    )
     featured = [
         "GLYPHOSATE", "ATRAZINE", "2,4-D", "METOLACHLOR", "CHLORPYRIFOS",
         "DICAMBA", "ACETOCHLOR", "IMIDACLOPRID", "MESOTRIONE",
@@ -186,9 +221,37 @@ def api_meta():
         "featured_compounds": [c for c in featured if c in compounds],
         "counties": counties,
         "data_sources": sources,
+        "data_current_as_of": data_current_as_of,
         "cancer_types": cancer_types,
         "cancer_default": cancer_data.DEFAULT_CANCER,
     })
+
+
+# Below this many acres of surveyed cropland, "lbs per cropland acre" is not
+# meaningful (non-agricultural counties, or ones where the 5 surveyed crops are
+# a tiny slice), so those counties are left uncolored instead of showing a wild
+# ratio from dividing by a near-zero denominator.
+MIN_CROPLAND_ACRES = 10_000
+
+
+def _cropland_acres_by_fips(conn) -> dict:
+    """{county_fips: harvested cropland acres}. For each county, take EACH crop's
+    most recent reported acreage and sum them (so a county isn't undercounted
+    just because one crop didn't report in its latest overall year). Denominator
+    for the 'lbs per cropland acre' normalization; {} when no NASS data loaded."""
+    rows = conn.execute("""
+        WITH latest AS (
+            SELECT county_fips, crop, MAX(year) AS y
+              FROM crop_acreage WHERE acres_harvested IS NOT NULL
+             GROUP BY county_fips, crop
+        )
+        SELECT ca.county_fips AS f, SUM(ca.acres_harvested) AS acres
+          FROM crop_acreage ca
+          JOIN latest l ON l.county_fips = ca.county_fips
+                       AND l.crop = ca.crop AND l.y = ca.year
+         GROUP BY ca.county_fips
+    """).fetchall()
+    return {r["f"]: r["acres"] for r in rows if r["acres"]}
 
 
 @app.route("/api/choropleth")
@@ -200,7 +263,8 @@ def api_choropleth():
         category  — herbicide | insecticide | fungicide | growth_regulator | other | all
         compound  — specific compound name (case-insensitive)
         estimate  — low | high | avg (default avg)
-        normalize — total | per_sq_mile  (default total)
+        normalize — total | per_sq_mile | per_acre  (default total)
+                    per_acre = lbs per acre of harvested cropland (needs NASS data)
     """
     year = request.args.get("year", type=int)
     category = request.args.get("category", "all")
@@ -232,13 +296,20 @@ def api_choropleth():
          ORDER BY c.name
     """
     rows = cur.execute(q, [year, *cat_p, *cmp_p]).fetchall()
+    cropland = _cropland_acres_by_fips(conn) if normalize == "per_acre" else {}
     conn.close()
 
     counties = []
     for r in rows:
         total = r["total_kg"] or 0.0
+        acres = cropland.get(r["fips"])
         if normalize == "per_sq_mile" and r["area_sq_miles"]:
             value = total / r["area_sq_miles"]
+        elif normalize == "per_acre":
+            # Undefined where a county has little/no surveyed cropland (urban or
+            # non-row-crop counties) — leave it uncolored rather than showing a
+            # wild ratio from a near-zero denominator.
+            value = (total / acres) if (acres and acres >= MIN_CROPLAND_ACRES) else 0.0
         else:
             value = total
         # Pre-convert the generic "value" key to lbs here; lb_jsonify only
@@ -251,6 +322,7 @@ def api_choropleth():
             "value": value * KG_TO_LB,   # already in lbs
             "compound_count": r["compound_count"],
             "area_sq_miles": r["area_sq_miles"],
+            "cropland_acres": acres,
         })
     values = [c["value"] for c in counties if c["value"] > 0]
     stats = {
@@ -2207,6 +2279,206 @@ def api_correlation_cancer_quartiles():
         "units": _cancer_units(data_type),
         "mi_rate": ref["mi_rate"] if ref else None,
         "bars": bars,
+    })
+
+
+# ---------- Unified "Explore correlations" endpoint ----------
+
+# Respiratory Y options (column, label, unit).
+_EXPLORE_RESP = {
+    "asthma_ed":   ("asthma_ed_rate",     "Asthma ER visits",       "per 10,000 (age-adjusted)"),
+    "asthma_hosp": ("asthma_hosp_rate",   "Asthma hospitalizations","per 10,000 (age-adjusted)"),
+    "copd_ed":     ("copd_ed_rate",       "COPD ER visits",         "per 10,000 (age-adjusted)"),
+    "copd_hosp":   ("copd_hosp_rate",     "COPD hospitalizations",  "per 10,000 (age-adjusted)"),
+    "prevalence":  ("asthma_prevalence_pct","Adult asthma prevalence","% of adults"),
+}
+
+# Pesticide X options (metric key -> label, unit). Compounds/contamination/water
+# are handled specially below.
+_EXPLORE_PEST = {
+    "total":       ("Total pesticide use",   "lbs applied (latest year)"),
+    "herbicide":   ("Herbicides",            "lbs applied (latest year)"),
+    "insecticide": ("Insecticides",          "lbs applied (latest year)"),
+    "fungicide":   ("Fungicides",            "lbs applied (latest year)"),
+    "per_sq_mile": ("Pesticide intensity",   "lbs per square mile of county"),
+}
+
+_EXPLORE_CAVEAT = {
+    "cancer": ("Cancer has a long latency (often 10–30 years), so today's rates "
+               "reflect exposures from decades ago — not current pesticide use."),
+    "respiratory": ("Asthma and COPD are driven mostly by air quality, smoking, "
+                    "housing, and industrial emissions — not farm pesticide use."),
+    "cwd": ("Chronic Wasting Disease spreads deer-to-deer and through the "
+            "environment; a link to pesticide use is not established."),
+}
+
+
+def _explore_water_detections(conn) -> dict:
+    """{county_fips: number of detected pesticide results}."""
+    rows = conn.execute(
+        """SELECT s.county_fips AS f, COUNT(*) AS n
+             FROM water_quality_results r
+             JOIN water_quality_sites s ON s.site_id = r.site_id
+            WHERE r.detected = 1 AND s.county_fips IS NOT NULL
+            GROUP BY s.county_fips""").fetchall()
+    return {r["f"]: r["n"] for r in rows}
+
+
+def _explore_x_map(conn, x_key: str):
+    """Return (xmap {fips: value}, label, unit, is_count) for any X variable."""
+    if x_key == "water_detections":
+        return (_explore_water_detections(conn),
+                "Water pesticide detections", "number of detections", True)
+    if x_key and x_key.startswith("contamination"):
+        xmap, label, _ = _cancer_x_map(conn, x_key)
+        return xmap, label.capitalize(), "number of sites", True
+    # pesticide metric or compound (kg values, converted to lbs by caller)
+    xmap, label, is_count = _cancer_x_map(conn, x_key)
+    unit = _EXPLORE_PEST.get(x_key, ("", "lbs applied (latest year)"))[1]
+    if x_key and x_key.startswith("compound:"):
+        unit = "lbs applied (latest year)"
+    return xmap, label, unit, is_count
+
+
+def _explore_y_map(conn, y_key: str):
+    """Return (ymap {fips: value}, label, unit, family) for any Y variable.
+    family is one of 'cancer' | 'respiratory' | 'cwd' (for the caveat)."""
+    if y_key and y_key.startswith("cancer:"):
+        ck = _cancer_key(y_key.split(":", 1)[1])
+        rows = conn.execute(
+            """SELECT county_fips AS f, rate FROM cancer_incidence
+                WHERE cancer_type = ? AND data_type = 'incidence' AND stage = 'all'
+                  AND rate IS NOT NULL""", (ck,)).fetchall()
+        label = cancer_data.CANCER_BY_KEY[ck]["label"]
+        return ({r["f"]: r["rate"] for r in rows}, label,
+                "cases per 100,000 (age-adjusted)", "cancer")
+    if y_key == "cwd":
+        rows = conn.execute(
+            "SELECT county_fips AS f, cwd_positives_count AS v FROM correlation_analysis"
+        ).fetchall()
+        return ({r["f"]: r["v"] for r in rows}, "CWD-positive deer",
+                "confirmed positive deer", "cwd")
+    # respiratory (default)
+    col, label, unit = _EXPLORE_RESP.get(y_key, _EXPLORE_RESP["asthma_ed"])
+    rows = conn.execute(
+        f"SELECT county_fips AS f, {col} AS v FROM correlation_analysis "
+        f"WHERE {col} IS NOT NULL").fetchall()
+    return {r["f"]: r["v"] for r in rows}, label, unit, "respiratory"
+
+
+def _explore_variables(conn) -> dict:
+    """The X and Y option lists that populate the explorer's dropdowns."""
+    present = {r[0] for r in conn.execute(
+        "SELECT DISTINCT UPPER(compound) FROM pesticide_use")}
+    featured = ["GLYPHOSATE", "ATRAZINE", "2,4-D", "METOLACHLOR", "CHLORPYRIFOS",
+                "DICAMBA", "ACETOCHLOR", "IMIDACLOPRID", "MESOTRIONE"]
+    x = [{"key": k, "label": lbl, "unit": u, "group": "Pesticide use"}
+         for k, (lbl, u) in _EXPLORE_PEST.items()]
+    for c in featured:
+        if c in present:
+            x.append({"key": f"compound:{c}", "label": c.title(),
+                      "unit": "lbs applied (latest year)", "group": "Specific compound"})
+    x += [
+        {"key": "contamination", "label": "Contamination sites (all)",
+         "unit": "number of sites", "group": "Pollution"},
+        {"key": "contamination:npl", "label": "Superfund (NPL) sites",
+         "unit": "number of sites", "group": "Pollution"},
+        {"key": "water_detections", "label": "Water pesticide detections",
+         "unit": "number of detections", "group": "Pollution"},
+    ]
+    y = [{"key": f"cancer:{c['key']}", "label": c["label"],
+          "unit": "cases per 100,000 (age-adjusted)", "group": "Cancer"}
+         for c in cancer_data.CANCER_TYPES]
+    y += [{"key": k, "label": lbl, "unit": u, "group": "Respiratory"}
+          for k, (col, lbl, u) in _EXPLORE_RESP.items()]
+    y += [{"key": "cwd", "label": "CWD-positive deer (count)",
+           "unit": "confirmed positive deer", "group": "Wildlife disease"}]
+    return {"x": x, "y": y,
+            "x_default": "total", "y_default": f"cancer:{cancer_data.DEFAULT_CANCER}"}
+
+
+@app.route("/api/explore/variables")
+def api_explore_variables():
+    conn = db()
+    try:
+        return jsonify(_explore_variables(conn))
+    finally:
+        conn.close()
+
+
+@app.route("/api/explore")
+def api_explore():
+    """Flexible county-level scatter/correlation for any X (pesticide use,
+    compound, contamination, water detections) vs any Y (cancer, respiratory,
+    CWD). Returns raw stats + points; the frontend does the plain-language
+    translation so it can update live."""
+    x_key = request.args.get("x", "total")
+    y_key = request.args.get("y", f"cancer:{cancer_data.DEFAULT_CANCER}")
+    cohort = request.args.get("cohort", "all")          # all | rural
+    exclude_missing = _bool_arg("exclude_missing")
+
+    conn = db()
+    xmap, x_label, x_unit, is_count = _explore_x_map(conn, x_key)
+    ymap, y_label, y_unit, family = _explore_y_map(conn, y_key)
+    urban = {r["county_fips"]: bool(r["is_urban"]) for r in conn.execute(
+        "SELECT county_fips, is_urban FROM correlation_analysis")}
+    names = {r["fips"]: r["name"] for r in conn.execute(
+        "SELECT fips, name FROM counties")}
+    conn.close()
+
+    n_urban = n_rural = n_excluded_missing = 0
+    pts = []
+    for fips, yv in ymap.items():
+        if yv is None:
+            continue
+        is_urban = urban.get(fips, False)
+        if cohort == "rural" and is_urban:
+            continue
+        xv = xmap.get(fips)
+        if xv is None:
+            if is_count and not exclude_missing:
+                xv = 0                     # no sites/detections is a real zero
+            else:
+                n_excluded_missing += 1
+                continue
+        pts.append({
+            "county_fips": fips, "county": names.get(fips, fips),
+            "is_urban": is_urban,
+            "x": xv if is_count else xv * KG_TO_LB,
+            "y": yv,
+        })
+        if is_urban:
+            n_urban += 1
+        else:
+            n_rural += 1
+
+    xs = [p["x"] for p in pts]
+    ys = [p["y"] for p in pts]
+    fit = pearson(xs, ys)
+    spear = spearman(xs, ys)
+    line = None
+    if fit.get("slope") is not None and xs:
+        xmin, xmax = min(xs), max(xs)
+        line = [{"x": xmin, "y": fit["intercept"] + fit["slope"] * xmin},
+                {"x": xmax, "y": fit["intercept"] + fit["slope"] * xmax}]
+    quart = None
+    if len(pts) >= 8:
+        sx = sorted(pts, key=lambda p: p["x"])
+        q = max(1, len(sx) // 4)
+        top = [p["y"] for p in sx[-q:]]
+        bot = [p["y"] for p in sx[:q]]
+        quart = {"top_mean": sum(top) / len(top), "bottom_mean": sum(bot) / len(bot),
+                 "top_n": len(top), "bottom_n": len(bot)}
+
+    return jsonify({
+        "x": {"key": x_key, "label": x_label, "unit": x_unit, "is_count": is_count},
+        "y": {"key": y_key, "label": y_label, "unit": y_unit, "family": family},
+        "cohort": cohort, "exclude_missing": exclude_missing,
+        "points": pts, "fit": fit, "spearman": spear, "trend_line": line,
+        "quartiles": quart,
+        "n": len(pts), "n_urban": n_urban, "n_rural": n_rural,
+        "n_excluded_missing": n_excluded_missing,
+        "caveat": _EXPLORE_CAVEAT.get(family, ""),
     })
 
 

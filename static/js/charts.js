@@ -117,9 +117,34 @@
     });
   }
 
-  function scatter(canvasId, datasets) {
+  function fmtCount(v) {
+    if (v == null) return '—';
+    return Number(v).toLocaleString();
+  }
+  function fmtNum(v) {
+    if (v == null) return '—';
+    const n = Number(v);
+    return (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
+  }
+
+  // Enhanced scatter.
+  //   opts: {
+  //     xLabel, yLabel   — plain-English axis titles (with units)
+  //     xName, yName     — short names used inside the hover tooltip
+  //     xFmt, yFmt       — value formatters (default lbs on x, number on y)
+  //     yBeginAtZero     — default true
+  //   }
+  // Point objects may carry {x, y, label (county), ur ('Urban'/'Rural')} which
+  // the hover tooltip surfaces. Datasets of type 'line' (the trend line) are
+  // excluded from the point tooltip.
+  function scatter(canvasId, datasets, opts) {
+    opts = opts || {};
     const ctx = document.getElementById(canvasId);
     if (!ctx) return null;
+    const xFmt = opts.xFmt || fmtLbs;
+    const yFmt = opts.yFmt || fmtNum;
+    const xName = opts.xName || 'Pesticide';
+    const yName = opts.yName || 'Value';
     return new Chart(ctx, {
       type: 'scatter',
       data: { datasets: datasets },
@@ -127,26 +152,42 @@
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'top', labels: { boxWidth: 12, padding: 12 } },
+          legend: { position: 'top', labels: { boxWidth: 12, padding: 12, usePointStyle: true } },
           tooltip: {
+            padding: 10,
+            titleFont: { size: 12.5 },
+            bodyFont: { size: 11.5 },
             callbacks: {
+              title: (items) => {
+                const it = items[0];
+                if (!it || it.dataset.type === 'line') return '';
+                const r = it.raw;
+                return r && r.label ? r.label + ' County' : '';
+              },
               label: (c) => {
+                if (c.dataset.type === 'line') return null;   // hide trend endpoints
                 const r = c.raw;
-                return r.label
-                  ? `${r.label}: x=${fmtKg(r.x)}, y=${r.y}`
-                  : `x=${fmtKg(r.x)}, y=${r.y}`;
+                const lines = [
+                  `${xName}: ${xFmt(r.x)}`,
+                  `${yName}: ${yFmt(r.y)}`,
+                ];
+                if (r.ur) lines.push(r.ur + ' county');
+                return lines;
               },
             },
           },
         },
         scales: {
-          x: { type: 'linear', title: { display: true, text: 'pesticide use (lbs)' },
+          x: { type: 'linear',
+               title: { display: true, text: opts.xLabel || 'pesticide use (lbs)',
+                        color: '#c7d0da', font: { size: 12 } },
                grid: { color: 'rgba(154,164,178,.10)' },
-               ticks: { callback: (v) => fmtLbs(v) } },
-          y: { title: { display: true, text: 'CWD positives' },
+               ticks: { callback: (v) => xFmt(v) } },
+          y: { title: { display: true, text: opts.yLabel || 'value',
+                        color: '#c7d0da', font: { size: 12 } },
                grid: { color: 'rgba(154,164,178,.10)' },
-               beginAtZero: true,
-               ticks: { precision: 0 } },
+               beginAtZero: opts.yBeginAtZero !== false,
+               ticks: { callback: (v) => yFmt(v) } },
         },
       },
     });
@@ -210,7 +251,7 @@
   }
 
   window.PMCharts = {
-    fmtKg, fmtLbs, horizontalBar, doughnut, lineChart, scatter, groupedBar,
-    verticalBar, destroyIfExists, CATEGORY_COLORS,
+    fmtKg, fmtLbs, fmtCount, fmtNum, horizontalBar, doughnut, lineChart,
+    scatter, groupedBar, verticalBar, destroyIfExists, CATEGORY_COLORS,
   };
 })();

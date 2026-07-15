@@ -25,6 +25,22 @@ python -m app.data_loader         # downloads ~120 MB of real USGS files into ./
 python app.py                     # serves http://127.0.0.1:8080
 ```
 
+### Optional API keys (`.env`)
+
+Some data sources need a free API key. Keys live in a **gitignored `.env`** file
+so they're never committed — copy the template and fill in your own:
+
+```bash
+cp .env.example .env              # then edit .env
+```
+
+| Variable | Enables | Get a key |
+|---|---|---|
+| `NASS_API_KEY` | USDA NASS county crop acreage → crop-context features + the **lbs per cropland acre** map normalization | https://quickstats.nass.usda.gov/api |
+
+`.env` is loaded automatically at startup (no extra dependency). After adding the
+key, run `python refresh_data.py --source nass_crop` to pull the crop data.
+
 ## Features
 
 - **Heat-map view** — county choropleth, layer toggles (category / specific compound),
@@ -173,11 +189,91 @@ The 2018 and 2019 preliminary releases cover fewer compounds than the final
 files (52 in 2019 vs 188 in earlier years), so totals dip in the late-year
 trend. This is a property of the source data, not the loader.
 
+## Keeping the data fresh
+
+`refresh_data.py` re-pulls every live source and updates the database **safely**.
+Each source is refreshed independently — one failing source never blocks the
+others, and the app is never left empty or half-written:
+
+1. The source's loader runs against a private **staging** database.
+2. The staged result is **validated** (expected tables/columns present, primary
+   table non-empty, row count not collapsed vs. the live data).
+3. Only if validation passes are the live tables **atomically swapped** in one
+   transaction. If a source is down or changed its format, the last good data is
+   kept and the failure is logged.
+
+Every run is appended to `refresh.log`, and each source's last-refresh time,
+coverage window, and status are recorded in the `data_sources` table and shown
+in the app's **Data sources** modal (with a "Data current as of …" line and a
+subtle *stale* flag on anything past its refresh interval).
+
+```bash
+python refresh_data.py                     # refresh all sources
+python refresh_data.py --source water_quality   # refresh just one
+python refresh_data.py --list              # show each source's last status
+python refresh_data.py --no-derived        # skip rebuilding correlations
+python refresh_data.py --source water_quality --full   # full WQP rebuild (see below)
+```
+
+The script is idempotent (re-running never duplicates data). Immutable archival
+caches (finalized USGS EPest files, historical wind, watershed boundaries) are
+reused — re-running still picks up any newly *published* years added to
+`app/config.py`.
+
+**Water Quality Portal is pulled incrementally.** The full MI pesticide result
+set is ~230 MB, and the portal rate-limits large repeated downloads. So after
+the first load, each refresh downloads only samples on/after the latest sample
+date already stored (WQP `startDateLo`) — usually a few MB — and appends them,
+re-fetching the boundary day in full to avoid gaps or duplicates. If a WQP fetch
+fails, the existing data is kept and the source is marked failed (it is never
+silently left partial). Because date-bounded pulls key off the *sample* date, a
+sample collected before the watermark but uploaded to WQP late can be missed;
+run `--full` occasionally (e.g. yearly) to re-pull everything and backfill.
+
+### Recommended refresh interval per source
+
+| Source (`--source`) | Cadence | Why |
+|---|---|---|
+| `usgs_epest` (pesticide use) | **Annual** | USGS publishes one release per year |
+| `nass_crop` (crop acreage) | **Annual** | NASS county data is yearly |
+| `cancer` (NCI cancer profiles) | **Annual** | 5-year rolling rates update yearly |
+| `respiratory` (CDC Tracking/WONDER) | **Annual** | Annual county measures |
+| `wind` (IEM ASOS) | **Annual** | Growing-season aggregates |
+| `water_quality` (WQP samples) | **Quarterly** | New samples posted continuously |
+| `superfund` (EPA NPL) | **Quarterly** | Site statuses change through the year |
+| `cwd` (DNR CWD) | **Quarterly** | Updated through hunting/testing seasons |
+
+### Scheduling on Windows (Task Scheduler)
+
+`refresh_data.py` does **not** schedule itself — set it up with the built-in
+Task Scheduler. Use the full path to the venv's Python and to the script, and
+quote paths that contain spaces. A simple approach is one monthly all-sources
+run (the per-source guards make it a no-op for anything already current):
+
+```bat
+schtasks /create /tn "PesticideMap Refresh" /sc MONTHLY /d 1 /st 03:00 ^
+  /tr "\"C:\Users\tarbu\Desktop\michigan-pesticide-map\.venv\Scripts\python.exe\" \"C:\Users\tarbu\Desktop\michigan-pesticide-map\refresh_data.py\""
+```
+
+For tighter control, create two tasks that call the script with `--source` for
+the quarterly sources and a yearly task for the annual ones. Example — quarterly
+water-quality refresh on the 1st of Jan/Apr/Jul/Oct:
+
+```bat
+schtasks /create /tn "PesticideMap WQ Refresh" /sc MONTHLY /mo 3 /d 1 /st 03:30 ^
+  /tr "\"...\.venv\Scripts\python.exe\" \"...\refresh_data.py\" --source water_quality"
+```
+
+The script exits non-zero if **every** selected source fails, so Task Scheduler
+can surface a failed run. Check `refresh.log` (and `python refresh_data.py
+--list`) to see what happened.
+
 ## Architecture
 
 ```
 michigan-pesticide-map/
 ├── app.py                  Flask server + REST API
+├── refresh_data.py         Safe, staged data-refresh harness (scheduled)
 ├── app/
 │   ├── config.py           Paths, URLs, env wiring
 │   ├── database.py         SQLite schema + connection helper

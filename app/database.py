@@ -65,10 +65,17 @@ CREATE TABLE IF NOT EXISTS data_sources (
     source_id       TEXT PRIMARY KEY,
     title           TEXT,
     url             TEXT,
-    status          TEXT,                    -- ok / unavailable / skipped
+    status          TEXT,                    -- ok / unavailable / skipped / reference / baseline / compiled
     rows_loaded     INTEGER,
     notes           TEXT,
-    last_updated    TEXT
+    last_updated    TEXT,
+    -- ---- provenance / freshness (written by refresh_data.py) ----
+    coverage_start          TEXT,            -- earliest data point covered (e.g. "1992" or "2018-01")
+    coverage_end            TEXT,            -- latest data point covered
+    refresh_status          TEXT,            -- success / failed / partial / skipped / never
+    refresh_interval_months INTEGER,         -- expected refresh cadence (staleness threshold)
+    last_success            TEXT,            -- ISO timestamp of last successful refresh
+    last_attempt            TEXT             -- ISO timestamp of last refresh attempt
 );
 
 -- ===== Chronic Wasting Disease (CWD) overlay =====

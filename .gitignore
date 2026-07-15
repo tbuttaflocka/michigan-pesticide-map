@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 venv/
 
+# Secrets / local environment (API keys) — never commit
+.env
+.env.*
+!.env.example
+
 # Downloaded / generated data artifacts (recreate with `python -m app.data_loader`)
 data/
 !data/.gitkeep
