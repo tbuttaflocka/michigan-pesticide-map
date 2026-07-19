@@ -2884,7 +2884,8 @@
         switchView(initial, false);
       }
 
-
+      renderChoropleth();
+      await loadWaterCompounds();
       bindFilters();
       await refreshAll();
 
