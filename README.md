@@ -161,6 +161,7 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 | **EPA Superfund (SEMS) NPL sites** | ✅ live download | ~90 Michigan NPL sites (66 active, 22 deleted, 2 proposed) with coordinates, HRS score, status, county, listing date. ArcGIS Feature Service (org `cJ9YHowT8TU7DUyn`, `State='Michigan'`); merged/deduped with the compiled dataset. |
 | **Compiled industrial polluters + PFAS sites** | ✅ embedded reference | 31 hand-compiled major sites (Dow, Velsicol/PBB, Wolverine/Hush Puppies PFAS, Torch Lake, McLouth Steel, GM, Kalamazoo River PCBs, Wurtsmith AFB, Gelman 1,4-dioxane, etc.) with company attribution, contaminant lists, narratives, impact radii, and affected waterways in `app/contamination_data.py`. Many are non-NPL and don't appear in the EPA feed. |
 | Michigan EGLE Remediation & Redevelopment (Part 201), MPART (PFAS), EPA Region 5, MDHHS PBB Registry, ATSDR | 🔗 reference link | State/PFAS programs and toxicological references; portal-only or embedded, not bulk feeds. |
+| **EPA Toxics Release Inventory (TRI)** — active industrial releases, 2013–2024 | ✅ live download | ~1,090 Michigan facilities and ~37k facility-chemical-year release records from the Envirofacts `mv_tri_basic_download` view (filtered `st=MI`, one CSV per year). Each record carries county, lat/lng, NAICS + plain-language industry sector, PFAS/carcinogen flags, and pounds released per pathway (air = fugitive + stack, water, underground, land). Complements the legacy Superfund layer by showing what facilities are *actively* releasing now. Self-reported annually under EPCRA. Powers factory markers, the "TRI toxic releases" choropleth (with air/water/land/PFAS sub-options), correlation X-variables, and a year-over-year trend. No API key required. |
 | **CDC EPHT Tracking Network** asthma + COPD rates | ✅ live download | 2,822 county-year-condition rows pulled from `getCoreHolder` measures 437/103/652/649 with exponential-backoff retry. |
 | MDHHS Asthma Atlas 2019 — statewide baseline | ✅ baked baseline | Adult prevalence applied uniformly across counties; "Above / below state average" comparison shown per county. |
 | Michigan MiTracking, MDHHS Resp. Dashboard, MHA, CDC WONDER, MiBRFS | 🔗 reference link | All five appear in the Data Sources modal but are not bulk-downloadable. |
@@ -239,6 +240,7 @@ run `--full` occasionally (e.g. yearly) to re-pull everything and backfill.
 | `cancer` (NCI cancer profiles) | **Annual** | 5-year rolling rates update yearly |
 | `respiratory` (CDC Tracking/WONDER) | **Annual** | Annual county measures |
 | `wind` (IEM ASOS) | **Annual** | Growing-season aggregates |
+| `tri` (EPA Toxics Release Inventory) | **Annual** (quarterly-safe) | TRI is published yearly (a year's data finalizes ~Oct of the following year). A quarterly run simply reuses the cached finalized years and picks up the newly-finalized year when it lands. |
 | `water_quality` (WQP samples) | **Quarterly** | New samples posted continuously |
 | `superfund` (EPA NPL) | **Quarterly** | Site statuses change through the year |
 | `cwd` (DNR CWD) | **Quarterly** | Updated through hunting/testing seasons |

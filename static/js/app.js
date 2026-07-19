@@ -87,6 +87,20 @@
       density: null,               // L.geoJSON
       densityByFips: new Map(),
     },
+    tri: {
+      loaded: false,
+      facilities: [],              // /api/tri/sites facilities
+      showSites: false,
+      markers: null,               // L.markerClusterGroup / layerGroup
+      latestYear: null,
+      maxTotal: 1,
+      metric: 'total',             // choropleth pathway sub-option
+      densityByFips: new Map(),    // per-metric county values (cache keyed by metric)
+      _densityMetric: null,        // which metric densityByFips currently holds
+      _densityMax: 1,
+      trendSw: null,
+      trendCty: null,
+    },
     wind: {
       showRoses: false,
       showDrift: false,
@@ -231,6 +245,15 @@
         const idx = Math.min(CONTAM_PALETTE.length - 1,
           Math.floor(Math.sqrt(v / max) * CONTAM_PALETTE.length));
         return CONTAM_PALETTE[idx];
+      }
+      case 'tri': {
+        const c = state.tri.densityByFips.get(fips);
+        const v = c ? c.value : 0;
+        if (!v) return NO_DATA;
+        const max = state.tri._densityMax || 1;
+        const idx = Math.min(TRI_PALETTE.length - 1,
+          Math.floor(Math.sqrt(v / max) * TRI_PALETTE.length));
+        return TRI_PALETTE[idx];
       }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
@@ -411,6 +434,12 @@
           ? `<div><span class="muted">Contamination sites:</span> <span class="v">${c.value}</span></div>`
           : '<div class="muted">No mapped sites</div>';
       }
+      case 'tri': {
+        const c = state.tri.densityByFips.get(fips);
+        if (!c || !c.value) return '<div class="muted">No TRI releases reported</div>';
+        return `<div><span class="muted">${triMetricLabel(state.tri.metric)}:</span> <span class="v">${fmtLbs(c.value)}</span></div>
+             <div><span class="muted">Facilities:</span> <span class="v">${c.facilities || 0}</span></div>`;
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         const valLabel = state.normalize === 'per_sq_mile' ? 'lbs / mi²'
@@ -443,8 +472,17 @@
       case 'resp':   return `Respiratory — ${respMetricLabel(state.resp.metric)}`;
       case 'cancer': return `Cancer — ${cancerTypeLabel(state.cancer.type)} (${state.cancer.dataType})`;
       case 'contam_density': return 'Contamination site density';
+      case 'tri':    return `TRI toxic releases — ${triMetricLabel(state.tri.metric).toLowerCase()}`;
       default:       return `Pesticide — ${pestFilterLabel()}`;
     }
+  }
+
+  // Plain-language label for the current TRI choropleth pathway sub-option.
+  function triMetricLabel(m) {
+    return ({
+      total: 'Total releases', air: 'Air releases', water: 'Water releases',
+      land: 'Land releases', pfas: 'PFAS releases',
+    })[m] || 'Total releases';
   }
 
   function pestFilterLabel() {
@@ -534,6 +572,11 @@
         paletteStrip(el, CONTAM_PALETTE);
         note.textContent = 'contamination sites per county (lower → higher)';
         break;
+      case 'tri':
+        paletteStrip(el, TRI_PALETTE);
+        note.textContent = `${triMetricLabel(state.tri.metric).toLowerCase()} · lbs/yr` +
+          (state.tri.latestYear ? ` (${state.tri.latestYear})` : '') + ' (lower → higher)';
+        break;
     }
     renderMarkerKeys();
   }
@@ -548,6 +591,7 @@
     { on: () => state.water.showWatersheds,  c: '#8db0ff', t: 'HUC-8 watersheds' },
     { on: () => state.contam.showSites,      c: '#f85149', t: 'Contamination sites' },
     { on: () => state.contam.showZones,      c: '#e8873c', t: 'Contamination impact zones' },
+    { on: () => state.tri.showSites,         c: '#d9772f', t: 'TRI facilities (size/red = more released)' },
     { on: () => state.wind.showRoses,        c: '#3fb950', t: 'Wind roses (Apr–Sep)' },
     { on: () => state.wind.showDrift,        c: '#e8873c', t: 'Drift arrows (downwind)' },
   ];
@@ -596,11 +640,16 @@
     state.cancer.enabled     = (which === 'cancer');
     state.contam.showDensity = (which === 'contam_density');
 
+    // Show the TRI pathway sub-options only while the TRI choropleth is active.
+    const triSub = $('tri-suboptions');
+    if (triSub) triSub.classList.toggle('hidden', which !== 'tri');
+
     loading(true);
     try {
       if (which === 'resp')  await loadRespData();  else updateRespMeta(null);
       if (which === 'cancer') await loadCancerData(); else updateCancerMeta(null);
       if (which === 'contam_density') await loadContamDensity();
+      if (which === 'tri') await loadTriDensity(state.tri.metric);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1145,7 +1194,16 @@
   // A self-contained trend panel: fetches /api/trend for a scope (statewide or a
   // county fips) and renders it in one of four view modes, with a mode toggle,
   // clickable legend, and a breakdown tooltip. Reused for both trend charts.
-  function createTrendPanel({ canvasId, modesId, scopeId, chartKey }) {
+  function createTrendPanel(opts) {
+    const { canvasId, modesId, scopeId, chartKey } = opts;
+    const endpoint = opts.endpoint || '/api/trend';
+    const catColors = opts.catColors || TREND_CAT_COLORS;
+    const totalLabel = opts.totalLabel || 'Total pesticide';
+    const totalColor = opts.totalColor || '#3fb950';
+    // Params for the fetch; pesticide passes estimate+category, TRI just fips.
+    const paramsFor = opts.paramsFor || ((fips) => ({
+      fips: fips || '', estimate: state.estimate, category: state.category,
+    }));
     let mode = 'category';
     let data = null;
 
@@ -1154,8 +1212,8 @@
         return {
           stacked: false, pct: false,
           datasets: [{
-            label: 'Total pesticide', data: data.total,
-            borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.15)',
+            label: totalLabel, data: data.total,
+            borderColor: totalColor, backgroundColor: hexA(totalColor, 0.15),
             fill: true, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.25,
           }],
         };
@@ -1184,7 +1242,7 @@
               return denom ? (v / denom * 100) : 0;
             })
           : c.values;
-        const color = TREND_CAT_COLORS[c.key] || '#9aa4b2';
+        const color = catColors[c.key] || '#9aa4b2';
         return {
           label: c.label, data: vals, borderColor: color,
           backgroundColor: hexA(color, 0.5),
@@ -1255,9 +1313,7 @@
     }
 
     async function load(fips) {
-      data = await api('/api/trend', {
-        fips: fips || '', estimate: state.estimate, category: state.category,
-      });
+      data = await api(endpoint, paramsFor(fips));
       if (scopeId) {
         $(scopeId).textContent = data.scope
           + (data.category_filter ? ` · ${data.category_filter}` : '');
@@ -1307,6 +1363,20 @@
       });
     }
     state.trend.sw.load(null);
+
+    // Statewide industrial-releases (TRI) trend — only if the layer has data.
+    if (triHasData()) {
+      if (!state.tri.trendSw) {
+        state.tri.trendSw = createTrendPanel({
+          canvasId: 'chart-tri-trend-sw', modesId: 'tri-trend-modes-sw',
+          scopeId: 'tri-trend-scope-sw', chartKey: 'triTrendSw',
+          endpoint: '/api/tri/trend', catColors: TRI_PATH_COLORS,
+          totalLabel: 'Total on-site releases', totalColor: '#d9772f',
+          paramsFor: (fips) => ({ fips: fips || '' }),
+        });
+      }
+      state.tri.trendSw.load(null);
+    }
 
     PMCharts.destroyIfExists(state.charts.category);
     const catLabels = data.by_category.map((r) => r.category);
@@ -1412,6 +1482,8 @@
     renderCountyCancerCard(data.cancer);
     // Industrial contamination list
     renderCountyContamination(data.contamination);
+    // Industrial toxic releases (TRI) — fetched separately (own tables).
+    renderCountyTri(fips);
 
     PMCharts.destroyIfExists(state.charts.countyCompounds);
     state.charts.countyCompounds = PMCharts.horizontalBar(
@@ -1628,6 +1700,209 @@
         <span class="n">${s.site_name}${s.company ? `<span class="muted small"> — ${s.company}</span>` : ''}</span>
         <span class="s">${s.status_class}${hrs}</span></div>`;
     }).join('');
+  }
+
+  // ---------- EPA Toxics Release Inventory (TRI) overlay ----------
+  // Choropleth: a distinct teal→indigo scale (unused by any other layer).
+  const TRI_PALETTE = ['#dff2f0', '#b9e2dd', '#8fcfc9', '#65bbb4', '#42a29d',
+                       '#2f8783', '#236c6c', '#1a5358', '#143c47', '#0e2833'];
+  // Trend pathway band colors.
+  const TRI_PATH_COLORS = {
+    air: '#e8873c', water: '#58a6ff', land: '#a3874f', underground: '#bc8cff',
+  };
+  // Facility-marker fill by release volume: amber (low) → deep red (high) so the
+  // worst emitters stand out (per spec: bigger/redder = more pounds released).
+  const TRI_MARKER_RAMP = ['#f0d06b', '#f0b429', '#e8873c', '#d96b35', '#bf3b2c', '#8b1f1f'];
+
+  function triHasData() {
+    return ((state.meta && state.meta.data_sources) || [])
+      .some((s) => s.source_id === 'epa_tri' && (s.rows_loaded || 0) > 0);
+  }
+
+  function triPane() {
+    if (!state.map.getPane('tri')) {
+      state.map.createPane('tri').style.zIndex = 640;   // above choropleth
+    }
+    return 'tri';
+  }
+
+  function triMarkerColor(total, max) {
+    const f = max > 0 ? Math.sqrt(Math.max(0, total) / max) : 0;
+    return TRI_MARKER_RAMP[Math.min(TRI_MARKER_RAMP.length - 1,
+      Math.floor(f * TRI_MARKER_RAMP.length))];
+  }
+  function triMarkerSize(total, max) {
+    const f = max > 0 ? Math.sqrt(Math.max(0, total) / max) : 0;
+    return Math.round(16 + f * 26);   // 16..42 px
+  }
+
+  function newTriClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      return L.markerClusterGroup({
+        clusterPane: 'tri', maxClusterRadius: 48, chunkedLoading: true,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: true,
+      });
+    }
+    return L.layerGroup();
+  }
+
+  async function loadTriSites() {
+    if (state.tri.loaded) return;
+    const d = await api('/api/tri/sites');
+    state.tri.facilities = d.facilities || [];
+    state.tri.latestYear = d.latest_year;
+    state.tri.maxTotal = (d.stats && d.stats.max_total) || 1;
+    state.tri.loaded = true;
+  }
+
+  // Tiny inline SVG sparkline of a facility's per-year total releases.
+  function triSpark(spark) {
+    if (!spark || spark.length < 2) return '';
+    const vals = spark.map((p) => p.total);
+    const max = Math.max(1, ...vals);
+    const w = 130, h = 26, n = vals.length;
+    const pts = vals.map((v, i) =>
+      `${(i / (n - 1) * (w - 2) + 1).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`).join(' ');
+    return `<div class="tri-spark-wrap"><svg class="tri-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+      <polyline points="${pts}" fill="none" stroke="#e8873c" stroke-width="1.5"/></svg>
+      <span class="muted small">${spark[0].year}–${spark[spark.length - 1].year}</span></div>`;
+  }
+
+  function triTrendBadge(trend) {
+    if (trend === 'up') return '<span class="tri-trend up">▲ rising</span>';
+    if (trend === 'down') return '<span class="tri-trend down">▼ falling</span>';
+    return '<span class="tri-trend flat">■ ~flat</span>';
+  }
+
+  function triFacilityPopupHtml(f) {
+    const path = (label, v) => v > 0
+      ? `<div class="row"><span class="k">${label}</span> <b>${fmtLbs(v)}</b></div>` : '';
+    const chem = (f.top_chemicals || []).slice(0, 5).map((c) =>
+      `<div class="tri-chem"><span class="cn">${c.chemical}`
+      + `${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}`
+      + `${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span>`
+      + `<span class="cv">${fmtLbs(c.lbs)}</span></div>`).join('');
+    return `<div class="tri-popup">
+      ${f.parent_company ? `<div class="tri-parent">${f.parent_company}</div>` : ''}
+      <h4>${f.name}</h4>
+      <div class="tri-meta">${f.industry_sector || 'Industry n/a'}${f.naics_code ? ` · NAICS ${f.naics_code}` : ''}${f.city ? ' · ' + f.city : ''}${f.county ? ', ' + f.county + ' Co.' : ''}</div>
+      <div class="tri-total">${fmtLbs(f.total_lbs)} <span class="muted">released · ${f.year}</span> ${triTrendBadge(f.trend)}</div>
+      <div class="tri-paths">${path('Air:', f.air_lbs)}${path('Water:', f.water_lbs)}${path('Land:', f.land_lbs)}${path('Underground:', f.underground_lbs)}</div>
+      ${chem ? `<div class="tri-chem-head">Top chemicals released</div>${chem}` : ''}
+      ${triSpark(f.spark)}
+      <div class="tri-note">Self-reported to EPA under the Toxics Release Inventory (EPCRA). Pounds per year.</div>
+    </div>`;
+  }
+
+  function renderTriMarkers() {
+    if (state.tri.markers) { state.tri.markers.remove(); state.tri.markers = null; }
+    if (!state.tri.showSites) { updateTriStats(); return; }
+    const pane = triPane();
+    const grp = newTriClusterLayer();
+    const max = state.tri.maxTotal || 1;
+    let shown = 0;
+    for (const f of state.tri.facilities) {
+      if (f.lat == null || f.lng == null) continue;
+      const size = triMarkerSize(f.total_lbs, max);
+      const color = triMarkerColor(f.total_lbs, max);
+      const m = L.marker([f.lat, f.lng], {
+        pane,
+        icon: L.divIcon({
+          className: 'tri-divicon',
+          html: `<div class="tri-marker" style="width:${size}px;height:${size}px;background:${color}"><span>🏭</span></div>`,
+          iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+        }),
+      });
+      m.bindPopup(triFacilityPopupHtml(f), { maxWidth: 340, className: 'tri-popup-wrap' });
+      grp.addLayer(m);
+      shown++;
+    }
+    grp.addTo(state.map);
+    state.tri.markers = grp;
+    updateTriStats(shown);
+  }
+
+  async function refreshTriSites() {
+    if (state.tri.showSites) await loadTriSites();
+    renderTriMarkers();
+    renderMarkerKeys();
+  }
+
+  function updateTriStats(shown) {
+    const el = $('tri-stats');
+    if (!el) return;
+    if (!state.tri.showSites || !state.tri.loaded) {
+      el.textContent = triHasData()
+        ? 'Enable "TRI industrial facilities" (Overlays) or choose "TRI toxic releases".'
+        : 'No TRI data loaded — run refresh_data.py --source tri.';
+      return;
+    }
+    const n = shown != null ? shown : state.tri.facilities.length;
+    el.textContent = `${n.toLocaleString()} facilities · ${state.tri.latestYear} · bigger/redder = more released`;
+  }
+
+  // Per-county TRI totals for the choropleth (cached per pathway metric).
+  async function loadTriDensity(metric) {
+    if (state.tri._densityMetric === metric && state.tri.densityByFips.size) return;
+    const d = await api('/api/tri/density', { metric });
+    state.tri.densityByFips.clear();
+    for (const c of d.counties) state.tri.densityByFips.set(c.fips, c);
+    state.tri._densityMetric = metric;
+    state.tri._densityMax = (d.stats && d.stats.max) || 1;
+    state.tri.latestYear = d.year;
+  }
+
+  function showCountyTriTrend(on) {
+    const m = $('tri-trend-modes-cty'), b = $('county-tri-trend-box');
+    if (m) m.classList.toggle('hidden', !on);
+    if (b) b.classList.toggle('hidden', !on);
+  }
+
+  // County-panel TRI section: pathway breakdown + top facilities + top chemicals.
+  async function renderCountyTri(fips) {
+    const el = $('county-tri-detail');
+    const count = $('county-tri-count');
+    if (!el) return;
+    if (!triHasData()) {
+      if (count) count.textContent = '';
+      el.innerHTML = '<p class="muted small">No TRI data loaded.</p>';
+      showCountyTriTrend(false);
+      return;
+    }
+    let d;
+    try { d = await api('/api/tri/county', { fips }); }
+    catch (e) { el.innerHTML = '<p class="muted small">TRI data unavailable.</p>'; return; }
+    if (!d.total_lbs) {
+      if (count) count.textContent = '· none reported';
+      el.innerHTML = '<p class="muted small">No TRI facilities reported releases in this county.</p>';
+      showCountyTriTrend(false);
+      return;
+    }
+    if (count) count.textContent =
+      `· ${fmtLbs(d.total_lbs)} · ${d.facilities} facilit${d.facilities === 1 ? 'y' : 'ies'} · ${d.year}`;
+    const pathRow = (p) => p.lbs > 0
+      ? `<div class="tri-pathrow"><span class="k">${p.label}</span><span class="v">${fmtLbs(p.lbs)}</span></div>` : '';
+    const facRow = (f) =>
+      `<div class="tri-firow"><span class="n">${f.name}${f.industry ? `<span class="muted small"> — ${f.industry}</span>` : ''}</span><span class="v">${fmtLbs(f.lbs)}</span></div>`;
+    const chemRow = (c) =>
+      `<div class="tri-firow"><span class="n">${c.chemical}${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span><span class="v">${fmtLbs(c.lbs)}</span></div>`;
+    el.innerHTML =
+      `<div class="tri-paths-block">${d.pathways.map(pathRow).join('')}</div>`
+      + `<div class="tri-sub">Top facilities</div>${d.top_facilities.map(facRow).join('')}`
+      + `<div class="tri-sub">Top chemicals</div>${d.top_chemicals.map(chemRow).join('')}`
+      + `<div class="tri-note">Self-reported to EPA (TRI). Pounds released in ${d.year}.</div>`;
+    showCountyTriTrend(true);
+    if (!state.tri.trendCty) {
+      state.tri.trendCty = createTrendPanel({
+        canvasId: 'chart-tri-trend-cty', modesId: 'tri-trend-modes-cty',
+        scopeId: null, chartKey: 'triTrendCty',
+        endpoint: '/api/tri/trend', catColors: TRI_PATH_COLORS,
+        totalLabel: 'Total on-site releases', totalColor: '#d9772f',
+        paramsFor: (f) => ({ fips: f || '' }),
+      });
+    }
+    state.tri.trendCty.load(fips);
   }
 
   // ---------- Wind roses & pesticide-drift overlay ----------
@@ -1955,6 +2230,23 @@
       state.contam.showZones = e.target.checked;
       if (e.target.checked) await loadContamination();
       renderContamZones(); renderMarkerKeys();
+    });
+
+    // TRI industrial-facility markers (independent overlay).
+    $('tri-sites').addEventListener('change', async (e) => {
+      state.tri.showSites = e.target.checked;
+      await refreshTriSites();
+    });
+    // TRI choropleth pathway sub-option.
+    $('tri-metric').addEventListener('change', async (e) => {
+      state.tri.metric = e.target.value;
+      if (state.activeChoropleth === 'tri') {
+        await loadTriDensity(state.tri.metric);
+        if (state.geoLayer) state.geoLayer.setStyle(styleFor);
+        restyleSelection();
+        renderLegend();
+        updateActiveIndicator();
+      }
     });
 
     // Wind / drift overlays (stack freely)
@@ -2401,6 +2693,11 @@
     $('explore-summary').textContent =
       PMGloss.summarySentence(d.fit, xLbl.toLowerCase(), yLbl.toLowerCase(), cohort);
     $('explore-caveat').textContent = d.caveat || '';
+
+    // Surface the "TRI as a control" note whenever an industrial-release
+    // variable is being compared, to frame it against the pesticide signal.
+    const triNote = $('explore-tri-note');
+    if (triNote) triNote.classList.toggle('hidden', !(x && x.startsWith('tri')));
   }
 
   function renderExploreReadout(d) {

@@ -244,6 +244,17 @@ SOURCES: list[Source] = [
         interval_months=12, min_abs=50, floor_frac=0.5,
         coverage=label_range("cancer_incidence", "data_years"),
     ),
+    Source(
+        id="tri", label="EPA Toxics Release Inventory — active industrial releases",
+        loaders=[dl.load_tri_data],
+        targets=["tri_facility", "tri_release"],
+        primary_target="tri_release", primary_source_id="epa_tri",
+        # TRI is published annually (finalized ~Oct for the prior year); a
+        # quarterly check simply reuses cached finalized years and picks up the
+        # newly-finalized year when it lands.
+        interval_months=12, min_abs=500, floor_frac=0.5,
+        coverage=year_range("tri_release", "year"),
+    ),
 ]
 
 SOURCES_BY_ID = {s.id: s for s in SOURCES}

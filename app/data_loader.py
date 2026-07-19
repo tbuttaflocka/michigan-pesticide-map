@@ -40,6 +40,11 @@ from .config import (
     WIND_YEARS,
     WIND_SEASON_MONTHS,
     WIND_CACHE_DIR,
+    TRI_MV_URL,
+    TRI_STATE_ABBR,
+    TRI_START_YEAR,
+    TRI_END_YEAR,
+    TRI_CACHE_DIR,
 )
 from .wind_data import MI_ASOS_STATIONS, DIRS_16, deg_to_dir16, dir16_to_deg
 from .water_quality import (
@@ -2171,6 +2176,206 @@ def _epa_ms_to_iso(ms) -> str | None:
         return None
 
 
+# ---------- EPA Toxics Release Inventory (TRI) ----------
+
+# Exact column headers we read out of the mv_tri_basic_download CSV.
+_TRI_COL = {
+    "year": "year", "fid": "trifd", "name": "facility name",
+    "addr": "street address", "city": "city", "county": "county",
+    "lat": "latitude", "lng": "longitude", "parent": "parent co name",
+    "naics": "primary naics", "sector": "industry sector",
+    "fed": "federal facility",
+    "chem": "chemical", "cas": "cas#", "pfas": "pfas", "carc": "carcinogen",
+    "fug_air": "5.1 - fugitive air", "stack_air": "5.2 - stack air",
+    "water": "5.3 - water", "underground": "5.4 - underground",
+    "onsite_total": "on-site release total",
+}
+
+
+def _tri_num(v) -> float:
+    """Parse a TRI quantity cell to pounds. Cells look like '1290.0000000000',
+    scientific-notation zeros like '0E-10', 'NA', or ''. All coerce to float;
+    blanks/NA -> 0.0."""
+    if v is None:
+        return 0.0
+    s = str(v).strip()
+    if not s or s.upper() == "NA":
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _tri_fetch_year(year: int) -> Path | None:
+    """Download one year's Michigan TRI basic-download CSV to the cache. Reuses
+    an existing cached file unless a force-refresh is requested (finalized TRI
+    years are immutable). Returns the path, or None if the fetch failed."""
+    TRI_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = TRI_CACHE_DIR / f"tri_{TRI_STATE_ABBR}_{year}.csv"
+    if not _need_download(path, 200, force=FORCE_REFRESH):
+        return path
+    url = TRI_MV_URL.format(state=TRI_STATE_ABBR, year=year)
+    try:
+        n = download_stream(url, path, timeout=180, attempts=4, min_bytes=1)
+        log(f"  TRI {year}: downloaded {n:,} bytes", level="ok")
+        return path
+    except Exception as e:                                # noqa: BLE001
+        log(f"  TRI {year}: download failed ({e})", level="warn")
+        return None
+
+
+def load_tri_data(conn: sqlite3.Connection) -> int:
+    """Load EPA Toxics Release Inventory releases for Michigan across the
+    available reporting years into tri_facility + tri_release.
+
+    Source: EPA Envirofacts `mv_tri_basic_download` view — one flat row per
+    facility/chemical/year, filtered to MI (st=MI). All quantities are in
+    pounds. Pathways: air = fugitive + stack; water; underground; land is the
+    on-site remainder (total - air - water - underground) so the four pathways
+    always sum to the reported on-site total without double-counting the many
+    RCRA land-disposal sub-columns.
+    """
+    log("Loading EPA Toxics Release Inventory (TRI) for Michigan...")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM tri_release")
+    cur.execute("DELETE FROM tri_facility")
+    conn.commit()
+
+    # Normalize county names for matching: TRI writes "ST JOSEPH" / "ST. CLAIR"
+    # in caps with inconsistent periods, vs the counties table's "St. Joseph".
+    def _norm_county(s: str) -> str:
+        return " ".join((s or "").upper().replace(".", "").split())
+
+    name_to_fips = {_norm_county(r["name"]): r["fips"]
+                    for r in conn.execute("SELECT name, fips FROM counties")}
+
+    C = _TRI_COL
+    facilities: dict[str, dict] = {}     # fid -> attributes (from most recent year)
+    releases: list[tuple] = []
+    years_seen: set[int] = set()
+    unmatched: set[str] = set()
+
+    def _flt(v):
+        try:
+            return float(v) if v not in (None, "", "NA") else None
+        except (ValueError, TypeError):
+            return None
+
+    for year in range(TRI_START_YEAR, TRI_END_YEAR + 1):
+        path = _tri_fetch_year(year)
+        if path is None:
+            continue
+        try:
+            with path.open(newline="", encoding="utf-8", errors="replace") as fh:
+                rows = list(csv.DictReader(fh))
+        except OSError as e:
+            log(f"  TRI {year}: read failed ({e})", level="warn")
+            continue
+        if not rows or C["fid"] not in (rows[0].keys() if rows else ()):
+            continue
+        year_rows = 0
+        for row in rows:
+            fid = (row.get(C["fid"]) or "").strip()
+            chem = (row.get(C["chem"]) or "").strip()
+            if not fid or not chem:
+                continue
+            row_year = int(_flt(row.get(C["year"])) or year)
+
+            county = (row.get(C["county"]) or "").strip()
+            fips = name_to_fips.get(_norm_county(county))
+            if county and not fips:
+                unmatched.add(county)
+
+            attrs = {
+                "facility_name": (row.get(C["name"]) or "").strip(),
+                "street_address": (row.get(C["addr"]) or "").strip() or None,
+                "city": (row.get(C["city"]) or "").strip() or None,
+                "county": county or None,
+                "county_fips": fips,
+                "latitude": _flt(row.get(C["lat"])),
+                "longitude": _flt(row.get(C["lng"])),
+                "parent_company": (row.get(C["parent"]) or "").strip() or None,
+                "naics_code": (row.get(C["naics"]) or "").strip() or None,
+                "industry_sector": (row.get(C["sector"]) or "").strip() or None,
+                "federal_facility": 1 if (row.get(C["fed"]) or "").strip().upper()
+                                    in ("YES", "TRUE", "1") else 0,
+                "_year": row_year,
+            }
+            prev = facilities.get(fid)
+            if prev is None or attrs["_year"] >= prev["_year"]:
+                facilities[fid] = attrs
+
+            fug = _tri_num(row.get(C["fug_air"]))
+            stk = _tri_num(row.get(C["stack_air"]))
+            water = _tri_num(row.get(C["water"]))
+            ug = _tri_num(row.get(C["underground"]))
+            total = _tri_num(row.get(C["onsite_total"]))
+            air = fug + stk
+            land = max(0.0, total - air - water - ug)
+            releases.append((
+                fid, row_year, chem,
+                (row.get(C["cas"]) or "").strip() or None,
+                1 if (row.get(C["pfas"]) or "").strip().upper() == "YES" else 0,
+                1 if (row.get(C["carc"]) or "").strip().upper() == "YES" else 0,
+                fug, stk, air, water, ug, land, total,
+            ))
+            year_rows += 1
+        if year_rows:
+            years_seen.add(year)
+            log(f"  TRI {year}: {year_rows:,} release records", level="info")
+
+    if not releases:
+        record_source(
+            conn, "epa_tri",
+            "EPA Toxics Release Inventory (TRI) — Envirofacts",
+            "https://www.epa.gov/toxics-release-inventory-tri-program",
+            "unavailable", 0,
+            "TRI fetch returned no data (Envirofacts unavailable or view changed).")
+        conn.commit()
+        log("  TRI: no data loaded", level="warn")
+        return 0
+
+    for fid, a in facilities.items():
+        cur.execute(
+            """INSERT INTO tri_facility(
+                 facility_id, facility_name, street_address, city, county,
+                 county_fips, latitude, longitude, parent_company, naics_code,
+                 industry_sector, federal_facility)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (fid, a["facility_name"], a["street_address"], a["city"], a["county"],
+             a["county_fips"], a["latitude"], a["longitude"], a["parent_company"],
+             a["naics_code"], a["industry_sector"], a["federal_facility"]))
+    cur.executemany(
+        """INSERT INTO tri_release(
+             facility_id, year, chemical, cas, is_pfas, is_carcinogen,
+             fugitive_air_lbs, stack_air_lbs, air_lbs, water_lbs,
+             underground_lbs, land_lbs, total_lbs)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        releases)
+    conn.commit()
+
+    y0, y1 = (min(years_seen), max(years_seen)) if years_seen else (None, None)
+    if unmatched:
+        log(f"  TRI: {len(unmatched)} unmatched county name(s): "
+            f"{sorted(unmatched)[:10]}", level="warn")
+    record_source(
+        conn, "epa_tri",
+        "EPA Toxics Release Inventory (TRI) — Envirofacts",
+        "https://www.epa.gov/toxics-release-inventory-tri-program",
+        "ok", len(releases),
+        f"{len(facilities):,} MI facilities; {len(releases):,} "
+        f"facility-chemical-year release records, {y0}-{y1}. Self-reported "
+        f"annually under EPCRA. Envirofacts mv_tri_basic_download (st=MI).",
+        coverage_start=str(y0) if y0 else None,
+        coverage_end=str(y1) if y1 else None,
+    )
+    conn.commit()
+    log(f"  TRI: {len(facilities):,} facilities, {len(releases):,} releases "
+        f"({y0}-{y1})", level="ok")
+    return len(releases)
+
+
 # ---------- driver ----------
 
 def load_wind_data(conn: sqlite3.Connection) -> int:
@@ -2367,6 +2572,9 @@ def run() -> int:
 
     wind_rows = load_wind_data(conn)
     log(f"wind_data stations loaded: {wind_rows}", level="ok")
+
+    tri_rows = load_tri_data(conn)
+    log(f"TRI release records loaded: {tri_rows}", level="ok")
     conn.commit()
 
     # Summary
@@ -2379,7 +2587,8 @@ def run() -> int:
               "water_quality_sites", "water_quality_results", "watersheds",
               "correlation_analysis", "cancer_incidence",
               "cancer_pesticide_correlation", "cancer_evidence",
-              "contamination_sites", "wind_data"):
+              "contamination_sites", "wind_data",
+              "tri_facility", "tri_release"):
         n = cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
         log(f"  {t:25s} {n:>10,}")
     conn.close()

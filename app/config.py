@@ -132,6 +132,20 @@ EPA_SITE_PROFILE = (
     "?fuseaction=second.cleanup&id={epa_id}"
 )
 
+# ---- EPA Toxics Release Inventory (TRI) via Envirofacts ----
+# The `mv_tri_basic_download` materialized view is a fully denormalized, flat
+# per-facility/chemical/year row carrying county, lat/lng, primary NAICS + a
+# plain-language "industry sector" label, PFAS/carcinogen flags, and every
+# release pathway broken out (5.1 fugitive air, 5.2 stack air, 5.3 water,
+# 5.4 underground, 5.5.x land). No API key required. Filter columns are `st`
+# (2-letter state) and `year`. One filtered CSV per year (~3k MI rows/yr).
+TRI_MV_URL = ("https://data.epa.gov/efservice/mv_tri_basic_download/"
+              "st/{state}/year/{year}/CSV")
+TRI_STATE_ABBR = "MI"
+TRI_START_YEAR = 2013          # pull >= 10 years so trends have depth
+TRI_END_YEAR = 2025            # probe downward from here; skip empty years
+TRI_CACHE_DIR = DATA_DIR / "tri"
+
 # ---- USGS Watershed Boundary Dataset (HUC-8 polygons) ----
 WBD_HUC8_QUERY = (
     "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/4/query"

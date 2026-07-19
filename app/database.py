@@ -368,6 +368,49 @@ CREATE TABLE IF NOT EXISTS wind_data (
     PRIMARY KEY (station_id, month, season)
 );
 CREATE INDEX IF NOT EXISTS ix_wind_station ON wind_data(station_id);
+
+-- ===== EPA Toxics Release Inventory (TRI) — active industrial toxic releases =====
+-- Complements the (legacy) contamination/Superfund layer: TRI is what active,
+-- covered industrial & federal facilities SELF-REPORT releasing each year under
+-- EPCRA. All quantities are already in POUNDS (TRI's native unit), so they are
+-- stored as *_lbs and pass through the kg->lbs response walker untouched.
+
+CREATE TABLE IF NOT EXISTS tri_facility (
+    facility_id      TEXT PRIMARY KEY,        -- EPA TRI Facility ID (trifd)
+    facility_name    TEXT NOT NULL,
+    street_address   TEXT,
+    city             TEXT,
+    county           TEXT,
+    county_fips      TEXT,
+    latitude         REAL,
+    longitude        REAL,
+    parent_company   TEXT,
+    naics_code       TEXT,                    -- primary 6-digit NAICS
+    industry_sector  TEXT,                    -- EPA industry-sector label (plain language)
+    federal_facility INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_tri_fac_county ON tri_facility(county_fips);
+
+CREATE TABLE IF NOT EXISTS tri_release (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    facility_id      TEXT NOT NULL,
+    year             INTEGER NOT NULL,
+    chemical         TEXT NOT NULL,
+    cas              TEXT,
+    is_pfas          INTEGER DEFAULT 0,
+    is_carcinogen    INTEGER DEFAULT 0,
+    fugitive_air_lbs REAL DEFAULT 0,
+    stack_air_lbs    REAL DEFAULT 0,
+    air_lbs          REAL DEFAULT 0,          -- fugitive + stack
+    water_lbs        REAL DEFAULT 0,
+    underground_lbs  REAL DEFAULT 0,
+    land_lbs         REAL DEFAULT 0,          -- on-site total minus air/water/underground
+    total_lbs        REAL DEFAULT 0,          -- on-site release total (all pathways)
+    FOREIGN KEY (facility_id) REFERENCES tri_facility(facility_id)
+);
+CREATE INDEX IF NOT EXISTS ix_tri_rel_fac  ON tri_release(facility_id);
+CREATE INDEX IF NOT EXISTS ix_tri_rel_year ON tri_release(year);
+CREATE INDEX IF NOT EXISTS ix_tri_rel_chem ON tri_release(chemical);
 """
 
 

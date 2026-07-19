@@ -1454,6 +1454,78 @@ a:hover { text-decoration: underline; }
 }
 .contam-popup .cp-record .k { color: var(--muted); font-weight: 600; }
 
+/* ---------- EPA Toxics Release Inventory (TRI) ---------- */
+.lr-dot.tri { background: #2f8783; }
+
+.tri-suboptions { margin: 4px 0 6px 22px; }
+.tri-suboptions label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
+.tri-suboptions select {
+  width: 100%; background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit;
+}
+
+.tri-divicon { background: transparent; border: 0; }
+.tri-marker {
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #fff; box-shadow: 0 2px 7px rgba(0,0,0,.65);
+  line-height: 1;
+}
+.tri-marker span { font-size: 60%; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+
+.tri-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.tri-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.tri-popup { max-width: 320px; font-size: 12.5px; }
+.tri-popup .tri-parent { font-weight: 700; color: var(--accent-2); font-size: 11.5px; }
+.tri-popup h4 { margin: 2px 0 4px; font-size: 14px; color: var(--text); }
+.tri-popup .tri-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
+.tri-popup .tri-total { font-size: 13px; margin: 4px 0 6px; }
+.tri-popup .tri-paths .row { margin: 2px 0; }
+.tri-popup .tri-paths .row .k { color: var(--muted); display: inline-block; min-width: 92px; }
+.tri-chem-head, .tri-sub {
+  margin: 8px 0 3px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted); font-weight: 600;
+}
+.tri-chem, .tri-firow, .tri-pathrow {
+  display: flex; justify-content: space-between; gap: 8px; margin: 2px 0;
+  font-size: 12px;
+}
+.tri-chem .cv, .tri-firow .v, .tri-pathrow .v { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tri-chem .cn, .tri-firow .n { color: var(--muted); }
+.tri-pathrow .k { color: var(--muted); }
+.tri-flag {
+  font-size: 9.5px; padding: 0 5px; border-radius: 8px; font-weight: 700;
+  vertical-align: middle;
+}
+.tri-flag.pfas { background: rgba(51,176,201,.18); color: #33b0c9; }
+.tri-flag.carc { background: rgba(248,81,73,.16); color: #f98bbd; }
+.tri-trend { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 8px; }
+.tri-trend.up   { background: rgba(248,81,73,.16); color: #f85149; }
+.tri-trend.down { background: rgba(63,185,80,.16); color: #3fb950; }
+.tri-trend.flat { background: rgba(154,164,178,.16); color: var(--muted); }
+.tri-spark-wrap { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.tri-spark { background: rgba(13,17,23,.35); border-radius: 4px; }
+.tri-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+
+/* county-panel TRI detail block */
+.tri-county-detail { font-size: 12.5px; }
+.tri-county-detail .tri-paths-block { margin-bottom: 6px; }
+.tri-county-detail .tri-note { margin-top: 8px; }
+.tri-caveat .disclaimer-text { line-height: 1.5; margin: 6px 0 0; }
+
+/* "TRI as a control" note in the Explore panel */
+.explore-tri-note {
+  margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+  background: rgba(47,135,131,.12); border: 1px solid rgba(47,135,131,.35);
+  font-size: 12px; line-height: 1.5; color: var(--text);
+}
+.explore-tri-note strong { color: #4bb3ac; }
+
 /* ---------- county "show all compounds" list ---------- */
 .link-btn {
   background: none;

@@ -37,6 +37,31 @@
       '"Forever chemicals" — a family of man-made chemicals used in non-stick and ' +
       'stain-resistant products that build up in water, soil, and the body and break ' +
       'down extremely slowly.',
+    'TRI':
+      'Toxics Release Inventory — an EPA program under which larger industrial and ' +
+      'federal facilities must report, every year, how many pounds of certain toxic ' +
+      'chemicals they release to the air, water, and land. It shows what facilities are ' +
+      'actively putting into the environment now, as self-reported.',
+    'EPCRA':
+      'The Emergency Planning and Community Right-to-Know Act — the 1986 federal law that ' +
+      'created the Toxics Release Inventory and gives the public the right to know what ' +
+      'toxic chemicals facilities in their community release.',
+    'release pathway':
+      'The route by which a chemical leaves a facility into the environment: to the AIR, ' +
+      'to WATER (surface-water discharge), to LAND (on-site landfill/disposal), or by ' +
+      'UNDERGROUND injection. TRI reports pounds for each pathway separately.',
+    'fugitive vs stack air':
+      'Two kinds of air release. STACK (or "point") emissions leave through a smokestack ' +
+      'or vent; FUGITIVE emissions escape everywhere else — leaks, valves, open doors, ' +
+      'evaporation. TRI adds both together as total air releases.',
+    'NAICS code':
+      'North American Industry Classification System code — a standardized number that ' +
+      'says what kind of business a facility is (e.g. 325 = chemical manufacturing). It ' +
+      'lets releases be grouped by industry.',
+    'self-reported data':
+      'Numbers a facility calculates and submits itself, rather than an outside measurement. ' +
+      'They are required by law and audited, but can under- or over-count, and only cover ' +
+      'facilities big enough to be required to report.',
     'choropleth':
       'A map where each area is shaded by a value — here, darker/brighter counties ' +
       'have more of whatever the legend describes.',

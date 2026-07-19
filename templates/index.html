@@ -50,6 +50,18 @@
         <label class="layer-radio" data-tip="Shade counties by asthma and COPD rates (age-adjusted). Source: CDC Environmental Public Health Tracking."><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
         <label class="layer-radio" data-tip="Shade counties by cancer incidence (new cases per 100,000, age-adjusted). Source: NCI State Cancer Profiles."><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
         <label class="layer-radio" data-tip="Shade counties by the number of known contaminated sites. Source: EPA Superfund + compiled records."><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
+        <label class="layer-radio" data-tip="Shade counties by the pounds of toxic chemicals industrial facilities self-report releasing each year. Source: EPA Toxics Release Inventory (TRI)."><input type="radio" name="choropleth" value="tri" /> <span class="lr-dot tri"></span> <span>TRI toxic releases</span></label>
+        <div class="tri-suboptions hidden" id="tri-suboptions">
+          <label class="small" data-tip="Which release pathway to color counties by. Air = fugitive + smokestack emissions; Water = surface-water discharge; Land = on-site landfill/disposal; PFAS = 'forever chemicals' only.">Pathway
+            <select id="tri-metric">
+              <option value="total">Total releases (all pathways)</option>
+              <option value="air">Air releases only</option>
+              <option value="water">Water releases only</option>
+              <option value="land">Land releases only</option>
+              <option value="pfas">PFAS releases only</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       <div class="layer-divider"></div>
@@ -70,6 +82,7 @@
           <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
         </div>
         <label class="cwd-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
+        <label class="cwd-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
         <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
         <label class="cwd-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
         <label class="cwd-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
@@ -187,6 +200,26 @@
     </section>
 
     <section class="panel">
+      <div class="panel-head">
+        <h2>Industrial releases (TRI) <span class="info-i" data-gloss="TRI">?</span></h2>
+      </div>
+      <p class="muted small">Active facilities' <em>self-reported</em> annual toxic releases —
+        what industry is putting into the air, water, and land <em>now</em> (vs the legacy
+        Superfund layer). Factory markers are under Map layers → Overlays; for county coloring,
+        choose <em>TRI toxic releases</em>.</p>
+      <p class="muted small" id="tri-stats">—</p>
+      <details class="collapsible tri-caveat">
+        <summary><span class="info-icon">ℹ️</span>&nbsp;About this data &amp; caveats</summary>
+        <p class="disclaimer-text small">TRI data is <strong>self-reported</strong> annually by
+          facilities above certain size and chemical-use thresholds. It <strong>undercounts</strong> —
+          small emitters and non-covered industries aren't included. Releases being reported doesn't
+          necessarily mean they're illegal or unsafe; it means the facility disclosed them as
+          <span data-gloss="EPCRA">required by law</span>. Quantities are pounds released per year.
+          Source: EPA Toxics Release Inventory via Envirofacts.</p>
+      </details>
+    </section>
+
+    <section class="panel">
       <h2>Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></h2>
       <div class="year-row">
         <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
@@ -237,6 +270,18 @@
 
       <h3>Category breakdown</h3>
       <div class="chart-box doughnut"><canvas id="chart-category"></canvas></div>
+
+      <h3>Industrial toxic releases over time
+        <span class="scope-tag" id="tri-trend-scope-sw">Statewide</span>
+        <span class="info-i" data-tip="Year-over-year pounds of toxic chemicals industrial facilities self-reported releasing (EPA TRI). Each band is a release pathway (air, water, land, underground); band thickness is pounds that year. Watch whether industrial releases are rising or falling.">?</span>
+      </h3>
+      <div class="trend-modes seg" id="tri-trend-modes-sw">
+        <button data-mode="category" class="active" data-tip="Stacked bands by release pathway: air, water, land, underground.">By pathway</button>
+        <button data-mode="total" data-tip="A single line of total on-site releases each year.">Total</button>
+        <button data-mode="compounds" data-tip="The top individual chemicals released, each as its own band.">Top chemicals</button>
+        <button data-mode="percent" data-tip="Each pathway's share of the yearly total (0–100%).">% share</button>
+      </div>
+      <div class="chart-box trend tall"><canvas id="chart-tri-trend-sw"></canvas></div>
     </section>
 
     <section class="panel county-panel hidden" id="county-panel">
@@ -304,6 +349,18 @@
       <h3>Industrial contamination <span class="muted small" id="county-contam-count"></span></h3>
       <div id="county-contam-list" class="contam-county-list"></div>
 
+      <h3>Industrial toxic releases (TRI) <span class="muted small" id="county-tri-count"></span>
+        <span class="info-i" data-gloss="TRI">?</span>
+      </h3>
+      <div id="county-tri-detail" class="tri-county-detail"></div>
+      <div class="trend-modes seg hidden" id="tri-trend-modes-cty">
+        <button data-mode="category" class="active" data-tip="Stacked bands by release pathway: air, water, land, underground.">By pathway</button>
+        <button data-mode="total" data-tip="A single line of this county's total on-site releases each year.">Total</button>
+        <button data-mode="compounds" data-tip="The top individual chemicals released in this county.">Top chemicals</button>
+        <button data-mode="percent" data-tip="Each pathway's share of the county's yearly total (0–100%).">% share</button>
+      </div>
+      <div class="chart-box trend tall hidden" id="county-tri-trend-box"><canvas id="chart-tri-trend-cty"></canvas></div>
+
       <p class="county-links">
         <a id="county-inspector" target="_blank" rel="noopener">MDARD inspector for this county →</a>
       </p>
@@ -355,6 +412,12 @@
       </div>
 
       <p class="explore-summary" id="explore-summary">Choose two measures above to begin.</p>
+      <div class="explore-tri-note hidden" id="explore-tri-note">
+        <strong>Using TRI as a control.</strong> Industrial air pollution is a well-established
+        respiratory risk factor. Compare an <em>industrial air releases</em> vs a respiratory
+        measure against the <em>pesticide</em> correlation to see which shows a stronger
+        association in this data — a way to separate agricultural from industrial explanations.
+      </div>
     </div>
 
     <div class="panel scatter-panel wide">
@@ -728,7 +791,8 @@
         <div class="intro-ico">🗺️</div>
         <h3>Explore the map</h3>
         <p>Use <strong>Map layers</strong> (left) to color counties by pesticide use, cancer,
-          respiratory health, or contamination, and to stack overlays like water sites and wind.
+          respiratory health, contamination, or <strong>industrial toxic releases (TRI)</strong>,
+          and to stack overlays like water sites, factory markers, and wind.
           Hover anything with a <span class="info-i" data-tip="Like this — hover or tap a ? for a plain-language explanation.">?</span> for an explanation.</p>
       </div>
       <div class="intro-block">

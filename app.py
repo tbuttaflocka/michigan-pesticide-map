@@ -2447,11 +2447,43 @@ def _explore_water_detections(conn) -> dict:
     return {r["f"]: r["n"] for r in rows}
 
 
+def _explore_tri_map(conn, x_key: str):
+    """Return (xmap {fips: value}, label, unit) for a TRI X variable. Values are
+    already in pounds (TRI's native unit) — the caller treats TRI as a 'count'
+    so it is NOT run through the kg->lbs multiply, and a county with no reporting
+    facility is a genuine zero."""
+    latest = conn.execute("SELECT MAX(year) FROM tri_release").fetchone()[0]
+    sub = x_key.split(":", 1)[1] if ":" in x_key else "total"
+    if sub == "facilities":
+        rows = conn.execute(
+            "SELECT county_fips AS f, COUNT(*) AS n FROM tri_facility "
+            "WHERE county_fips IS NOT NULL GROUP BY county_fips").fetchall()
+        return {r["f"]: r["n"] for r in rows}, "TRI facilities", "facilities reporting"
+    if latest is None:
+        return {}, "TRI releases", "pounds released per year"
+    col = {"total": "total_lbs", "air": "air_lbs", "water": "water_lbs",
+           "land": "land_lbs"}.get(sub, "total_lbs")
+    rows = conn.execute(
+        f"""SELECT f.county_fips AS f, SUM(r.{col}) AS v
+              FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+             WHERE r.year = ? AND f.county_fips IS NOT NULL
+             GROUP BY f.county_fips""", (latest,)).fetchall()
+    labels = {"total": "Industrial toxic releases (TRI)",
+              "air": "Industrial air releases (TRI)",
+              "water": "Industrial water releases (TRI)",
+              "land": "Industrial land releases (TRI)"}
+    return ({r["f"]: (r["v"] or 0.0) for r in rows},
+            labels.get(sub, "TRI releases"), f"pounds released ({latest})")
+
+
 def _explore_x_map(conn, x_key: str):
     """Return (xmap {fips: value}, label, unit, is_count) for any X variable."""
     if x_key == "water_detections":
         return (_explore_water_detections(conn),
                 "Water pesticide detections", "number of detections", True)
+    if x_key and x_key.startswith("tri"):
+        xmap, label, unit = _explore_tri_map(conn, x_key)
+        return xmap, label, unit, True         # pounds already; skip kg->lbs
     if x_key and x_key.startswith("contamination"):
         xmap, label, _ = _cancer_x_map(conn, x_key)
         return xmap, label.capitalize(), "number of sites", True
@@ -2509,6 +2541,21 @@ def _explore_variables(conn) -> dict:
         {"key": "water_detections", "label": "Water pesticide detections",
          "unit": "number of detections", "group": "Pollution"},
     ]
+    # Industrial toxic releases (TRI) — only when the layer has data. Air
+    # releases in particular are a well-established respiratory driver, so they
+    # double as a control/comparison against the agricultural-pesticide signal.
+    has_tri = conn.execute("SELECT 1 FROM tri_release LIMIT 1").fetchone()
+    if has_tri:
+        x += [
+            {"key": "tri:total", "label": "Industrial toxic releases (TRI, all)",
+             "unit": "pounds released per year", "group": "Industrial releases (TRI)"},
+            {"key": "tri:air", "label": "Industrial air releases (TRI)",
+             "unit": "pounds released to air per year", "group": "Industrial releases (TRI)"},
+            {"key": "tri:water", "label": "Industrial water releases (TRI)",
+             "unit": "pounds released to water per year", "group": "Industrial releases (TRI)"},
+            {"key": "tri:facilities", "label": "Number of TRI facilities",
+             "unit": "facilities reporting", "group": "Industrial releases (TRI)"},
+        ]
     y = [{"key": f"cancer:{c['key']}", "label": c["label"],
           "unit": "cases per 100,000 (age-adjusted)", "group": "Cancer"}
          for c in cancer_data.CANCER_TYPES]
@@ -2602,6 +2649,252 @@ def api_explore():
         "n": len(pts), "n_urban": n_urban, "n_rural": n_rural,
         "n_excluded_missing": n_excluded_missing,
         "caveat": _EXPLORE_CAVEAT.get(family, ""),
+    })
+
+
+# ---------- EPA Toxics Release Inventory (TRI) ----------
+
+# Pathway keys shared by the choropleth, county detail, and trend chart. Air =
+# fugitive + stack; land = on-site remainder; these four sum to total_lbs.
+_TRI_PATHWAYS = [
+    ("air", "air_lbs", "Air (fugitive + smokestack)"),
+    ("water", "water_lbs", "Water (surface-water discharge)"),
+    ("land", "land_lbs", "Land (on-site landfill / disposal)"),
+    ("underground", "underground_lbs", "Underground injection"),
+]
+_TRI_TREND_TOP_N = 8       # top individual chemicals; the rest fold into "All others"
+
+
+def _tri_latest_year(conn) -> int | None:
+    r = conn.execute("SELECT MAX(year) FROM tri_release").fetchone()
+    return r[0] if r and r[0] is not None else None
+
+
+@app.route("/api/tri/sites")
+def api_tri_sites():
+    """TRI facility markers. Each facility carries its most-recent reporting
+    year's pathway breakdown, its top chemicals that year, a per-year total
+    sparkline, and an up/down trend flag. Quantities are pounds (no kg convert).
+    """
+    conn = db()
+    latest = _tri_latest_year(conn)
+    if latest is None:
+        conn.close()
+        return jsonify({"latest_year": None, "facilities": [], "stats": {}})
+
+    facs = {r["facility_id"]: dict(r)
+            for r in conn.execute("SELECT * FROM tri_facility")}
+
+    yearly: dict = {}     # fid -> {year: {total,air,water,land,underground}}
+    for r in conn.execute(
+        """SELECT facility_id AS fid, year,
+                  SUM(total_lbs) t, SUM(air_lbs) a, SUM(water_lbs) w,
+                  SUM(land_lbs) l, SUM(underground_lbs) u
+             FROM tri_release GROUP BY facility_id, year"""):
+        yearly.setdefault(r["fid"], {})[r["year"]] = {
+            "total": r["t"] or 0.0, "air": r["a"] or 0.0, "water": r["w"] or 0.0,
+            "land": r["l"] or 0.0, "underground": r["u"] or 0.0}
+
+    chems: dict = {}      # fid -> {year: [ {chemical, lbs, pfas, carcinogen} ]}
+    for r in conn.execute(
+        """SELECT facility_id AS fid, year, chemical, is_pfas, is_carcinogen,
+                  SUM(total_lbs) lbs
+             FROM tri_release GROUP BY facility_id, year, chemical
+             ORDER BY lbs DESC"""):
+        chems.setdefault(r["fid"], {}).setdefault(r["year"], []).append({
+            "chemical": (r["chemical"] or "").title(),
+            "lbs": round(r["lbs"] or 0.0, 1),
+            "pfas": bool(r["is_pfas"]), "carcinogen": bool(r["is_carcinogen"])})
+    conn.close()
+
+    out = []
+    for fid, f in facs.items():
+        yrs = yearly.get(fid)
+        if not yrs:
+            continue
+        fac_latest = max(yrs)
+        cur = yrs[fac_latest]
+        spark = [{"year": y, "total": round(yrs[y]["total"], 1)}
+                 for y in sorted(yrs)]
+        vals = [p["total"] for p in spark]
+        trend = "flat"
+        if len(vals) >= 2 and vals[0] > 0:
+            change = (vals[-1] - vals[0]) / vals[0]
+            trend = "up" if change > 0.15 else "down" if change < -0.15 else "flat"
+        out.append({
+            "facility_id": fid, "name": f["facility_name"],
+            "parent_company": f["parent_company"], "city": f["city"],
+            "county": f["county"], "county_fips": f["county_fips"],
+            "lat": f["latitude"], "lng": f["longitude"],
+            "naics_code": f["naics_code"], "industry_sector": f["industry_sector"],
+            "federal": bool(f["federal_facility"]),
+            "year": fac_latest,
+            "total_lbs": round(cur["total"], 1),
+            "air_lbs": round(cur["air"], 1), "water_lbs": round(cur["water"], 1),
+            "land_lbs": round(cur["land"], 1),
+            "underground_lbs": round(cur["underground"], 1),
+            "top_chemicals": (chems.get(fid, {}).get(fac_latest, []))[:6],
+            "spark": spark, "trend": trend,
+        })
+    out.sort(key=lambda x: x["total_lbs"], reverse=True)
+    stats = {"max_total": out[0]["total_lbs"] if out else 0,
+             "facility_count": len(out), "latest_year": latest}
+    return jsonify({"latest_year": latest, "facilities": out, "stats": stats})
+
+
+@app.route("/api/tri/density")
+def api_tri_density():
+    """Per-county TRI choropleth. ?metric=total|air|water|land|pfas selects the
+    pathway; ?year defaults to the latest reporting year."""
+    metric = request.args.get("metric", "total")
+    year = request.args.get("year", type=int)
+    conn = db()
+    latest = _tri_latest_year(conn)
+    if latest is None:
+        conn.close()
+        return jsonify({"metric": metric, "year": None, "counties": [], "stats": {}})
+    if year is None:
+        year = latest
+    if metric == "pfas":
+        val_expr = "SUM(CASE WHEN r.is_pfas = 1 THEN r.total_lbs ELSE 0 END)"
+    else:
+        col = {"total": "total_lbs", "air": "air_lbs", "water": "water_lbs",
+               "land": "land_lbs"}.get(metric, "total_lbs")
+        val_expr = f"SUM(r.{col})"
+    rows = conn.execute(
+        f"""SELECT c.fips, c.name, {val_expr} AS value,
+                   COUNT(DISTINCT r.facility_id) AS facilities
+              FROM counties c
+         LEFT JOIN tri_facility f ON f.county_fips = c.fips
+         LEFT JOIN tri_release r ON r.facility_id = f.facility_id AND r.year = ?
+          GROUP BY c.fips, c.name ORDER BY c.name""", (year,)).fetchall()
+    conn.close()
+    out = [{"fips": r["fips"], "name": r["name"],
+            "value": round(r["value"] or 0.0, 1), "facilities": r["facilities"] or 0}
+           for r in rows]
+    vals = [o["value"] for o in out if o["value"] > 0]
+    stats = {"max": max(vals) if vals else 0, "min": min(vals) if vals else 0,
+             "mean": (sum(vals) / len(vals)) if vals else 0,
+             "counties_with_data": len(vals), "total_counties": len(out),
+             "year": year}
+    return jsonify({"metric": metric, "year": year, "counties": out, "stats": stats})
+
+
+@app.route("/api/tri/county")
+def api_tri_county():
+    """County-click detail for the TRI choropleth: pathway breakdown, top
+    facilities, and top chemicals for the given county + year."""
+    fips = (request.args.get("fips") or "").strip()
+    year = request.args.get("year", type=int)
+    conn = db()
+    latest = _tri_latest_year(conn)
+    if year is None:
+        year = latest
+    name_row = conn.execute("SELECT name FROM counties WHERE fips = ?", (fips,)).fetchone()
+    if not name_row or latest is None:
+        conn.close()
+        return jsonify({"fips": fips, "name": None, "year": year, "total_lbs": 0,
+                        "pathways": [], "top_facilities": [], "top_chemicals": []})
+    p = conn.execute(
+        """SELECT SUM(r.total_lbs) t, SUM(r.air_lbs) a, SUM(r.water_lbs) w,
+                  SUM(r.land_lbs) l, SUM(r.underground_lbs) u,
+                  COUNT(DISTINCT r.facility_id) facs
+             FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+            WHERE f.county_fips = ? AND r.year = ?""", (fips, year)).fetchone()
+    pathways = [
+        {"key": "air", "label": "Air", "lbs": round(p["a"] or 0.0, 1)},
+        {"key": "water", "label": "Water", "lbs": round(p["w"] or 0.0, 1)},
+        {"key": "land", "label": "Land", "lbs": round(p["l"] or 0.0, 1)},
+        {"key": "underground", "label": "Underground", "lbs": round(p["u"] or 0.0, 1)},
+    ]
+    top_f = [{"name": r["facility_name"], "industry": r["industry_sector"],
+              "lbs": round(r["t"] or 0.0, 1)}
+             for r in conn.execute(
+        """SELECT f.facility_name, f.industry_sector, SUM(r.total_lbs) t
+             FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+            WHERE f.county_fips = ? AND r.year = ?
+            GROUP BY r.facility_id ORDER BY t DESC LIMIT 5""", (fips, year))]
+    top_c = [{"chemical": (r["chemical"] or "").title(), "lbs": round(r["t"] or 0.0, 1),
+              "pfas": bool(r["pf"]), "carcinogen": bool(r["cc"])}
+             for r in conn.execute(
+        """SELECT r.chemical, MAX(r.is_pfas) pf, MAX(r.is_carcinogen) cc,
+                  SUM(r.total_lbs) t
+             FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+            WHERE f.county_fips = ? AND r.year = ?
+            GROUP BY r.chemical ORDER BY t DESC LIMIT 6""", (fips, year))]
+    conn.close()
+    return jsonify({
+        "fips": fips, "name": name_row["name"], "year": year,
+        "total_lbs": round(p["t"] or 0.0, 1), "facilities": p["facs"] or 0,
+        "pathways": pathways, "top_facilities": top_f, "top_chemicals": top_c,
+    })
+
+
+@app.route("/api/tri/trend")
+def api_tri_trend():
+    """Year-over-year TRI releases — statewide (no fips) or one county — broken
+    down by pathway and by top individual chemicals. Mirrors /api/trend's shape
+    so the frontend trend panel can render it the same way."""
+    fips = (request.args.get("fips") or "").strip()
+    conn = db()
+    where, params, scope = "", [], "Statewide"
+    if fips:
+        row = conn.execute("SELECT name FROM counties WHERE fips = ?", (fips,)).fetchone()
+        if row:
+            where = "AND f.county_fips = ?"
+            params = [fips]
+            scope = f"{row['name']} County"
+
+    years = [r[0] for r in conn.execute(
+        f"""SELECT DISTINCT r.year FROM tri_release r
+              JOIN tri_facility f ON f.facility_id = r.facility_id
+             WHERE 1=1 {where} ORDER BY r.year""", params)]
+    yi = {y: i for i, y in enumerate(years)}
+    n = len(years)
+
+    total = [0.0] * n
+    path_series = {k: [0.0] * n for k, _, _ in _TRI_PATHWAYS}
+    for r in conn.execute(
+        f"""SELECT r.year y, SUM(r.total_lbs) t, SUM(r.air_lbs) a,
+                   SUM(r.water_lbs) w, SUM(r.land_lbs) l, SUM(r.underground_lbs) u
+              FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+             WHERE 1=1 {where} GROUP BY r.year""", params):
+        i = yi[r["y"]]
+        total[i] = round(r["t"] or 0.0, 1)
+        path_series["air"][i] = round(r["a"] or 0.0, 1)
+        path_series["water"][i] = round(r["w"] or 0.0, 1)
+        path_series["land"][i] = round(r["l"] or 0.0, 1)
+        path_series["underground"][i] = round(r["u"] or 0.0, 1)
+    categories = [{"key": k, "label": lbl, "values": path_series[k]}
+                  for k, _, lbl in _TRI_PATHWAYS]
+
+    top = conn.execute(
+        f"""SELECT r.chemical c, SUM(r.total_lbs) t
+              FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+             WHERE 1=1 {where} GROUP BY r.chemical
+             ORDER BY t DESC NULLS LAST LIMIT ?""", [*params, _TRI_TREND_TOP_N]).fetchall()
+    top_names = [r["c"] for r in top]
+    compounds = []
+    if top_names:
+        comp_series = {name: [0.0] * n for name in top_names}
+        placeholders = ",".join("?" * len(top_names))
+        for r in conn.execute(
+            f"""SELECT r.year y, r.chemical c, SUM(r.total_lbs) t
+                  FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+                 WHERE r.chemical IN ({placeholders}) {where}
+                 GROUP BY r.year, r.chemical""", [*top_names, *params]):
+            comp_series[r["c"]][yi[r["y"]]] += round(r["t"] or 0.0, 1)
+        compounds = [{"name": (name or "").title(), "values": comp_series[name]}
+                     for name in top_names]
+        others = [max(0.0, total[i] - sum(comp_series[nm][i] for nm in top_names))
+                  for i in range(n)]
+        if any(v > 0 for v in others):
+            compounds.append({"name": "All others",
+                              "values": [round(v, 1) for v in others]})
+    conn.close()
+    return jsonify({
+        "scope": scope, "fips": fips or None, "years": years,
+        "total": total, "categories": categories, "compounds": compounds,
     })
 
 
