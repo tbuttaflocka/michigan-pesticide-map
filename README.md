@@ -37,6 +37,54 @@ python -m app.data_loader         # downloads ~120 MB of real USGS files into ./
 python app.py                     # serves http://127.0.0.1:8080
 ```
 
+> `python app.py` starts Flask's built-in **development** server — fine for local
+> use, but **not** for public hosting. To share the app publicly, use the
+> production setup below.
+
+### Running in production (public sharing)
+
+Flask's dev server is single-threaded and not hardened for the public internet.
+For a shared deployment, serve the app with **Waitress** (a pure-Python,
+production-grade WSGI server that also runs on Windows) via the included
+`serve.py`:
+
+```bash
+pip install -r requirements-prod.txt   # adds Waitress
+python serve.py                        # serves HOST:PORT (default 127.0.0.1:8080)
+```
+
+`serve.py` respects the `HOST` and `PORT` environment variables and exposes the
+WSGI app as `serve:application` (so `waitress-serve --listen=127.0.0.1:8080
+serve:application`, or gunicorn `serve:application` on Linux, also work).
+
+**Put HTTPS in front of it.** Waitress speaks plain HTTP; terminate TLS with a
+reverse proxy and bind the app to localhost so only the proxy is exposed:
+
+```bash
+HOST=127.0.0.1 PORT=8080 python serve.py
+```
+
+- **Caddy** (automatic HTTPS via Let's Encrypt) — simplest:
+  ```
+  your-domain.example {
+      reverse_proxy 127.0.0.1:8080
+  }
+  ```
+- **nginx** — `proxy_pass http://127.0.0.1:8080;` inside a `server { listen 443 ssl; }`
+  block with your certificate, plus a redirect from port 80 → 443.
+- **Windows/IIS** — use the Application Request Routing (ARR) reverse-proxy module
+  pointed at `http://127.0.0.1:8080`.
+
+Notes for a public deployment:
+
+- Serve **only over HTTPS** and add **HSTS** (`Strict-Transport-Security`) at the
+  proxy — it's intentionally not set in-app so local HTTP still works.
+- The app already sends a Content-Security-Policy and other security headers
+  (see `_security_headers` in `app.py`); the reverse proxy can add HSTS on top.
+- The app is **read-only** (no login, no user data, no write endpoints), so it
+  needs no database credentials or session secret.
+- Run the data refresh on a schedule (see [Keeping the data fresh](#keeping-the-data-fresh)).
+
 ### Optional API keys (`.env`)
 
 Some data sources need a free API key. Keys live in a **gitignored `.env`** file
