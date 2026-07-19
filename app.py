@@ -1337,25 +1337,141 @@ def api_water_heatmap():
 
 _HUC_POLYS: list | None = None       # [(huc8, [outer_ring, ...])]
 _WS_EXTRA: dict | None = None        # {huc8: {contam, contam_npl, pesticide_kg, total_sites}}
+_WS_BASE: list | None = None         # cached simplified display features (built once)
+
+# Douglas-Peucker tolerance in degrees for the display geometry (~222 m). The
+# raw HUC-8 file is ~1.2M points / 25 MB; at Michigan statewide zoom that detail
+# is invisible, so we simplify to ~3% of the points (~0.8 MB) once and cache it.
+_WS_SIMPLIFY_TOL = 0.002
+
+
+def _dp_simplify(points: list, tol: float) -> list:
+    """Iterative Douglas-Peucker line simplification. `points` is [[lon,lat],...];
+    keeps the endpoints. Returns the reduced point list."""
+    n = len(points)
+    if n < 3:
+        return points
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+    while stack:
+        s, e = stack.pop()
+        ax, ay = points[s]
+        bx, by = points[e]
+        dx, dy = bx - ax, by - ay
+        seg = dx * dx + dy * dy
+        dmax, idx = 0.0, -1
+        for i in range(s + 1, e):
+            px, py = points[i]
+            if seg == 0:
+                d = ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+            else:
+                t = ((px - ax) * dx + (py - ay) * dy) / seg
+                t = 0.0 if t < 0 else 1.0 if t > 1 else t
+                d = ((px - (ax + t * dx)) ** 2 + (py - (ay + t * dy)) ** 2) ** 0.5
+            if d > dmax:
+                dmax, idx = d, i
+        if idx != -1 and dmax > tol:
+            keep[idx] = True
+            stack.append((s, idx))
+            stack.append((idx, e))
+    return [points[i] for i in range(n) if keep[i]]
+
+
+def _simplify_ring(ring: list, tol: float) -> list | None:
+    """Simplify one polygon ring; drop it if it collapses below a valid polygon."""
+    r = _dp_simplify(ring, tol)
+    if len(r) < 4:                    # need >=4 pts (closed ring) to stay valid
+        return None
+    if r[0] != r[-1]:                 # keep the ring closed
+        r = r + [r[0]]
+    return r
+
+
+def _simplify_geometry(geom: dict, tol: float) -> dict | None:
+    """Return a new Polygon/MultiPolygon geometry with simplified rings."""
+    t = geom.get("type")
+    coords = geom.get("coordinates") or []
+    if t == "Polygon":
+        rings = [rr for rr in (_simplify_ring(r, tol) for r in coords) if rr]
+        return {"type": "Polygon", "coordinates": rings} if rings else None
+    if t == "MultiPolygon":
+        polys = []
+        for poly in coords:
+            rings = [rr for rr in (_simplify_ring(r, tol) for r in poly) if rr]
+            if rings:
+                polys.append(rings)
+        return {"type": "MultiPolygon", "coordinates": polys} if polys else None
+    return geom
+
+
+_WS_FC: dict | None = None           # cached HUC-8 FC with simplified geometry
+MI_HUC8_SIMPLIFIED_PATH = MI_HUC8_GEOJSON_PATH.with_name("mi_huc8.simplified.geojson")
+
+
+def _ws_simplified_fc() -> dict:
+    """The HUC-8 FeatureCollection with display-ready simplified geometry.
+
+    Prefers a prebuilt on-disk simplified file (a fast ~0.8 MB parse). If it's
+    missing, simplifies the ~25 MB source ONCE (Douglas-Peucker), writes the
+    small file for next time, and caches it in memory. After the first build no
+    request ever does runtime simplification, so responses stay fast."""
+    global _WS_FC
+    if _WS_FC is not None:
+        return _WS_FC
+    if MI_HUC8_SIMPLIFIED_PATH.exists():
+        try:
+            _WS_FC = json.loads(MI_HUC8_SIMPLIFIED_PATH.read_text())
+            return _WS_FC
+        except (OSError, ValueError):
+            pass
+    if not MI_HUC8_GEOJSON_PATH.exists():
+        _WS_FC = {"type": "FeatureCollection", "features": []}
+        return _WS_FC
+    raw = json.loads(Path(MI_HUC8_GEOJSON_PATH).read_text())
+    feats = []
+    for f in raw.get("features", []):
+        geom = _simplify_geometry(f.get("geometry") or {}, _WS_SIMPLIFY_TOL)
+        if not geom:
+            continue
+        props = f.get("properties") or {}
+        feats.append({"type": "Feature",
+                      "properties": {"huc8": props.get("huc8"), "name": props.get("name")},
+                      "geometry": geom})
+    fc = {"type": "FeatureCollection", "features": feats}
+    try:
+        MI_HUC8_SIMPLIFIED_PATH.write_text(json.dumps(fc))
+    except OSError:
+        pass
+    _WS_FC = fc
+    return _WS_FC
 
 
 def _huc_polys() -> list:
-    """Outer rings per HUC-8, cached. Rings are [[lon, lat], ...]."""
+    """Outer rings + bounding box per HUC-8 for point-in-polygon, cached. Built
+    from the already-simplified geometry, so there is no runtime DP work and the
+    bbox rejects far-away points before the ray-cast even starts."""
     global _HUC_POLYS
     if _HUC_POLYS is not None:
         return _HUC_POLYS
     out: list = []
-    if MI_HUC8_GEOJSON_PATH.exists():
-        fc = json.loads(Path(MI_HUC8_GEOJSON_PATH).read_text())
-        for f in fc.get("features", []):
-            huc = (f.get("properties") or {}).get("huc8")
-            geom = f.get("geometry") or {}
-            t = geom.get("type")
-            coords = geom.get("coordinates") or []
-            polys = [coords] if t == "Polygon" else (coords if t == "MultiPolygon" else [])
-            outers = [p[0] for p in polys if p]   # outer ring of each polygon
-            if huc and outers:
-                out.append((huc, outers))
+    for f in _ws_simplified_fc().get("features", []):
+        huc = (f.get("properties") or {}).get("huc8")
+        geom = f.get("geometry") or {}
+        t = geom.get("type")
+        coords = geom.get("coordinates") or []
+        polys = [coords] if t == "Polygon" else (coords if t == "MultiPolygon" else [])
+        outers = []
+        for p in polys:
+            if not p:
+                continue
+            ring = p[0]                        # already simplified
+            if len(ring) >= 4:
+                xs = [pt[0] for pt in ring]
+                ys = [pt[1] for pt in ring]
+                outers.append((ring, (min(xs), min(ys), max(xs), max(ys))))
+        if huc and outers:
+            out.append((huc, outers))
     _HUC_POLYS = out
     return out
 
@@ -1378,7 +1494,9 @@ def _huc_for_point(lon, lat) -> str | None:
     if lon is None or lat is None:
         return None
     for huc, outers in _huc_polys():
-        for ring in outers:
+        for ring, (minx, miny, maxx, maxy) in outers:
+            if lon < minx or lon > maxx or lat < miny or lat > maxy:
+                continue                       # bbox reject — skip the ray-cast
             if _pip(lon, lat, ring):
                 return huc
     return None
@@ -1419,11 +1537,47 @@ def _watershed_extra(conn) -> dict:
     return _WS_EXTRA
 
 
+def _ws_base_features(conn) -> list:
+    """Cached display features: simplified geometry + the static (non-compound)
+    properties (name, monitoring-site count, contamination counts, approx
+    pesticide use). Built once — the 25 MB source file is read, simplified, and
+    merged a single time for the life of the process."""
+    global _WS_BASE
+    if _WS_BASE is not None:
+        return _WS_BASE
+    base: list = []
+    fc = _ws_simplified_fc()
+    if fc.get("features"):
+        extra = _watershed_extra(conn)
+        for f in fc.get("features", []):
+            props = f.get("properties", {}) or {}
+            huc = props.get("huc8")
+            geom = f.get("geometry")            # already simplified
+            if not huc or not geom:
+                continue
+            e = extra.get(huc, {"contam": 0, "contam_npl": 0,
+                                "pesticide_kg": 0.0, "total_sites": 0})
+            base.append({
+                "huc8": huc, "geometry": geom,
+                "static": {
+                    "huc8": huc, "name": props.get("name"),
+                    "total_sites": e["total_sites"],
+                    "contam_sites": e["contam"], "contam_npl": e["contam_npl"],
+                    "pesticide_lbs": round((e["pesticide_kg"] or 0) * KG_TO_LB),
+                },
+            })
+    _WS_BASE = base
+    return _WS_BASE
+
+
 @app.route("/api/water/watersheds")
 def api_water_watersheds():
     """HUC-8 watershed polygons with per-watershed data for the interactive
     choropleth: pesticide detections/exceedances, monitoring-site counts,
-    contamination-site counts, and (approx) upstream pesticide use."""
+    contamination-site counts, and (approx) upstream pesticide use.
+
+    Geometry is simplified and cached once; each request only re-derives the
+    compound-specific detection counts, so responses are small and fast."""
     compound = (request.args.get("compound") or "").strip().upper()
     conn = db()
     cur = conn.cursor()
@@ -1447,25 +1601,20 @@ def api_water_watersheds():
              GROUP BY s.huc8
         """, args)
     }
-    extra = _watershed_extra(conn)
+    base = _ws_base_features(conn)
     conn.close()
-    geojson_path = MI_HUC8_GEOJSON_PATH
-    if not geojson_path.exists():
+    if not base:
         return jsonify({"type": "FeatureCollection", "features": [],
                         "note": "Watershed polygons not yet downloaded — run the loader."})
-    fc = json.loads(geojson_path.read_text())
-    for f in fc.get("features", []):
-        props = f.get("properties", {}) or {}
-        huc = props.get("huc8")
-        c = counts.get(huc, {"detections": 0, "exceedances": 0, "sites_with_detections": 0})
-        e = extra.get(huc, {"contam": 0, "contam_npl": 0, "pesticide_kg": 0.0, "total_sites": 0})
-        props.update(c)
-        props["total_sites"] = e["total_sites"]
-        props["contam_sites"] = e["contam"]
-        props["contam_npl"] = e["contam_npl"]
-        props["pesticide_lbs"] = round((e["pesticide_kg"] or 0) * KG_TO_LB)
-        f["properties"] = props
-    return jsonify(fc)
+    features = []
+    for b in base:
+        props = dict(b["static"])          # fresh copy; cached geometry is shared read-only
+        props.update(counts.get(b["huc8"],
+                                {"detections": 0, "exceedances": 0,
+                                 "sites_with_detections": 0}))
+        features.append({"type": "Feature", "geometry": b["geometry"],
+                         "properties": props})
+    return jsonify({"type": "FeatureCollection", "features": features})
 
 
 @app.route("/api/water/compounds")

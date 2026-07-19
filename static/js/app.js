@@ -797,12 +797,40 @@
     </div>`;
   }
 
+  // A SINGLE persistent watershed layer. Toggling just adds/removes it; it is
+  // (re)built only when first shown or when the compound filter changes. This
+  // avoids the old ghost-layer bug where two overlapping async builds each
+  // added an L.geoJSON and only the newest reference could be removed.
   async function refreshWaterWatersheds() {
-    if (state.water.wsLayer) { state.water.wsLayer.remove(); state.water.wsLayer = null; }
-    if (!state.water.showWatersheds) { renderMarkerKeys(); return; }
+    // Toggle OFF — synchronous remove, no async gap that could race a toggle-on.
+    if (!state.water.showWatersheds) {
+      if (state.water.wsLayer && state.map.hasLayer(state.water.wsLayer)) {
+        state.map.removeLayer(state.water.wsLayer);
+      }
+      renderMarkerKeys();
+      return;
+    }
+    const compound = activeWaterCompound();
+    // Reuse the already-built layer when the compound is unchanged — instant.
+    if (state.water.wsLayer && state.water._wsCompound === compound) {
+      if (!state.map.hasLayer(state.water.wsLayer)) state.water.wsLayer.addTo(state.map);
+      renderMarkerKeys();
+      return;
+    }
+    // Build for this compound. A monotonically increasing id lets a newer build
+    // cancel an older in-flight one, so overlapping builds never each add a layer.
+    const buildId = (state.water._wsBuildId = (state.water._wsBuildId || 0) + 1);
     try {
-      const compound = activeWaterCompound();
-      const fc = await api('/api/water/watersheds', compound ? { compound } : {});
+      state.water._wsCache = state.water._wsCache || {};
+      const key = compound || '__all__';
+      let fc = state.water._wsCache[key];
+      if (!fc) {
+        fc = await api('/api/water/watersheds', compound ? { compound } : {});
+        state.water._wsCache[key] = fc;          // cache so toggles never refetch
+      }
+      if (buildId !== state.water._wsBuildId) return;   // superseded by a newer build
+      // Replace any existing layer with the single new reference.
+      if (state.water.wsLayer) { state.map.removeLayer(state.water.wsLayer); state.water.wsLayer = null; }
       if (!fc.features || !fc.features.length) { renderMarkerKeys(); return; }
       let maxDet = 1;
       for (const f of fc.features) maxDet = Math.max(maxDet, f.properties.detections || 0);
@@ -822,10 +850,13 @@
           const p = feat.properties;
           lyr.bindPopup(watershedPopupHtml(p), { maxWidth: 300, className: 'ws-popup-wrap' });
           lyr.on('mouseover', () => lyr.setStyle({ weight: 3, color: '#ffd23f', dashArray: null }));
-          lyr.on('mouseout', () => { if (state.water.wsLayer) state.water.wsLayer.resetStyle(lyr); });
+          lyr.on('mouseout', () => { if (state.water.wsLayer === layer) layer.resetStyle(lyr); });
         },
-      }).addTo(state.map);
+      });
       state.water.wsLayer = layer;
+      state.water._wsCompound = compound;
+      // Only display it if still wanted (user may have toggled off during fetch).
+      if (state.water.showWatersheds) layer.addTo(state.map);
     } catch (e) {
       console.error('watershed layer failed:', e && e.message, e);
     }
