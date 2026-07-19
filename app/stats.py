@@ -1,5 +1,5 @@
 """
-Minimal statistics for the CWD-vs-pesticide correlation panel.
+Minimal statistics for the county-level correlation panels.
 
 Implemented in stdlib so the app installs cleanly on Python 3.14 without
 waiting for scipy/numpy wheels. Results match scipy.stats to ~1e-9.

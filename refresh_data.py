@@ -42,7 +42,7 @@ SCHEDULING (Windows Task Scheduler)
 -----------------------------------
 See the "Keeping the data fresh" section of README.md. Recommended cadence:
   * Annual   (Jan): usgs_epest, nass_crop, respiratory, cancer, wind
-  * Quarterly:      water_quality, superfund, cwd
+  * Quarterly:      water_quality, superfund
 Example (monthly all-sources check; per-source guards skip anything unchanged):
 
     schtasks /create /tn "PesticideMap Refresh" /sc MONTHLY /d 1 /st 03:00 ^
@@ -188,14 +188,6 @@ SOURCES: list[Source] = [
         primary_target="crop_acreage", primary_source_id="nass_acreage",
         interval_months=12, min_abs=1, floor_frac=0.5,
         coverage=year_range("crop_acreage"),
-    ),
-    Source(
-        id="cwd", label="Michigan DNR — Chronic Wasting Disease",
-        loaders=[dl.load_cwd_data],
-        targets=["cwd_wild_deer", "cwd_farmed_deer", "cwd_surveillance"],
-        primary_target="cwd_wild_deer", primary_source_id="dnr_cwd",
-        interval_months=3, min_abs=1, floor_frac=0.5,
-        coverage=year_range("cwd_surveillance", "surveillance_year"),
     ),
     Source(
         id="respiratory", label="CDC Environmental Tracking + WONDER — respiratory",

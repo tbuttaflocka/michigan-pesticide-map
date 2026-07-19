@@ -21,7 +21,6 @@
     <div class="view-switch" id="view-switch">
       <button data-view="map" class="active">Heat map</button>
       <button data-view="explore" class="primary-view">Explore correlations</button>
-      <button data-view="correlation">CWD correlation</button>
       <button data-view="respiratory">Respiratory</button>
       <button data-view="cancer">Cancer</button>
     </div>
@@ -46,7 +45,6 @@
         <div class="layer-group-head">County coloring <span class="lg-hint">choose one</span></div>
         <label class="layer-radio" data-tip="Turn off county shading and show only the point overlays (markers, sites, wind)."><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
         <label class="layer-radio" data-tip="Shade each county by how much agricultural pesticide is applied. Source: USGS NAWQA EPest estimates."><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
-        <label class="layer-radio" data-tip="Shade counties where Chronic Wasting Disease has been confirmed in wild deer. Source: Michigan DNR."><input type="radio" name="choropleth" value="cwd" /> <span class="lr-dot cwd"></span> <span>CWD-positive counties</span></label>
         <label class="layer-radio" data-tip="Shade counties by asthma and COPD rates (age-adjusted). Source: CDC Environmental Public Health Tracking."><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
         <label class="layer-radio" data-tip="Shade counties by cancer incidence (new cases per 100,000, age-adjusted). Source: NCI State Cancer Profiles."><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
         <label class="layer-radio" data-tip="Shade counties by the number of known contaminated sites. Source: EPA Superfund + compiled records."><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
@@ -68,25 +66,22 @@
 
       <div class="layer-group">
         <div class="layer-group-head">Overlays <span class="lg-hint">stack freely</span></div>
-        <label class="cwd-toggle" data-tip="Pins where individual CWD-positive wild deer were found. Source: Michigan DNR."><input type="checkbox" id="cwd-markers" checked /> <span>CWD wild-deer markers</span></label>
-        <label class="cwd-toggle" data-tip="Captive deer/elk farms with confirmed CWD. Source: Michigan MDARD."><input type="checkbox" id="cwd-farmed" /> <span>Farmed-cervid facilities</span></label>
-        <label class="cwd-toggle" data-tip="Areas under enhanced CWD testing and surveillance. Source: Michigan DNR."><input type="checkbox" id="cwd-surv" /> <span>CWD surveillance zones</span></label>
-        <label class="cwd-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
-        <label class="cwd-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
-        <label class="cwd-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
-        <label class="cwd-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
+        <label class="overlay-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
+        <label class="overlay-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
+        <label class="overlay-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
+        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
         <div class="contam-subtoggles" id="contam-subtoggles">
           <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
           <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
           <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
           <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
         </div>
-        <label class="cwd-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
-        <label class="cwd-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
+        <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
+        <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
         <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
-        <label class="cwd-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
-        <label class="cwd-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
-        <label class="cwd-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
+        <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
+        <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
+        <label class="overlay-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
       </div>
     </section>
 
@@ -130,12 +125,6 @@
           <button data-val="per_acre" data-tip="Pounds applied per acre of harvested cropland (USDA NASS). The truest measure of application intensity — urban counties with little farmland are left uncolored.">lbs / acre</button>
         </div>
       </label>
-    </section>
-
-    <section class="panel">
-      <h2>CWD data</h2>
-      <p class="muted small">Enable <em>CWD-positive counties</em> under Map layers to color the map.</p>
-      <p class="muted small" id="cwd-stats">—</p>
     </section>
 
     <section class="panel">
@@ -291,12 +280,9 @@
       <h2 id="county-name">—</h2>
       <p class="county-meta"><span id="county-fips"></span> · <span id="county-area"></span></p>
 
-      <div id="county-cwd-badge" class="cwd-badge hidden"></div>
-
       <div class="big-stats">
         <div><strong id="county-total">—</strong><span>lbs applied</span></div>
         <div><strong id="county-density">—</strong><span>lbs / mi²</span></div>
-        <div><strong id="county-cwd-positives">—</strong><span>CWD positives</span></div>
       </div>
 
       <h3>Top 10 compounds</h3>
@@ -392,7 +378,7 @@
         <span class="explore-vs">vs</span>
         <label class="explore-pick">
           <span class="ep-label">…against this health measure:
-            <span class="info-i" data-tip="The measure shown bottom-to-top on the chart. Choose a cancer type, a respiratory measure, or wildlife disease.">?</span>
+            <span class="info-i" data-tip="The measure shown bottom-to-top on the chart. ">?</span>
           </span>
           <select id="explore-y"></select>
         </label>
@@ -444,104 +430,6 @@
         income — that also affect health. Use this as a starting point for questions, not an answer.
       </div>
       <p class="muted small" id="explore-caveat"></p>
-    </div>
-
-  </div>
-</section>
-
-<!-- ===================== Correlation view ===================== -->
-<section class="app-body correlation-view hidden" id="view-correlation">
-  <div class="correlation-grid">
-
-    <div class="panel disclaimer-panel">
-      <h2>Important context</h2>
-      <ul class="disclaimer">
-        <li><strong>CWD is caused by infectious prions, not pesticides.</strong>
-          Prion transmission occurs deer-to-deer and through environmental contamination.</li>
-        <li>CWD prevalence and pesticide use are both concentrated in agricultural
-          regions of Michigan's Lower Peninsula. This creates an inherent
-          geographic confound.</li>
-        <li>Surveillance effort varies dramatically by county and year —
-          counties with more testing naturally detect more cases.</li>
-        <li>The initial detection cluster (Ingham/Clinton/Montcalm) drives much
-          of the geographic pattern through proximity-based spread.</li>
-        <li>Deer population density, habitat type, farmed cervid facility
-          proximity, and hunter-harvest density are all major confounding variables.</li>
-        <li>This tool is for <strong>exploratory visualization only</strong> and
-          does not constitute scientific evidence of causation.</li>
-      </ul>
-    </div>
-
-    <div class="panel scatter-panel">
-      <div class="panel-head">
-        <h2>Pesticide use vs CWD positives</h2>
-        <select id="scatter-metric">
-          <option value="total">Total pesticide lbs</option>
-          <option value="per_sq_mile">lbs per square mile</option>
-          <option value="herbicide">Herbicides only</option>
-          <option value="insecticide">Insecticides only</option>
-          <option value="fungicide">Fungicides only</option>
-        </select>
-      </div>
-      <p class="explainer">Each dot is one Michigan county. <b>Left-to-right</b> shows how much
-        pesticide is applied there; <b>bottom-to-top</b> shows how many deer tested positive for
-        CWD. Hover any dot for the county name and its exact values.</p>
-      <div class="ur-legend">
-        <span class="ur-item"><span class="ur-dot" style="background:#f85149"></span> CWD-positive county</span>
-        <span class="ur-item"><span class="ur-dot" style="background:rgba(154,164,178,.7)"></span> CWD-negative county</span>
-      </div>
-      <div class="chart-box scatter"><canvas id="chart-scatter"></canvas></div>
-      <div id="scatter-fit" class="muted small fit-line"></div>
-      <div class="assoc-reminder">
-        <strong>Association is not causation.</strong> CWD is caused by infectious prions, not
-        pesticides. Both happen to concentrate in the same farming regions — that shared geography
-        can create a trend here that means nothing biologically.
-      </div>
-    </div>
-
-    <div class="panel stats-panel">
-      <h2>Statistical summary</h2>
-      <div class="big-stats">
-        <div><strong id="stats-mean-pos">—</strong><span>mean lbs · CWD+</span></div>
-        <div><strong id="stats-mean-neg">—</strong><span>mean lbs · CWD−</span></div>
-        <div><strong id="stats-t">—</strong><span>Welch t</span></div>
-        <div><strong id="stats-p">—</strong><span>two-tailed p</span></div>
-        <div><strong id="stats-r">—</strong><span>Pearson r</span></div>
-        <div><strong id="stats-r2">—</strong><span>R²</span></div>
-      </div>
-      <p id="stats-interp" class="stats-interp"></p>
-    </div>
-
-    <div class="panel compounds-panel">
-      <h2>Featured compounds · mean lbs per county</h2>
-      <div class="chart-box bar tall"><canvas id="chart-compounds"></canvas></div>
-      <p class="muted small">CWD-positive vs CWD-negative counties, latest available year.
-        Statistical comparison is per-compound Welch's t-test (significance shown by ★).</p>
-    </div>
-
-    <div class="panel table-panel">
-      <div class="panel-head">
-        <h2>County comparison</h2>
-        <label class="small"><input type="checkbox" id="only-cwd" /> only CWD-positive</label>
-      </div>
-      <div class="table-wrap">
-        <table id="corr-table">
-          <thead>
-            <tr>
-              <th data-sort="county" class="sortable" data-tip="Michigan county. Click any header to sort the table by that column.">County</th>
-              <th data-sort="total_pesticide_lbs" class="sortable right" data-tip="Total pounds of all pesticides applied in the county (USGS EPest estimate, latest year).">Total lbs</th>
-              <th data-sort="pesticide_per_sq_mile" class="sortable right" data-tip="Pounds applied per square mile — adjusts for the county's size.">lbs/mi²</th>
-              <th data-sort="herbicide_lbs" class="sortable right" data-tip="Pounds of herbicides (weed killers) applied.">Herb lbs</th>
-              <th data-sort="insecticide_lbs" class="sortable right" data-tip="Pounds of insecticides (insect killers) applied.">Insect lbs</th>
-              <th data-sort="fungicide_lbs" class="sortable right" data-tip="Pounds of fungicides (fungus/mold control) applied.">Fung lbs</th>
-              <th data-sort="cwd_positives_count" class="sortable right" data-tip="Number of wild deer that tested positive for Chronic Wasting Disease.">CWD+</th>
-              <th data-sort="cwd_farmed_facilities" class="sortable right" data-tip="Number of captive deer/elk farms in the county with confirmed CWD.">Farms</th>
-              <th data-sort="cwd_positive" class="sortable" data-tip="Whether CWD has ever been confirmed in this county's wild deer.">CWD status</th>
-            </tr>
-          </thead>
-          <tbody id="corr-tbody"></tbody>
-        </table>
-      </div>
     </div>
 
   </div>
@@ -782,8 +670,7 @@
     <h2 id="intro-title">Welcome — start here</h2>
     <p class="intro-lead">
       This is a free tool for <strong>exploring</strong> Michigan's environmental and health data
-      on one map. It brings together pesticide use, water and industrial contamination, wildlife
-      disease, and human health data so you can look for patterns and ask better questions.
+      on one map. It brings together  so you can look for patterns and ask better questions.
     </p>
 
     <div class="intro-grid">

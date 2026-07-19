@@ -54,13 +54,6 @@ from .water_quality import (
     canonicalize_compound,
     threshold_for,
 )
-from .cwd_data import (
-    CWD_FARMED_DEER,
-    CWD_WILD_DEER_COUNTIES,
-    SURVEILLANCE_STATS,
-    SURVEILLANCE_YEARS,
-    TOWNSHIP_COORDS,
-)
 from .respiratory_data import (
     MI_BROADER_RESP_BASELINE,
     MI_STATEWIDE_BASELINE,
@@ -578,113 +571,10 @@ def record_reference_sources(conn: sqlite3.Connection) -> None:
     )
 
 
-# ---------- 5. Chronic Wasting Disease (CWD) ingest ----------
-
-def load_cwd_data(conn: sqlite3.Connection) -> int:
-    """Insert the hardcoded MI DNR / MDARD CWD baseline into SQLite."""
-    log("Loading CWD baseline (DNR + MDARD compiled to Feb 2026)...")
-    cur = conn.cursor()
-    cur.execute("DELETE FROM cwd_wild_deer")
-    cur.execute("DELETE FROM cwd_farmed_deer")
-    cur.execute("DELETE FROM cwd_surveillance")
-
-    rows = 0
-    for county, info in CWD_WILD_DEER_COUNTIES.items():
-        townships = info.get("townships") or [None]
-        # Distribute reported county-total positives evenly across known townships
-        # so each marker carries plausible weight. The county-level total remains
-        # truthful in correlation_analysis.
-        n = max(1, len(townships))
-        per = info["positives"] // n
-        rem = info["positives"] - per * n
-        for i, tship in enumerate(townships):
-            coords = TOWNSHIP_COORDS.get(tship, (None, None))
-            cur.execute(
-                """INSERT INTO cwd_wild_deer(county, county_fips, township,
-                       latitude, longitude, first_detected,
-                       total_positives, source, notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'DNR', ?)""",
-                (county, info["fips"], tship,
-                 coords[0], coords[1],
-                 info["first_detected"], per + (rem if i == 0 else 0),
-                 info["notes"]),
-            )
-            rows += 1
-
-    for county, info in CWD_FARMED_DEER.items():
-        cur.execute(
-            """INSERT INTO cwd_farmed_deer(county, county_fips,
-                   facilities_positive, first_detected, source, notes)
-               VALUES (?, ?, ?, ?, 'MDARD', ?)""",
-            (county, info["fips"], info["facilities"],
-             info["first_detected"], info["notes"]),
-        )
-        rows += 1
-
-    # Surveillance zones: per-county per-year. We don't have per-county
-    # tested counts (only statewide 148,800), so deer_tested is left NULL.
-    name_to_fips = {
-        r["name"]: r["fips"] for r in conn.execute("SELECT name, fips FROM counties")
-    }
-    for year, counties in SURVEILLANCE_YEARS.items():
-        for cname in counties:
-            fips = name_to_fips.get(cname)
-            if not fips:
-                continue
-            cur.execute(
-                """INSERT INTO cwd_surveillance(county, county_fips,
-                       surveillance_year, deer_tested, positives_found)
-                   VALUES (?, ?, ?, NULL, 0)""",
-                (cname, fips, year),
-            )
-            rows += 1
-
-    conn.commit()
-    record_source(
-        conn, "dnr_cwd",
-        "Michigan DNR — Chronic Wasting Disease testing data",
-        "https://www.michigan.gov/dnr/managing-resources/wildlife/wildlife-disease/disease-monitoring/cwd/cwd-testing-data",
-        "ok",
-        len(CWD_WILD_DEER_COUNTIES),
-        f"Wild deer: {SURVEILLANCE_STATS['total_positives_wild']} positives in "
-        f"{SURVEILLANCE_STATS['positive_counties']} counties since "
-        f"{SURVEILLANCE_STATS['first_detection_year']}. "
-        f"{SURVEILLANCE_STATS['total_tested']:,} animals tested since "
-        f"{SURVEILLANCE_STATS['surveillance_start_year']}.",
-    )
-    record_source(
-        conn, "mdard_cervid",
-        "MDARD — Farmed Cervid CWD Surveillance",
-        "https://www.michigan.gov/mdard/animals/diseases/cervid",
-        "ok", len(CWD_FARMED_DEER),
-        "16 captive facilities CWD-positive since first detection in 2008 (Kent Co).",
-    )
-    record_source(
-        conn, "msu_vdl",
-        "MSU Veterinary Diagnostic Laboratory — CWD confirmation testing",
-        "https://cvm.msu.edu/vdl",
-        "skipped", 0, "Confirmatory testing laboratory referenced by DNR.",
-    )
-    record_source(
-        conn, "usda_nvsl",
-        "USDA NVSL (Ames, Iowa) — Secondary CWD confirmation",
-        "https://www.aphis.usda.gov/aphis/ourfocus/animalhealth/lab-info-services/sa_nvsl",
-        "skipped", 0, "National Veterinary Services Laboratories reference link.",
-    )
-    record_source(
-        conn, "cwd_info",
-        "CWD-Info.org — Chronic Wasting Disease Alliance",
-        "https://cwd-info.org/category/michigan/",
-        "skipped", 0, "News-article case tracking; not bulk downloadable.",
-    )
-    conn.commit()
-    return rows
-
-
 # ---------- 6. Pre-compute correlation_analysis ----------
 
 def build_correlation_table(conn: sqlite3.Connection) -> int:
-    """Join the latest-year pesticide totals with CWD/farmed/surveillance flags."""
+    """Join the latest-year pesticide totals with county respiratory rates."""
     cur = conn.cursor()
     cur.execute("DELETE FROM correlation_analysis")
 
@@ -713,19 +603,6 @@ def build_correlation_table(conn: sqlite3.Connection) -> int:
         GROUP BY c.fips, c.name, c.area_sq_miles
     """, (latest_year,)).fetchall()
 
-    # CWD per county
-    cwd_by_fips = {
-        info["fips"]: info for info in CWD_WILD_DEER_COUNTIES.values()
-    }
-    farmed_by_fips = {
-        info["fips"]: info["facilities"] for info in CWD_FARMED_DEER.values()
-    }
-    surv_by_fips: dict[str, list[int]] = {}
-    for year, counties in SURVEILLANCE_YEARS.items():
-        for r in rows:
-            if r["name"] in counties:
-                surv_by_fips.setdefault(r["fips"], []).append(year)
-
     # Latest respiratory rates per county per condition (most recent year).
     resp = {}
     for r in cur.execute("""
@@ -753,27 +630,18 @@ def build_correlation_table(conn: sqlite3.Connection) -> int:
     inserted = 0
     for r in rows:
         fips = r["fips"]
-        cwd = cwd_by_fips.get(fips)
-        positives = cwd["positives"] if cwd else 0
         per_sq_mi = (r["total_kg"] / r["area_sq_miles"]) if r["area_sq_miles"] else None
         resp_row = resp.get(fips, {})
         cur.execute(
             """INSERT INTO correlation_analysis(
                  county_fips, county, total_pesticide_kg, pesticide_per_sq_mile,
-                 herbicide_kg, insecticide_kg, fungicide_kg,
-                 cwd_positive, cwd_positives_count, cwd_farmed_facilities,
-                 deer_tested, surveillance_years, area_sq_miles,
+                 herbicide_kg, insecticide_kg, fungicide_kg, area_sq_miles,
                  is_urban, asthma_ed_rate, asthma_hosp_rate,
                  copd_ed_rate, copd_hosp_rate, asthma_prevalence_pct)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fips, r["name"], r["total_kg"], per_sq_mi,
                 r["herb_kg"], r["insect_kg"], r["fung_kg"],
-                1 if positives > 0 else 0,
-                positives,
-                farmed_by_fips.get(fips, 0),
-                None,
-                ",".join(str(y) for y in sorted(surv_by_fips.get(fips, []))) or None,
                 r["area_sq_miles"],
                 1 if r["name"] in URBAN_COUNTIES else 0,
                 resp_row.get("ed_asthma"),
@@ -2553,8 +2421,6 @@ def run() -> int:
     log(f"NASS crop_acreage rows: {nass_rows:,}")
 
     record_reference_sources(conn)
-    cwd_rows = load_cwd_data(conn)
-    log(f"CWD rows loaded: {cwd_rows}", level="ok")
     resp_rows = load_respiratory_data(conn)
     log(f"Respiratory rows loaded: {resp_rows}", level="ok")
     wq_sites, wq_results = load_water_quality(conn)
@@ -2581,7 +2447,6 @@ def run() -> int:
     cur = conn.cursor()
     for t in ("counties", "pesticide_use", "pesticide_categories",
               "crop_acreage", "data_sources",
-              "cwd_wild_deer", "cwd_farmed_deer", "cwd_surveillance",
               "respiratory_ed_visits", "respiratory_hospitalizations",
               "respiratory_prevalence", "respiratory_mortality",
               "water_quality_sites", "water_quality_results", "watersheds",

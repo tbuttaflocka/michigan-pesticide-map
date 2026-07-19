@@ -46,16 +46,6 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 - **Heat-map view** — county choropleth, layer toggles (category / specific compound),
   Low/Avg/High estimate switch, total-vs-kg/mi² normalization, time slider
   (1992–2012) with play animation, click-for-county-detail with charts.
-- **CWD overlay** — toggle-able layers on top of the pesticide map:
-  CWD-positive county choropleth, per-township wild-deer markers, farmed-cervid
-  facility markers, and per-year surveillance zones. County detail panel shows
-  CWD status, first-detected date, and confirmed-positive count alongside
-  pesticide totals.
-- **Correlation view** — separate tab with a scatter plot of pesticide intensity
-  vs CWD positives (with OLS fit), Welch's t-test of CWD-positive vs negative
-  county means, per-compound mean comparison with significance stars, and a
-  sortable comparison table across all 83 counties. Statistical tests are
-  computed in pure stdlib so no scipy install is required.
 - **Water contamination overlay** — three toggleable layers in the left
   sidebar: monitoring sites (2,514 stations colour-coded green / amber / red
   by detection severity), Leaflet heatmap of detection density, and HUC-8
@@ -152,9 +142,6 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 | **US Census TIGER** county boundaries (plotly mirror) | ✅ live download | Filtered to STATE FIPS 26. |
 | **Pesticide categories** (herbicide / insecticide / fungicide / etc.) | ✅ embedded reference | Curated mapping built from EPA labels and university extension publications; see `app/categories.py`. |
 | **USDA NASS Quick Stats** crop acreage | ⚙️ optional | Set `NASS_API_KEY=...` (free at quickstats.nass.usda.gov/api) before running the loader. |
-| **Michigan DNR** CWD wild-deer test results (compiled to Feb 2026) | ✅ baked baseline | 18 positive counties / 378 wild positives. DNR's per-season tables are behind JS-rendered widgets; the loader uses the static fallback in `app/cwd_data.py`. |
-| **MDARD** farmed-cervid CWD surveillance | ✅ baked baseline | 16 captive facilities CWD-positive since 2008. |
-| MSU Veterinary Diagnostic Lab, USDA NVSL, CWD-Info.org | 🔗 reference link | Confirmation labs and Alliance case tracking. |
 | **NCI / CDC State Cancer Profiles** county cancer incidence & mortality, 2018–2022 | ✅ live download | County age-adjusted rates for 11 cancer types (incidence + mortality + late-stage). The site's `?…&output=1` export returns the empty HTML form to a browser but real CSV to the loader's `urllib` client; parsed rows land in `data/cancer/` and SQLite. Falls back to the Michigan statewide baseline in `app/cancer_data.py` if a fetch yields no county rows. |
 | **Agricultural Health Study** + **IARC Monographs** | ✅ embedded reference | Compound→cancer evidence table (evidence level, IARC class, mechanism, key studies) in `app/cancer_data.py`; powers the evidence modal + matrix dots. |
 | Michigan Cancer Surveillance Program (MCSP), CDC NPCR, NCI SEER, CDC WONDER | 🔗 reference link | Registry programs behind State Cancer Profiles; county extracts are portal/agreement-gated, not bulk feeds. |
@@ -243,7 +230,6 @@ run `--full` occasionally (e.g. yearly) to re-pull everything and backfill.
 | `tri` (EPA Toxics Release Inventory) | **Annual** (quarterly-safe) | TRI is published yearly (a year's data finalizes ~Oct of the following year). A quarterly run simply reuses the cached finalized years and picks up the newly-finalized year when it lands. |
 | `water_quality` (WQP samples) | **Quarterly** | New samples posted continuously |
 | `superfund` (EPA NPL) | **Quarterly** | Site statuses change through the year |
-| `cwd` (DNR CWD) | **Quarterly** | Updated through hunting/testing seasons |
 
 ### Scheduling on Windows (Task Scheduler)
 
@@ -300,16 +286,6 @@ michigan-pesticide-map/
 | `GET /api/statewide?year=&estimate=` | Top-N counties + compounds + trend + categories |
 | `GET /api/compound/<name>?estimate=` | Statewide trend + per-county breakdown for one compound |
 | `GET /api/search?q=` | Type-ahead search over counties & compounds |
-| `GET /api/cwd/counties` | One row per CWD-positive county |
-| `GET /api/cwd/points` | Per-township wild-deer marker points |
-| `GET /api/cwd/timeline` | CWD detections by year (drives animation) |
-| `GET /api/cwd/farmed` | Farmed-cervid CWD facility counts |
-| `GET /api/cwd/surveillance` | DNR focused surveillance counties by year |
-| `GET /api/correlation` | Sortable comparison table — pesticide totals + CWD per county |
-| `GET /api/correlation/scatter?metric=` | Scatter points + OLS trend line |
-| `GET /api/correlation/stats?metric=` | Welch t-test, Pearson r, plain-English summary |
-| `GET /api/correlation/compounds` | Per-compound mean-kg comparison (CWD+ vs CWD−) |
-| `GET /api/correlation/crops` | Crop-mix comparison (requires NASS) |
 | `GET /api/respiratory/counties?metric=` | Per-county asthma/COPD ED + hosp rates for the choropleth |
 | `GET /api/respiratory/trends?metric=&fips=` | Yearly trend, statewide or county |
 | `GET /api/respiratory/seasonal` | Statewide season-of-year asthma ED index |

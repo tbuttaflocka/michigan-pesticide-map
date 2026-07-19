@@ -19,7 +19,6 @@ from app import contamination_data
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
-from app.cwd_data import SURVEILLANCE_STATS
 from app.respiratory_data import (
     GROWING_SEASON_MONTHS,
     ICD10_RESP_RANGES,
@@ -763,308 +762,6 @@ def api_search():
     return lb_jsonify({"counties": counties, "compounds": compounds})
 
 
-# ---------- CWD endpoints ----------
-
-@app.route("/api/cwd/counties")
-def api_cwd_counties():
-    """One row per CWD-positive county with summary fields for the choropleth."""
-    conn = db()
-    cur = conn.cursor()
-    rows = cur.execute("""
-        SELECT county, county_fips,
-               SUM(total_positives) AS positives,
-               MIN(first_detected)  AS first_detected,
-               GROUP_CONCAT(DISTINCT township) AS townships,
-               MIN(notes)           AS notes
-          FROM cwd_wild_deer
-         GROUP BY county, county_fips
-         ORDER BY positives DESC
-    """).fetchall()
-    conn.close()
-    return lb_jsonify({
-        "counties": [dict(r) for r in rows],
-        "stats": SURVEILLANCE_STATS,
-    })
-
-
-@app.route("/api/cwd/points")
-def api_cwd_points():
-    """Per-township CWD marker points (lat/lon present)."""
-    conn = db()
-    rows = conn.execute("""
-        SELECT county, county_fips, township, latitude, longitude,
-               first_detected, total_positives, source, notes
-          FROM cwd_wild_deer
-         WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-         ORDER BY first_detected
-    """).fetchall()
-    conn.close()
-    return lb_jsonify({"points": [dict(r) for r in rows]})
-
-
-@app.route("/api/cwd/timeline")
-def api_cwd_timeline():
-    """Per-year list of counties that turned positive — drives the animation."""
-    conn = db()
-    rows = conn.execute("""
-        SELECT county, county_fips,
-               MIN(SUBSTR(first_detected, 1, 4)) AS year,
-               SUM(total_positives) AS positives
-          FROM cwd_wild_deer
-         GROUP BY county, county_fips
-    """).fetchall()
-    conn.close()
-    by_year: dict[int, list[dict]] = {}
-    for r in rows:
-        try:
-            y = int(r["year"])
-        except (TypeError, ValueError):
-            continue
-        by_year.setdefault(y, []).append({
-            "county": r["county"], "county_fips": r["county_fips"],
-            "positives": r["positives"],
-        })
-    cumulative = []
-    seen: set[str] = set()
-    for y in sorted(by_year):
-        for c in by_year[y]:
-            seen.add(c["county_fips"])
-        cumulative.append({
-            "year": y,
-            "new_counties": [c["county"] for c in by_year[y]],
-            "cumulative_counties": sorted(seen),
-        })
-    return lb_jsonify({"by_year": [
-        {"year": y, "counties": by_year[y]} for y in sorted(by_year)
-    ], "cumulative": cumulative})
-
-
-@app.route("/api/cwd/farmed")
-def api_cwd_farmed():
-    conn = db()
-    rows = conn.execute("""
-        SELECT county, county_fips, facilities_positive,
-               first_detected, source, notes
-          FROM cwd_farmed_deer
-         ORDER BY facilities_positive DESC
-    """).fetchall()
-    # attach county centroid (approx) for marker placement: average of geojson bbox
-    # provided by counties table area is not enough — we just emit FIPS and the
-    # frontend looks up the matching county GeoJSON feature for its centroid.
-    conn.close()
-    return lb_jsonify({"facilities": [dict(r) for r in rows]})
-
-
-@app.route("/api/cwd/surveillance")
-def api_cwd_surveillance():
-    """County → surveillance year list, plus per-year county lists."""
-    conn = db()
-    rows = conn.execute("""
-        SELECT county, county_fips, surveillance_year
-          FROM cwd_surveillance
-         ORDER BY surveillance_year, county
-    """).fetchall()
-    conn.close()
-    by_year: dict[int, list[str]] = {}
-    by_fips: dict[str, list[int]] = {}
-    for r in rows:
-        by_year.setdefault(r["surveillance_year"], []).append(r["county_fips"])
-        by_fips.setdefault(r["county_fips"], []).append(r["surveillance_year"])
-    return lb_jsonify({
-        "by_year": [{"year": y, "county_fips": v} for y, v in sorted(by_year.items())],
-        "by_county": [{"county_fips": f, "years": v} for f, v in by_fips.items()],
-    })
-
-
-# ---------- Correlation analysis endpoints ----------
-
-_METRIC_COLUMNS = {
-    "total":       "total_pesticide_kg",
-    "per_sq_mile": "pesticide_per_sq_mile",
-    "herbicide":   "herbicide_kg",
-    "insecticide": "insecticide_kg",
-    "fungicide":   "fungicide_kg",
-}
-
-
-@app.route("/api/correlation")
-def api_correlation():
-    """Full comparison table — one row per county."""
-    conn = db()
-    rows = conn.execute("""
-        SELECT * FROM correlation_analysis
-         ORDER BY total_pesticide_kg DESC NULLS LAST
-    """).fetchall()
-    conn.close()
-    return lb_jsonify({"rows": [dict(r) for r in rows]})
-
-
-@app.route("/api/correlation/scatter")
-def api_correlation_scatter():
-    """Points + OLS trend line for the scatter chart. x values are kg from
-    the DB; we pre-convert to lbs here so the response is unit-clean."""
-    metric = request.args.get("metric", "total")
-    col = _METRIC_COLUMNS.get(metric, "total_pesticide_kg")
-    conn = db()
-    rows = conn.execute(f"""
-        SELECT county_fips, county, {col} AS x, cwd_positives_count AS y,
-               cwd_positive
-          FROM correlation_analysis
-    """).fetchall()
-    conn.close()
-    pts = []
-    for r in rows:
-        x_kg = r["x"]
-        pts.append({
-            "county_fips": r["county_fips"], "county": r["county"],
-            "x": x_kg * KG_TO_LB if x_kg is not None else None,
-            "y": r["y"], "cwd_positive": r["cwd_positive"],
-        })
-    xs = [p["x"] for p in pts if p["x"] is not None]
-    ys = [p["y"] for p in pts if p["x"] is not None]
-    fit = pearson(xs, ys)
-    line = None
-    if fit.get("slope") is not None and xs:
-        xmin, xmax = min(xs), max(xs)
-        line = [
-            {"x": xmin, "y": fit["intercept"] + fit["slope"] * xmin},
-            {"x": xmax, "y": fit["intercept"] + fit["slope"] * xmax},
-        ]
-    return jsonify({
-        "metric": metric,
-        "points": pts,
-        "fit": fit,
-        "trend_line": line,
-    })
-
-
-@app.route("/api/correlation/stats")
-def api_correlation_stats():
-    """Welch t-test + Pearson r for CWD-positive vs CWD-negative county pesticide use.
-    Group means/SDs are pre-converted to lbs."""
-    metric = request.args.get("metric", "total")
-    col = _METRIC_COLUMNS.get(metric, "total_pesticide_kg")
-    conn = db()
-    rows = conn.execute(f"""
-        SELECT {col} AS v, cwd_positive, cwd_positives_count
-          FROM correlation_analysis
-    """).fetchall()
-    conn.close()
-    pos = [r["v"] * KG_TO_LB for r in rows if r["cwd_positive"] and r["v"] is not None]
-    neg = [r["v"] * KG_TO_LB for r in rows if not r["cwd_positive"] and r["v"] is not None]
-    t = welch_t_test(pos, neg)
-    cont = pearson(
-        [r["v"] * KG_TO_LB for r in rows if r["v"] is not None],
-        [r["cwd_positives_count"] for r in rows if r["v"] is not None],
-    )
-    return jsonify({
-        "metric": metric,
-        "n_positive_counties": len(pos),
-        "n_negative_counties": len(neg),
-        "welch_t_test": t,
-        "pearson_continuous": cont,
-        "interpretation": _interpret_stats(t, cont),
-    })
-
-
-@app.route("/api/correlation/compounds")
-def api_correlation_compounds():
-    """For featured compounds: mean kg in CWD-positive vs negative counties + t-test."""
-    featured = ["GLYPHOSATE", "ATRAZINE", "2,4-D", "METOLACHLOR",
-                "CHLORPYRIFOS", "DICAMBA"]
-    year = request.args.get("year", type=int)
-    conn = db()
-    cur = conn.cursor()
-    if year is None:
-        year = cur.execute("SELECT MAX(year) FROM pesticide_use").fetchone()[0]
-
-    out = []
-    for compound in featured:
-        rows = cur.execute("""
-            SELECT (pu.epest_low_kg + pu.epest_high_kg)/2.0 AS kg,
-                   ca.cwd_positive
-              FROM correlation_analysis ca
-         LEFT JOIN pesticide_use pu
-                ON pu.county_fips = ca.county_fips
-               AND pu.compound = ? AND pu.year = ?
-        """, (compound, year)).fetchall()
-        # Convert kg → lbs at the source so downstream means and t-test are in lbs.
-        pos = [(r["kg"] or 0) * KG_TO_LB for r in rows if r["cwd_positive"]]
-        neg = [(r["kg"] or 0) * KG_TO_LB for r in rows if not r["cwd_positive"]]
-        out.append({
-            "compound": compound,
-            "year": year,
-            "mean_positive_kg": (sum(pos) / len(pos)) if pos else 0,
-            "mean_negative_kg": (sum(neg) / len(neg)) if neg else 0,
-            "welch_t_test": welch_t_test(pos, neg),
-        })
-    conn.close()
-    return lb_jsonify({"compounds": out, "year": year})
-
-
-@app.route("/api/correlation/crops")
-def api_correlation_crops():
-    """Compare crop mix in CWD-positive vs CWD-negative counties.
-
-    Returns the totals so the UI can render side-by-side bars. Falls back
-    to an empty list (and a `note`) when no NASS crop data is loaded.
-    """
-    conn = db()
-    cur = conn.cursor()
-    n_crop_rows = cur.execute("SELECT COUNT(*) FROM crop_acreage").fetchone()[0]
-    if n_crop_rows == 0:
-        conn.close()
-        return lb_jsonify({
-            "crops": [],
-            "note": ("No USDA NASS crop acreage data loaded. "
-                     "Set NASS_API_KEY and re-run the loader to enable "
-                     "this comparison."),
-        })
-    rows = cur.execute("""
-        SELECT crop, ca.cwd_positive, SUM(acres_harvested) AS acres
-          FROM crop_acreage cr
-          JOIN correlation_analysis ca ON ca.county_fips = cr.county_fips
-         GROUP BY crop, ca.cwd_positive
-    """).fetchall()
-    conn.close()
-    grouped: dict[str, dict] = {}
-    for r in rows:
-        d = grouped.setdefault(r["crop"], {"crop": r["crop"], "pos": 0, "neg": 0})
-        if r["cwd_positive"]:
-            d["pos"] = r["acres"] or 0
-        else:
-            d["neg"] = r["acres"] or 0
-    return lb_jsonify({"crops": sorted(grouped.values(), key=lambda d: -d["pos"] - d["neg"])})
-
-
-def _interpret_stats(t: dict, cont: dict) -> str:
-    """Plain-English headline for the stats box."""
-    p = t.get("p_value")
-    r = cont.get("r")
-    parts = []
-    if p is None:
-        parts.append("Insufficient data for Welch's t-test.")
-    else:
-        sig = "statistically significant" if p < 0.05 else "not statistically significant"
-        direction = ("higher" if t["mean_a"] > t["mean_b"] else "lower")
-        parts.append(
-            f"Mean pesticide use in CWD-positive counties is {direction} "
-            f"than in CWD-negative counties (Welch's t = {t['t']:.2f}, "
-            f"p = {p:.3g}; {sig} at α = 0.05)."
-        )
-    if r is not None:
-        parts.append(
-            f"Pearson r = {r:.2f} (R² = {cont['r2']:.2f}) "
-            f"between pesticide use and the count of CWD positives across "
-            f"all 83 counties."
-        )
-    parts.append(
-        "Reminder: CWD is caused by prion proteins, not chemicals. "
-        "Geographic overlap with agricultural regions is a strong confounder."
-    )
-    return " ".join(parts)
-
-
 # ---------- Respiratory endpoints ----------
 
 # Each tuple: (table, rate_col, cond_col, cond_value, label, units, is_county_level)
@@ -1277,8 +974,7 @@ def api_correlation_respiratory():
         SELECT county_fips, county, total_pesticide_kg, pesticide_per_sq_mile,
                herbicide_kg, insecticide_kg, fungicide_kg,
                is_urban, asthma_ed_rate, asthma_hosp_rate,
-               copd_ed_rate, copd_hosp_rate, asthma_prevalence_pct,
-               cwd_positive, cwd_positives_count
+               copd_ed_rate, copd_hosp_rate, asthma_prevalence_pct
           FROM correlation_analysis
          ORDER BY total_pesticide_kg DESC NULLS LAST
     """).fetchall()
@@ -2431,8 +2127,6 @@ _EXPLORE_CAVEAT = {
                "reflect exposures from decades ago — not current pesticide use."),
     "respiratory": ("Asthma and COPD are driven mostly by air quality, smoking, "
                     "housing, and industrial emissions — not farm pesticide use."),
-    "cwd": ("Chronic Wasting Disease spreads deer-to-deer and through the "
-            "environment; a link to pesticide use is not established."),
 }
 
 
@@ -2497,7 +2191,7 @@ def _explore_x_map(conn, x_key: str):
 
 def _explore_y_map(conn, y_key: str):
     """Return (ymap {fips: value}, label, unit, family) for any Y variable.
-    family is one of 'cancer' | 'respiratory' | 'cwd' (for the caveat)."""
+    family is one of 'cancer' | 'respiratory' (for the caveat)."""
     if y_key and y_key.startswith("cancer:"):
         ck = _cancer_key(y_key.split(":", 1)[1])
         rows = conn.execute(
@@ -2507,12 +2201,6 @@ def _explore_y_map(conn, y_key: str):
         label = cancer_data.CANCER_BY_KEY[ck]["label"]
         return ({r["f"]: r["rate"] for r in rows}, label,
                 "cases per 100,000 (age-adjusted)", "cancer")
-    if y_key == "cwd":
-        rows = conn.execute(
-            "SELECT county_fips AS f, cwd_positives_count AS v FROM correlation_analysis"
-        ).fetchall()
-        return ({r["f"]: r["v"] for r in rows}, "CWD-positive deer",
-                "confirmed positive deer", "cwd")
     # respiratory (default)
     col, label, unit = _EXPLORE_RESP.get(y_key, _EXPLORE_RESP["asthma_ed"])
     rows = conn.execute(
@@ -2561,8 +2249,6 @@ def _explore_variables(conn) -> dict:
          for c in cancer_data.CANCER_TYPES]
     y += [{"key": k, "label": lbl, "unit": u, "group": "Respiratory"}
           for k, (col, lbl, u) in _EXPLORE_RESP.items()]
-    y += [{"key": "cwd", "label": "CWD-positive deer (count)",
-           "unit": "confirmed positive deer", "group": "Wildlife disease"}]
     return {"x": x, "y": y,
             "x_default": "total", "y_default": f"cancer:{cancer_data.DEFAULT_CANCER}"}
 
@@ -2579,8 +2265,8 @@ def api_explore_variables():
 @app.route("/api/explore")
 def api_explore():
     """Flexible county-level scatter/correlation for any X (pesticide use,
-    compound, contamination, water detections) vs any Y (cancer, respiratory,
-    CWD). Returns raw stats + points; the frontend does the plain-language
+    compound, contamination, water detections) vs any Y (cancer, respiratory).
+    Returns raw stats + points; the frontend does the plain-language
     translation so it can update live."""
     x_key = request.args.get("x", "total")
     y_key = request.args.get("y", f"cancer:{cancer_data.DEFAULT_CANCER}")

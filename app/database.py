@@ -78,44 +78,6 @@ CREATE TABLE IF NOT EXISTS data_sources (
     last_attempt            TEXT             -- ISO timestamp of last refresh attempt
 );
 
--- ===== Chronic Wasting Disease (CWD) overlay =====
-
-CREATE TABLE IF NOT EXISTS cwd_wild_deer (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    county          TEXT NOT NULL,
-    county_fips     TEXT NOT NULL,
-    township        TEXT,
-    latitude        REAL,
-    longitude       REAL,
-    first_detected  TEXT,                    -- ISO date
-    total_positives INTEGER DEFAULT 0,
-    source          TEXT DEFAULT 'DNR',
-    notes           TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_cwd_wild_county ON cwd_wild_deer(county_fips);
-
-CREATE TABLE IF NOT EXISTS cwd_farmed_deer (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    county              TEXT NOT NULL,
-    county_fips         TEXT NOT NULL,
-    facilities_positive INTEGER DEFAULT 0,
-    first_detected      TEXT,
-    source              TEXT DEFAULT 'MDARD',
-    notes               TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_cwd_farm_county ON cwd_farmed_deer(county_fips);
-
-CREATE TABLE IF NOT EXISTS cwd_surveillance (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    county             TEXT NOT NULL,
-    county_fips        TEXT NOT NULL,
-    surveillance_year  INTEGER NOT NULL,
-    deer_tested        INTEGER,
-    positives_found    INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS ix_cwd_surv_county ON cwd_surveillance(county_fips);
-CREATE INDEX IF NOT EXISTS ix_cwd_surv_year   ON cwd_surveillance(surveillance_year);
-
 CREATE TABLE IF NOT EXISTS correlation_analysis (
     county_fips           TEXT PRIMARY KEY,
     county                TEXT NOT NULL,
@@ -124,11 +86,6 @@ CREATE TABLE IF NOT EXISTS correlation_analysis (
     herbicide_kg          REAL,
     insecticide_kg        REAL,
     fungicide_kg          REAL,
-    cwd_positive          INTEGER DEFAULT 0,
-    cwd_positives_count   INTEGER DEFAULT 0,
-    cwd_farmed_facilities INTEGER DEFAULT 0,
-    deer_tested           INTEGER,
-    surveillance_years    TEXT,
     area_sq_miles         REAL,
     is_urban              INTEGER DEFAULT 0,
     asthma_ed_rate        REAL,

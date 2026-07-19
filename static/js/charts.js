@@ -219,39 +219,8 @@
     });
   }
 
-  function groupedBar(canvasId, labels, posValues, negValues, sigFlags) {
-    const ctx = document.getElementById(canvasId);
-    if (!ctx) return null;
-    const starred = labels.map((l, i) => sigFlags[i] ? `★ ${l}` : l);
-    return new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: starred,
-        datasets: [
-          { label: 'CWD-positive counties',
-            data: posValues, backgroundColor: '#f85149', borderRadius: 4 },
-          { label: 'CWD-negative counties',
-            data: negValues, backgroundColor: '#3fb950', borderRadius: 4 },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'top', labels: { boxWidth: 12, padding: 12 } },
-          tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${fmtKg(c.parsed.y)}` } },
-        },
-        scales: {
-          x: { grid: { display: false } },
-          y: { grid: { color: 'rgba(154,164,178,.10)' },
-               ticks: { callback: (v) => fmtKg(v) } },
-        },
-      },
-    });
-  }
-
   window.PMCharts = {
     fmtKg, fmtLbs, fmtCount, fmtNum, horizontalBar, doughnut, lineChart,
-    scatter, groupedBar, verticalBar, destroyIfExists, CATEGORY_COLORS,
+    scatter, verticalBar, destroyIfExists, CATEGORY_COLORS,
   };
 })();

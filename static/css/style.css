@@ -612,8 +612,8 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 
-/* ---------- CWD overlay toggles ---------- */
-.cwd-toggle {
+/* ---------- overlay toggles ---------- */
+.overlay-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -621,8 +621,7 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
   font-size: 13px;
 }
-.cwd-toggle input { accent-color: #f85149; }
-#cwd-stats { margin-top: 8px; }
+.overlay-toggle input { accent-color: var(--accent); }
 
 /* ---------- layer control (choropleth radios + overlays) ---------- */
 .active-layer {
@@ -683,7 +682,6 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 0 0 1px rgba(255,255,255,.15) inset;
 }
 .lr-dot.pest   { background: #5b9f3b; }
-.lr-dot.cwd    { background: #bf3b2c; }
 .lr-dot.resp   { background: #5474c9; }
 .lr-dot.cancer { background: #e85d2f; }
 .lr-dot.contam { background: #9c2f8c; }
@@ -792,18 +790,6 @@ a:hover { text-decoration: underline; }
 /* Leaflet tooltip arrow color to match dark theme */
 .wind-tip.leaflet-tooltip-top::before { border-top-color: var(--line); }
 
-/* CWD layer styling */
-.cwd-marker {
-  background: #f85149;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(248,81,73,.35), 0 2px 6px rgba(0,0,0,.6);
-}
-.cwd-marker.farmed { background: #f0b429; box-shadow: 0 0 0 2px rgba(240,180,41,.35), 0 2px 6px rgba(0,0,0,.6); }
-.cwd-popup { color: var(--text); }
-.cwd-popup h4 { margin: 0 0 4px; font-size: 13px; }
-.cwd-popup .pos { color: #f85149; font-weight: 600; }
-
 .leaflet-popup-content-wrapper {
   background: var(--bg-2);
   color: var(--text);
@@ -813,23 +799,6 @@ a:hover { text-decoration: underline; }
 }
 .leaflet-popup-tip { background: var(--bg-2); }
 .leaflet-popup-close-button { color: var(--muted) !important; }
-
-.cwd-badge {
-  display: inline-block;
-  background: rgba(248,81,73,.18);
-  border: 1px solid rgba(248,81,73,.4);
-  color: #ff7a72;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.cwd-badge.negative {
-  background: rgba(63,185,80,.10);
-  border-color: rgba(63,185,80,.4);
-  color: #5dd66f;
-}
 
 /* ---------- correlation view ---------- */
 .correlation-view {
@@ -914,20 +883,7 @@ a:hover { text-decoration: underline; }
 #corr-table th.sorted-asc::after  { content: ' ▲'; color: var(--accent); }
 #corr-table th.sorted-desc::after { content: ' ▼'; color: var(--accent); }
 #corr-table td.right, #corr-table th.right { text-align: right; font-variant-numeric: tabular-nums; }
-#corr-table tr.cwd-pos { background: rgba(248,81,73,.06); }
-#corr-table tr.cwd-pos td:first-child { border-left: 3px solid #f85149; }
 #corr-table tr:hover { background: rgba(63,185,80,.06); cursor: pointer; }
-
-.cwd-status-pill {
-  font-size: 10.5px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-}
-.cwd-status-pill.pos { background: rgba(248,81,73,.18); color: #ff7a72; }
-.cwd-status-pill.neg { background: rgba(154,164,178,.14); color: var(--muted); }
 
 /* ---------- respiratory overlay ---------- */
 .resp-meta {

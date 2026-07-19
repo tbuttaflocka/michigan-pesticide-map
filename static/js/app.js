@@ -17,7 +17,6 @@
     geoLayer: null,
     map: null,
     // Which layer colors the county fills. Exactly one at a time (radio group):
-    // 'pesticide' | 'cwd' | 'resp' | 'cancer' | 'contam_density'
     activeChoropleth: 'pesticide',
     countyByFips: new Map(),
     breaks: [],
@@ -25,14 +24,6 @@
     palette: [],
     playInterval: null,
     charts: {},
-    // CWD overlays
-    cwd: { counties: [], points: [], farmed: [], surveillance: {}, byFips: new Map() },
-    layers: { cwdChoropleth: null, cwdMarkers: null, cwdFarmed: null, cwdSurv: null },
-    showCwdChoropleth: false,
-    showCwdMarkers: true,
-    showCwdFarmed: false,
-    showCwdSurv: false,
-    correlation: { rows: [], sortKey: 'total_pesticide_lbs', sortDir: 'desc', onlyCwd: false },
     explore: { vars: null, wired: false, chart: null },
     trend: { sw: null, cty: null },
     water: {
@@ -219,10 +210,6 @@
   const NO_DATA = '#26303f';
   function fillColorForActive(fips) {
     switch (state.activeChoropleth) {
-      case 'cwd': {
-        const c = state.cwd.byFips.get(fips);
-        return (c && cwdColor(c.positives)) || NO_DATA;
-      }
       case 'resp': {
         const c = state.resp.byFips.get(fips);
         if (!c || c.value == null) return NO_DATA;
@@ -407,12 +394,6 @@
     switch (state.activeChoropleth) {
       case 'none':
         return '';   // county name only — coloring is off
-      case 'cwd': {
-        const c = state.cwd.byFips.get(fips);
-        return (c && c.positives)
-          ? `<div><span class="muted">CWD-positive deer:</span> <span class="v">${c.positives}</span></div>`
-          : '<div class="muted">No CWD positives</div>';
-      }
       case 'resp': {
         const c = state.resp.byFips.get(fips);
         const base = (state.resp.meta && !state.resp.countyLevel) ? ' · MI baseline' : '';
@@ -468,7 +449,6 @@
   function activeChoroplethLabel() {
     switch (state.activeChoropleth) {
       case 'none':   return 'None (no county coloring)';
-      case 'cwd':    return 'CWD-positive counties';
       case 'resp':   return `Respiratory — ${respMetricLabel(state.resp.metric)}`;
       case 'cancer': return `Cancer — ${cancerTypeLabel(state.cancer.type)} (${state.cancer.dataType})`;
       case 'contam_density': return 'Contamination site density';
@@ -542,20 +522,6 @@
           : 'lbs applied (lower → higher)';
         break;
       }
-      case 'cwd': {
-        const bins = [
-          { c: '#f0d685', t: '1–4' }, { c: '#e8c440', t: '5–9' }, { c: '#e08c3c', t: '10–24' },
-          { c: '#bf3b2c', t: '25–99' }, { c: '#7f0d0a', t: '100+' },
-        ];
-        for (const b of bins) {
-          const div = document.createElement('div');
-          div.className = 'bucket'; div.style.background = b.c;
-          div.style.color = '#fff'; div.textContent = b.t;
-          el.appendChild(div);
-        }
-        note.textContent = 'cumulative CWD-positive wild deer';
-        break;
-      }
       case 'resp':
         paletteStrip(el, RESP_PALETTE);
         note.textContent = state.resp.meta
@@ -583,9 +549,6 @@
 
   // Small key entries for whatever point/marker overlays are stacked on top.
   const MARKER_KEYS = [
-    { on: () => state.showCwdMarkers,        c: '#f85149', t: 'CWD wild-deer sites' },
-    { on: () => state.showCwdFarmed,         c: '#f0b429', t: 'Farmed-cervid facilities' },
-    { on: () => state.showCwdSurv,           c: '#58a6ff', t: 'CWD surveillance zones' },
     { on: () => state.water.showSites,       c: '#f0b429', t: 'Water monitoring sites' },
     { on: () => state.water.showHeat,        c: '#f85149', t: 'Water detection heatmap' },
     { on: () => state.water.showWatersheds,  c: '#8db0ff', t: 'HUC-8 watersheds' },
@@ -635,7 +598,6 @@
     if (!which) return;
     state.activeChoropleth = which;
     // Keep the legacy per-layer flags in sync (county cards + meta text use them).
-    state.showCwdChoropleth  = (which === 'cwd');
     state.resp.enabled       = (which === 'resp');
     state.cancer.enabled     = (which === 'cancer');
     state.contam.showDensity = (which === 'contam_density');
@@ -691,138 +653,6 @@
     } finally {
       loading(false);
     }
-  }
-
-  // ---------- CWD overlays ----------
-  async function loadCwd() {
-    const [counties, points, farmed, surv] = await Promise.all([
-      api('/api/cwd/counties'),
-      api('/api/cwd/points'),
-      api('/api/cwd/farmed'),
-      api('/api/cwd/surveillance'),
-    ]);
-    state.cwd.counties = counties.counties;
-    state.cwd.points = points.points;
-    state.cwd.farmed = farmed.facilities;
-    state.cwd.surveillance = surv;
-    state.cwd.byFips.clear();
-    for (const c of counties.counties) state.cwd.byFips.set(c.county_fips, c);
-
-    const s = counties.stats;
-    $('cwd-stats').textContent =
-      `${s.total_positives_wild} positives · ${s.positive_counties}/${s.total_counties} counties · ` +
-      `${s.total_tested.toLocaleString()} tested since ${s.surveillance_start_year}`;
-  }
-
-  function cwdColor(positives) {
-    if (positives >= 100) return '#7f0d0a';
-    if (positives >= 25)  return '#bf3b2c';
-    if (positives >= 10)  return '#e08c3c';
-    if (positives >= 5)   return '#e8c440';
-    if (positives >= 1)   return '#f0d685';
-    return null;
-  }
-
-  // (CWD county fill is now painted by the shared base choropleth via
-  // fillColorForActive when 'cwd' is the active layer — no separate overlay.)
-
-  function countyCentroid(fips) {
-    const feat = state.geojson.features.find((f) => f.id === fips);
-    if (!feat) return null;
-    const layer = L.geoJSON(feat);
-    const c = layer.getBounds().getCenter();
-    layer.remove();
-    return c;
-  }
-
-  function renderCwdMarkers() {
-    if (state.layers.cwdMarkers) state.layers.cwdMarkers.remove();
-    if (!state.showCwdMarkers) { state.layers.cwdMarkers = null; return; }
-    // featureGroup (not layerGroup) so overlays can call .bringToFront().
-    const grp = L.featureGroup();
-    for (const p of state.cwd.points) {
-      if (p.latitude == null || p.longitude == null) continue;
-      const m = L.circleMarker([p.latitude, p.longitude], {
-        radius: Math.min(14, 6 + Math.sqrt(p.total_positives) * 1.5),
-        color: '#fff',
-        weight: 1.5,
-        fillColor: '#f85149',
-        fillOpacity: 0.88,
-      });
-      m.bindPopup(`
-        <div class="cwd-popup">
-          <h4>${p.township} Twp · ${p.county} County</h4>
-          <div><span class="muted">First detected:</span> ${p.first_detected || 'unknown'}</div>
-          <div><span class="muted">Positives:</span> <span class="pos">${p.total_positives}</span></div>
-          <div><span class="muted">Source:</span> ${p.source}</div>
-          <div class="small muted" style="margin-top:4px">${p.notes || ''}</div>
-        </div>`);
-      grp.addLayer(m);
-    }
-    grp.addTo(state.map);
-    state.layers.cwdMarkers = grp;
-  }
-
-  function renderCwdFarmed() {
-    if (state.layers.cwdFarmed) state.layers.cwdFarmed.remove();
-    if (!state.showCwdFarmed) { state.layers.cwdFarmed = null; return; }
-    const grp = L.layerGroup();
-    for (const f of state.cwd.farmed) {
-      const c = countyCentroid(f.county_fips);
-      if (!c) continue;
-      const m = L.marker(c, {
-        icon: L.divIcon({
-          className: '',
-          html: `<div style="width:22px;height:22px;border-radius:4px;background:#f0b429;
-                   color:#1a1208;display:flex;align-items:center;justify-content:center;
-                   font-weight:700;font-size:11px;border:2px solid #fff;
-                   box-shadow:0 2px 6px rgba(0,0,0,.6);transform:translate(-11px,-11px);">
-                   ${f.facilities_positive}</div>`,
-        }),
-      });
-      m.bindPopup(`
-        <div class="cwd-popup">
-          <h4>${f.county} County · Farmed cervid</h4>
-          <div><span class="muted">CWD-positive facilities:</span>
-            <span class="pos">${f.facilities_positive}</span></div>
-          <div><span class="muted">First detected:</span> ${f.first_detected || 'unknown'}</div>
-          <div class="small muted" style="margin-top:4px">${f.notes || ''}</div>
-        </div>`);
-      grp.addLayer(m);
-    }
-    grp.addTo(state.map);
-    state.layers.cwdFarmed = grp;
-  }
-
-  function renderCwdSurveillance() {
-    if (state.layers.cwdSurv) state.layers.cwdSurv.remove();
-    if (!state.showCwdSurv) { state.layers.cwdSurv = null; return; }
-    const yearColors = {
-      2021: '#58a6ff', 2022: '#bc8cff', 2023: '#3fb950', 2024: '#f0b429', 2025: '#f85149',
-    };
-    const fipsToYears = {};
-    for (const r of state.cwd.surveillance.by_county || []) fipsToYears[r.county_fips] = r.years;
-    state.layers.cwdSurv = L.geoJSON(state.geojson, {
-      style: (f) => {
-        const yrs = fipsToYears[f.id];
-        if (!yrs || !yrs.length) return { fillOpacity: 0, weight: 0 };
-        const latest = Math.max(...yrs);
-        return {
-          fillColor: yearColors[latest] || '#9aa4b2',
-          fillOpacity: 0.35,
-          color: yearColors[latest] || '#9aa4b2',
-          weight: 1,
-          dashArray: '2 4',
-        };
-      },
-      interactive: false,
-    }).addTo(state.map);
-  }
-
-  function refreshAllCwdLayers() {
-    renderCwdSurveillance();
-    renderCwdMarkers();
-    renderCwdFarmed();
   }
 
   // ---------- Water-quality overlay ----------
@@ -1062,7 +892,7 @@
 
   // ---------- Cancer choropleth overlay ----------
   // Orange-red heat palette (distinct from green=pesticide, blue-purple=resp,
-  // dashed red=CWD). Low → high = pale orange → deep red.
+  // magenta=contamination). Low → high = pale orange → deep red.
   const CANCER_PALETTE = ['#fee0b6', '#fdc98a', '#fcae6b', '#fb9350', '#f5793b',
                           '#e85d2f', '#d6431f', '#b82e12', '#94210c', '#6b1508'];
 
@@ -1427,22 +1257,6 @@
     $('county-density').textContent = data.lbs_per_sq_mile != null
       ? fmtLbs(data.lbs_per_sq_mile) : '—';
     $('county-inspector').href = data.mdard_inspector_url;
-
-    // CWD status for this county
-    const cwd = state.cwd.byFips.get(fips);
-    const badge = $('county-cwd-badge');
-    if (cwd) {
-      badge.className = 'cwd-badge';
-      badge.innerHTML =
-        `CWD-positive · ${cwd.positives} confirmed · first detected ${cwd.first_detected || 'unknown'}` +
-        (cwd.townships ? ` · townships: ${cwd.townships}` : '');
-      $('county-cwd-positives').textContent = cwd.positives.toLocaleString();
-    } else {
-      badge.className = 'cwd-badge negative';
-      badge.innerHTML = 'No CWD positives recorded';
-      $('county-cwd-positives').textContent = '0';
-    }
-    badge.classList.remove('hidden');
 
     // Respiratory comparison table — one row per metric.
     const r = data.respiratory || {};
@@ -2148,16 +1962,6 @@
       });
     });
 
-    // CWD marker/zone overlays (stack freely, independent checkboxes)
-    $('cwd-markers').addEventListener('change', (e) => {
-      state.showCwdMarkers = e.target.checked; renderCwdMarkers(); renderMarkerKeys();
-    });
-    $('cwd-farmed').addEventListener('change', (e) => {
-      state.showCwdFarmed = e.target.checked; renderCwdFarmed(); renderMarkerKeys();
-    });
-    $('cwd-surv').addEventListener('change', (e) => {
-      state.showCwdSurv = e.target.checked; renderCwdSurveillance(); renderMarkerKeys();
-    });
     // Water-quality overlays
     $('wq-sites').addEventListener('change', (e) => {
       state.water.showSites = e.target.checked; refreshWaterSites(); renderMarkerKeys();
@@ -2269,24 +2073,6 @@
     window.addEventListener('hashchange', () => {
       const v = (location.hash || '').replace('#', '');
       if (v && document.getElementById('view-' + v)) switchView(v, false);
-    });
-
-    // Correlation view interactivity
-    $('scatter-metric').addEventListener('change', refreshScatter);
-    $('only-cwd').addEventListener('change', (e) => {
-      state.correlation.onlyCwd = e.target.checked; renderCorrTable();
-    });
-    document.querySelectorAll('#corr-table th.sortable').forEach((th) => {
-      th.addEventListener('click', () => {
-        const k = th.dataset.sort;
-        if (state.correlation.sortKey === k) {
-          state.correlation.sortDir = state.correlation.sortDir === 'asc' ? 'desc' : 'asc';
-        } else {
-          state.correlation.sortKey = k;
-          state.correlation.sortDir = (k === 'county') ? 'asc' : 'desc';
-        }
-        renderCorrTable();
-      });
     });
 
     $('county-close').addEventListener('click', closeCountyPanel);
@@ -2466,125 +2252,9 @@
     show($('sources-modal'));
   }
 
-  // ---------- correlation view ----------
-  async function renderCorrelation() {
-    if (!state.correlation.rows.length) {
-      const data = await api('/api/correlation');
-      state.correlation.rows = data.rows;
-    }
-    renderCorrTable();
-    await Promise.all([refreshScatter(), refreshStatsBox(), refreshCompoundBars()]);
-  }
-
-  function renderCorrTable() {
-    const tbody = $('corr-tbody');
-    tbody.innerHTML = '';
-    let rows = state.correlation.rows.slice();
-    if (state.correlation.onlyCwd) rows = rows.filter((r) => r.cwd_positive);
-    const k = state.correlation.sortKey;
-    const dir = state.correlation.sortDir === 'asc' ? 1 : -1;
-    rows.sort((a, b) => {
-      const va = a[k], vb = b[k];
-      if (va == null && vb == null) return 0;
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      if (typeof va === 'string') return va.localeCompare(vb) * dir;
-      return (va - vb) * dir;
-    });
-    document.querySelectorAll('#corr-table th').forEach((th) => {
-      th.classList.remove('sorted-asc', 'sorted-desc');
-      if (th.dataset.sort === k) {
-        th.classList.add(dir === 1 ? 'sorted-asc' : 'sorted-desc');
-      }
-    });
-    const f = (v) => (v == null ? '—' : fmtLbs(v));
-    for (const r of rows) {
-      const tr = document.createElement('tr');
-      if (r.cwd_positive) tr.classList.add('cwd-pos');
-      tr.innerHTML = `
-        <td>${r.county}</td>
-        <td class="right">${f(r.total_pesticide_lbs)}</td>
-        <td class="right">${r.pesticide_per_sq_mile == null ? '—' : r.pesticide_per_sq_mile.toFixed(1)}</td>
-        <td class="right">${f(r.herbicide_lbs)}</td>
-        <td class="right">${f(r.insecticide_lbs)}</td>
-        <td class="right">${f(r.fungicide_lbs)}</td>
-        <td class="right">${r.cwd_positives_count}</td>
-        <td class="right">${r.cwd_farmed_facilities}</td>
-        <td><span class="cwd-status-pill ${r.cwd_positive ? 'pos' : 'neg'}">
-          ${r.cwd_positive ? 'positive' : 'negative'}</span></td>`;
-      tr.addEventListener('click', () => {
-        // jump back to the map and open this county
-        document.querySelector('#view-switch button[data-view="map"]').click();
-        openCounty(r.county_fips);
-      });
-      tbody.appendChild(tr);
-    }
-  }
-
-  async function refreshScatter() {
-    const metric = $('scatter-metric').value;
-    const data = await api('/api/correlation/scatter', { metric });
-    const pos = data.points
-      .filter((p) => p.cwd_positive && p.x != null && p.y != null)
-      .map((p) => ({ x: p.x, y: p.y, label: p.county, ur: 'CWD-positive' }));
-    const neg = data.points
-      .filter((p) => !p.cwd_positive && p.x != null && p.y != null)
-      .map((p) => ({ x: p.x, y: p.y, label: p.county, ur: 'CWD-negative' }));
-    const datasets = [
-      { label: `CWD-positive counties (${pos.length})`, data: pos,
-        backgroundColor: '#f85149', pointRadius: 6, pointHoverRadius: 9 },
-      { label: `CWD-negative counties (${neg.length})`, data: neg,
-        backgroundColor: 'rgba(154,164,178,.7)', pointRadius: 6, pointHoverRadius: 9 },
-    ];
-    if (data.trend_line) {
-      datasets.push({
-        label: 'Overall trend', data: data.trend_line, type: 'line',
-        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2,
-        backgroundColor: 'transparent', borderDash: [6, 4], pointRadius: 0, fill: false,
-      });
-    }
-    PMCharts.destroyIfExists(state.charts.scatter);
-    state.charts.scatter = PMCharts.scatter('chart-scatter', datasets, {
-      xLabel: 'Pesticide applied (lbs)', yLabel: 'Confirmed CWD-positive deer',
-      xName: 'Pesticide', yName: 'CWD-positive deer', yFmt: PMCharts.fmtCount,
-    });
-    // Plain-English reading of the fit, alongside the raw numbers.
-    const info = PMGloss.interpret(data.fit, 'CWD positives');
-    $('scatter-fit').innerHTML =
-      data.fit.r == null
-        ? 'Not enough data to measure a relationship.'
-        : `${info.r2Sentence} <span class="${info.significant ? 'sr-sig-yes' : 'sr-sig-no'}">`
-          + `${info.pSentence}</span> `
-          + `<span class="muted small">(r = ${data.fit.r.toFixed(3)}, R² = ${data.fit.r2.toFixed(3)}, `
-          + `p = ${fmtP(data.fit.p_value)}, n = ${data.fit.n})</span>`;
-  }
-
-  async function refreshStatsBox() {
-    const metric = $('scatter-metric').value;
-    const d = await api('/api/correlation/stats', { metric });
-    const t = d.welch_t_test, r = d.pearson_continuous;
-    $('stats-mean-pos').textContent = fmtLbs(t.mean_a);
-    $('stats-mean-neg').textContent = fmtLbs(t.mean_b);
-    $('stats-t').textContent = t.t != null ? t.t.toFixed(2) : '—';
-    $('stats-p').textContent = t.p_value != null ? t.p_value.toExponential(2) : '—';
-    $('stats-r').textContent = r.r != null ? r.r.toFixed(3) : '—';
-    $('stats-r2').textContent = r.r2 != null ? r.r2.toFixed(3) : '—';
-    $('stats-interp').textContent = d.interpretation;
-  }
-
-  async function refreshCompoundBars() {
-    const d = await api('/api/correlation/compounds');
-    const labels = d.compounds.map((c) => c.compound);
-    const pos = d.compounds.map((c) => c.mean_positive_lbs);
-    const neg = d.compounds.map((c) => c.mean_negative_lbs);
-    const sig = d.compounds.map((c) => (c.welch_t_test.p_value ?? 1) < 0.05);
-    PMCharts.destroyIfExists(state.charts.compoundBars);
-    state.charts.compoundBars = PMCharts.groupedBar('chart-compounds', labels, pos, neg, sig);
-  }
-
   // Activate one of the top-level views. Central so both button clicks, #hash
   // deep links, and boot-time restoration go through the same path.
-  const VIEWS = ['map', 'explore', 'correlation', 'respiratory', 'cancer'];
+  const VIEWS = ['map', 'explore', 'respiratory', 'cancer'];
   function switchView(v, updateHash) {
     if (!VIEWS.includes(v)) v = 'map';
     document.querySelectorAll('#view-switch button').forEach((x) =>
@@ -2592,7 +2262,6 @@
     VIEWS.forEach((name) =>
       $('view-' + name).classList.toggle('hidden', name !== v));
     if (v === 'explore') renderExplore();
-    else if (v === 'correlation') renderCorrelation();
     else if (v === 'respiratory') renderRespiratory();
     else if (v === 'cancer') renderCancer();
     else if (state.map) state.map.invalidateSize();
@@ -3215,10 +2884,7 @@
         switchView(initial, false);
       }
 
-      renderChoropleth();
-      await loadCwd();
-      refreshAllCwdLayers();
-      await loadWaterCompounds();
+
       bindFilters();
       await refreshAll();
 
