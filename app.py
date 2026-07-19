@@ -44,6 +44,75 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["JSON_SORT_KEYS"] = False
 
 
+# ---------- security headers ----------
+# Applied to every response. The Content-Security-Policy is scoped to exactly
+# what the app loads: its own assets, the Leaflet/MarkerCluster/Heat libraries
+# from unpkg, Chart.js from jsDelivr, and CARTO/OSM basemap tiles. There are no
+# inline <script> blocks, so script-src stays strict (no 'unsafe-inline');
+# style-src allows inline because Leaflet and the charts set element styles.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+    "img-src 'self' data: https://*.basemaps.cartocdn.com https://*.cartocdn.com; "
+    "connect-src 'self'; "
+    "font-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.after_request
+def _security_headers(resp):
+    resp.headers.setdefault("Content-Security-Policy", _CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Permissions-Policy",
+                            "geolocation=(), microphone=(), camera=()")
+    return resp
+
+
+# ---------- error handlers ----------
+# Clean, generic responses so a public visitor never sees a stack trace or an
+# internal path. JSON for /api/* callers, a small styled HTML page otherwise.
+# (Flask already hides tracebacks with debug=False; these just make it tidy.)
+
+def _wants_json() -> bool:
+    return request.path.startswith("/api/")
+
+
+def _error_response(code: int, title: str, message: str):
+    if _wants_json():
+        return jsonify({"error": title, "message": message, "status": code}), code
+    html = (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>{code} — {title}</title>"
+        "<style>body{background:#0d1117;color:#e6edf3;font-family:-apple-system,"
+        "Segoe UI,Roboto,Helvetica,Arial,sans-serif;display:flex;min-height:100vh;"
+        "margin:0;align-items:center;justify-content:center;text-align:center}"
+        ".box{max-width:460px;padding:24px}h1{font-size:52px;margin:0;color:#3fb950}"
+        "p{color:#9aa4b2;line-height:1.5}a{color:#58a6ff}</style></head><body>"
+        f"<div class='box'><h1>{code}</h1><p><strong>{title}.</strong> {message}</p>"
+        "<p><a href='/'>← Back to the map</a></p></div></body></html>"
+    )
+    return html, code
+
+
+@app.errorhandler(404)
+def _handle_404(e):
+    return _error_response(404, "Page not found",
+                           "That address doesn't exist here.")
+
+
+@app.errorhandler(500)
+def _handle_500(e):
+    return _error_response(500, "Something went wrong",
+                           "An unexpected error occurred. Please try again.")
+
+
 # ---------- units: kg -> lbs (single chokepoint) ----------
 #
 # The USGS source data and the SQLite DB store everything in kilograms.

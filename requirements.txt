@@ -1,3 +1,7 @@
+# Runtime dependency for the web app (everything else is Python stdlib —
+# sqlite3, urllib, json, csv). Install with:  pip install -r requirements.txt
 Flask>=3.0
-requests>=2.31
+
+# Optional — only needed to regenerate the app icon via scripts/make_icon.py.
+# Not required to run or use the app.
 Pillow>=10.0

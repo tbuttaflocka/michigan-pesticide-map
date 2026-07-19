@@ -1256,6 +1256,14 @@ a:hover { text-decoration: underline; }
 .intro-block h3 { margin: 6px 0 4px; font-size: 13.5px; color: var(--text); }
 .intro-block p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .intro-ico { font-size: 20px; }
+.intro-about {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.intro-about strong { color: var(--text); }
+
 .intro-disclaimer {
   font-size: 12.5px;
   line-height: 1.6;
@@ -1623,4 +1631,14 @@ a:hover { text-decoration: underline; }
   .app-body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; }
   .sidebar.left, .sidebar.right { border: none; border-bottom: 1px solid var(--line); }
   .correlation-grid { grid-template-columns: 1fr; }
+}
+/* Narrow phones: let the header wrap instead of overflowing, and give the
+   search box and view switch room to reflow onto their own lines. */
+@media (max-width: 600px) {
+  .app-header { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+  .header-actions { flex-wrap: wrap; gap: 8px; width: 100%; }
+  .view-switch { flex-wrap: wrap; }
+  #search { width: 100%; flex: 1 1 160px; }
+  .search-dropdown { right: 0; width: 100%; }
+  .branding h1 { font-size: 16px; }
 }

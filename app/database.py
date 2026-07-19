@@ -44,23 +44,6 @@ CREATE TABLE IF NOT EXISTS crop_acreage (
 CREATE INDEX IF NOT EXISTS ix_crop_county ON crop_acreage(county_fips);
 CREATE INDEX IF NOT EXISTS ix_crop_year   ON crop_acreage(year);
 
-CREATE TABLE IF NOT EXISTS registered_pesticides (
-    epa_reg_number      TEXT PRIMARY KEY,
-    product_name        TEXT,
-    active_ingredient   TEXT,
-    registrant          TEXT,
-    registration_status TEXT
-);
-
-CREATE TABLE IF NOT EXISTS water_monitoring (
-    station_id      TEXT PRIMARY KEY,
-    station_name    TEXT,
-    county_fips     TEXT,
-    latitude        REAL,
-    longitude       REAL,
-    notes           TEXT
-);
-
 CREATE TABLE IF NOT EXISTS data_sources (
     source_id       TEXT PRIMARY KEY,
     title           TEXT,

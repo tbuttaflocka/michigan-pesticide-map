@@ -1,8 +1,20 @@
-# Michigan Pesticide Application Heat Map
+# Michigan Pesticide & Environmental Health Map
 
-Interactive single-page web app showing county-level agricultural pesticide use across
-Michigan's 83 counties from 1992 through 2012, sourced directly from the USGS NAWQA
-Pesticide National Synthesis Project. Built with Flask + SQLite + Leaflet + Chart.js.
+Interactive single-page web app that brings together county-level environmental and
+health data for Michigan's 83 counties on one map so you can explore it and ask
+questions. It combines agricultural **pesticide use** (USGS NAWQA EPest), **water-quality**
+sampling, **industrial contamination** (EPA Superfund) and active **industrial toxic
+releases** (EPA Toxics Release Inventory), **respiratory** and **cancer** health measures,
+crop acreage, and growing-season **wind/drift**. Built with Flask + SQLite + Leaflet +
+Chart.js.
+
+> **Disclaimer — please read.** This tool is for **exploration and education only**. It is
+> **not** medical, legal, regulatory, or scientific advice. Any patterns it shows are
+> **associations, not proof of cause** — counties differ in age, income, industry, smoking,
+> and many other ways that affect health. It is an **independent, non-commercial project**
+> and is not affiliated with or endorsed by any government agency. Do not use it to draw
+> conclusions about any individual person, place, or product. See **[Disclaimer &
+> limitations](#disclaimer--limitations)** below.
 
 ## Quick start
 
@@ -240,7 +252,7 @@ run (the per-source guards make it a no-op for anything already current):
 
 ```bat
 schtasks /create /tn "PesticideMap Refresh" /sc MONTHLY /d 1 /st 03:00 ^
-  /tr "\"C:\Users\tarbu\Desktop\michigan-pesticide-map\.venv\Scripts\python.exe\" \"C:\Users\tarbu\Desktop\michigan-pesticide-map\refresh_data.py\""
+  /tr "\"C:\path\to\michigan-pesticide-map\.venv\Scripts\python.exe\" \"C:\path\to\michigan-pesticide-map\refresh_data.py\""
 ```
 
 For tighter control, create two tasks that call the script with `--source` for
@@ -255,6 +267,35 @@ schtasks /create /tn "PesticideMap WQ Refresh" /sc MONTHLY /mo 3 /d 1 /st 03:30 
 The script exits non-zero if **every** selected source fails, so Task Scheduler
 can surface a failed run. Check `refresh.log` (and `python refresh_data.py
 --list`) to see what happened.
+
+## Disclaimer & limitations
+
+This is an **independent, non-commercial educational project**. It compiles publicly
+available data from USGS, EPA, CDC, NCI, USDA, and Michigan state agencies; it is **not
+affiliated with or endorsed by** any of them. It is provided for **exploration and
+education only** and is **not medical, legal, regulatory, or scientific advice**.
+
+**Correlation is not causation.** The comparison tools show whether two things rise and
+fall together across counties. That is a starting point for questions — never proof that
+one causes the other. County-level (ecological) comparisons cannot establish individual
+risk (the *ecological fallacy*), and counties differ in age, income, industry, smoking,
+and screening in ways that independently affect health (confounding).
+
+Known limitations, by source:
+
+| Source | Key limitations |
+| --- | --- |
+| **USGS NAWQA EPest** (pesticide use) | *Modeled estimates*, not measurements — derived from proprietary sales + crop-extent models and reported as a low/high range. Covers crop-protection use only (no lawn/golf/aquatic use). Latest finalized years lag by several years. |
+| **EPA TRI** (industrial releases) | *Self-reported* annually by facilities above size/chemical thresholds; **undercounts** — small emitters and non-covered industries are excluded. Reporting a release does not mean it is illegal or unsafe. |
+| **NCI/CDC State Cancer Profiles** | Cancer has **10–30 year latency**, so current rates reflect past exposure. Counts under a threshold (≈16 cases) are **suppressed**, leaving gaps. Ecological comparison only. |
+| **CDC Environmental Tracking** (respiratory) | Annual, county-level, age-adjusted; some measures fall back to a Michigan statewide baseline where county breakdowns aren't published. Urban asthma is driven mostly by air quality/industry, not farming. |
+| **EPA Superfund / compiled sites** | Point locations and status change over time; the compiled set is a curated subset, not an exhaustive inventory of every contaminated site. |
+| **USGS/EPA Water Quality Portal** | Sampling is uneven in space and time; absence of detections can reflect a lack of sampling, not clean water. |
+| **IEM ASOS wind** | Prevailing growing-season wind at a handful of airport stations; drift arrows are a coarse approximation, not a dispersion model. |
+
+The in-app **Data sources** dialog shows each source's coverage window and last-refresh
+date. Coverage years, refresh cadence, and per-source status are listed above under
+[Data sources](#data-sources) and [Keeping the data fresh](#keeping-the-data-fresh).
 
 ## Architecture
 
