@@ -1597,15 +1597,20 @@
       + `${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}`
       + `${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span>`
       + `<span class="cv">${fmtLbs(c.lbs)}</span></div>`).join('');
+    const parent = (f.parent_company && f.parent_company !== 'NA') ? f.parent_company : '';
+    const addr = [f.street_address, f.city].filter(Boolean).join(', ');
+    const loc = addr ? `${addr}${f.county ? ', ' + f.county + ' Co.' : ''}` : (f.county ? `${f.county} Co.` : '');
     return `<div class="tri-popup">
-      ${f.parent_company ? `<div class="tri-parent">${f.parent_company}</div>` : ''}
+      ${parent ? `<div class="tri-parent">${parent}</div>` : ''}
       <h4>${f.name}</h4>
-      <div class="tri-meta">${f.industry_sector || 'Industry n/a'}${f.naics_code ? ` · NAICS ${f.naics_code}` : ''}${f.city ? ' · ' + f.city : ''}${f.county ? ', ' + f.county + ' Co.' : ''}</div>
+      <div class="tri-meta">${f.industry_sector || 'Industry n/a'}${f.naics_code ? ` · NAICS ${f.naics_code}` : ''}</div>
+      ${loc ? `<div class="tri-meta">${loc}</div>` : ''}
+      ${f.company_summary ? `<div class="tri-summary">${f.company_summary}</div>` : ''}
       <div class="tri-total">${fmtLbs(f.total_lbs)} <span class="muted">released · ${f.year}</span> ${triTrendBadge(f.trend)}</div>
       <div class="tri-paths">${path('Air:', f.air_lbs)}${path('Water:', f.water_lbs)}${path('Land:', f.land_lbs)}${path('Underground:', f.underground_lbs)}</div>
       ${chem ? `<div class="tri-chem-head">Top chemicals released</div>${chem}` : ''}
       ${triSpark(f.spark)}
-      <div class="tri-note">Self-reported to EPA under the Toxics Release Inventory (EPCRA). Pounds per year.</div>
+      <div class="tri-note">Facility data: EPA Toxics Release Inventory (self-reported, EPCRA). Pounds per year.</div>
     </div>`;
   }
 
@@ -1614,6 +1619,7 @@
     if (!state.tri.showSites) { updateTriStats(); return; }
     const pane = triPane();
     const grp = newTriClusterLayer();
+    const byId = new Map();          // facility_id -> marker, for click-to-locate
     const max = state.tri.maxTotal || 1;
     let shown = 0;
     for (const f of state.tri.facilities) {
@@ -1630,10 +1636,12 @@
       });
       m.bindPopup(triFacilityPopupHtml(f), { maxWidth: 340, className: 'tri-popup-wrap' });
       grp.addLayer(m);
+      byId.set(f.facility_id, m);
       shown++;
     }
     grp.addTo(state.map);
     state.tri.markers = grp;
+    state.tri.markerById = byId;
     updateTriStats(shown);
   }
 
@@ -1698,14 +1706,32 @@
     const pathRow = (p) => p.lbs > 0
       ? `<div class="tri-pathrow"><span class="k">${p.label}</span><span class="v">${fmtLbs(p.lbs)}</span></div>` : '';
     const facRow = (f) =>
-      `<div class="tri-firow"><span class="n">${f.name}${f.industry ? `<span class="muted small"> — ${f.industry}</span>` : ''}</span><span class="v">${fmtLbs(f.lbs)}</span></div>`;
+      `<div class="tri-firow tri-clickable tri-fac" data-fid="${f.facility_id}" role="button" tabindex="0" title="Show this facility on the map">`
+      + `<span class="n">${f.name}${f.industry ? `<span class="muted small"> — ${f.industry}</span>` : ''}</span>`
+      + `<span class="v">${fmtLbs(f.lbs)} <span class="tri-chev">›</span></span></div>`;
     const chemRow = (c) =>
-      `<div class="tri-firow"><span class="n">${c.chemical}${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span><span class="v">${fmtLbs(c.lbs)}</span></div>`;
+      `<div class="tri-firow tri-clickable tri-chem-item" data-chem="${encodeURIComponent(c.key || c.chemical)}" role="button" tabindex="0" title="What is this chemical?">`
+      + `<span class="n">${c.chemical}${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span>`
+      + `<span class="v">${fmtLbs(c.lbs)} <span class="tri-chev">›</span></span></div>`;
     el.innerHTML =
       `<div class="tri-paths-block">${d.pathways.map(pathRow).join('')}</div>`
-      + `<div class="tri-sub">Top facilities</div>${d.top_facilities.map(facRow).join('')}`
-      + `<div class="tri-sub">Top chemicals</div>${d.top_chemicals.map(chemRow).join('')}`
+      + `<div class="tri-sub">Top facilities <span class="tri-hint">click to locate</span></div>${d.top_facilities.map(facRow).join('')}`
+      + `<div class="tri-sub">Top chemicals <span class="tri-hint">click for detail</span></div>${d.top_chemicals.map(chemRow).join('')}`
       + `<div class="tri-note">Self-reported to EPA (TRI). Pounds released in ${d.year}.</div>`;
+    el.dataset.fips = fips;
+    if (!el._triWired) {
+      el._triWired = true;
+      const act = (target) => {
+        const fac = target.closest('.tri-fac');
+        if (fac) { focusTriFacility(fac.dataset.fid); return; }
+        const ch = target.closest('.tri-chem-item');
+        if (ch) { openTriChemInfo(el.dataset.fips, decodeURIComponent(ch.dataset.chem)); }
+      };
+      el.addEventListener('click', (e) => act(e.target));
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(e.target); }
+      });
+    }
     showCountyTriTrend(true);
     if (!state.tri.trendCty) {
       state.tri.trendCty = createTrendPanel({
@@ -1717,6 +1743,83 @@
       });
     }
     state.tri.trendCty.load(fips);
+  }
+
+  // Locate a TRI facility on the map: turn the markers layer on if needed, zoom
+  // until its marker un-clusters, and open its detail popup. The county panel
+  // stays open the whole time.
+  async function focusTriFacility(fid) {
+    if (!fid) return;
+    if (!state.tri.showSites) {
+      state.tri.showSites = true;
+      const cb = $('tri-sites'); if (cb) cb.checked = true;
+      await refreshTriSites();
+    } else if (!state.tri.loaded) {
+      await refreshTriSites();
+    }
+    if (state.map) state.map.invalidateSize();
+    const m = state.tri.markerById && state.tri.markerById.get(fid);
+    if (!m) {
+      const f = (state.tri.facilities || []).find((x) => x.facility_id === fid);
+      if (f && f.lat != null && f.lng != null) state.map.setView([f.lat, f.lng], 11);
+      return;
+    }
+    const open = () => m.openPopup();
+    if (state.tri.markers && typeof state.tri.markers.zoomToShowLayer === 'function') {
+      state.tri.markers.zoomToShowLayer(m, open);   // markercluster: un-cluster then open
+    } else {
+      state.map.setView(m.getLatLng(), Math.max(state.map.getZoom() || 8, 10));
+      open();
+    }
+  }
+
+  // Chemical drill-down modal for a chemical in the current county.
+  async function openTriChemInfo(fips, chemKey) {
+    const modal = $('tri-info-modal');
+    const body = $('tri-info-body');
+    if (!modal || !body) return;
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    show(modal);
+    let d;
+    try { d = await api('/api/tri/chemical', { fips, chemical: chemKey }); }
+    catch (e) { body.innerHTML = '<p class="muted">Could not load chemical info.</p>'; return; }
+    if (!d || !d.found) { body.innerHTML = '<p class="muted">No data for this chemical.</p>'; return; }
+    body.innerHTML = triChemInfoHtml(d);
+  }
+
+  function triChemInfoHtml(d) {
+    const p = d.profile || {};
+    const flags =
+      (d.carcinogen ? '<span class="tri-flag carc">carcinogen</span> ' : '')
+      + (d.pfas ? '<span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : '');
+    const line = (label, val) => val
+      ? `<div class="tci-row"><span class="tci-k">${label}</span><span class="tci-v">${val}</span></div>` : '';
+    const paths = (d.pathways || []).filter((x) => x.lbs > 0)
+      .map((x) => `${x.label} ${fmtLbs(x.lbs)}`).join(' · ') || 'not reported this year';
+    const facs = (d.facilities || []).map((f) =>
+      `<div class="tci-firow"><span class="n">${f.name}</span><span class="v">${fmtLbs(f.lbs)}</span></div>`).join('')
+      || '<p class="muted small">None in this county this year.</p>';
+    const carcBlock = p.carcinogen ? `<div class="tci-carc">⚠ ${p.carcinogen}</div>` : '';
+    return `
+      <div class="tci-head">
+        <h3>${d.chemical}</h3>
+        <div class="tci-sub">${d.cas ? 'CAS ' + d.cas + ' · ' : ''}${flags}</div>
+      </div>
+      ${p.what ? `<p class="tci-what">${p.what}</p>` : ''}
+      ${line('Used for', p.uses)}
+      ${line('Health', p.health)}
+      ${carcBlock}
+      ${line('Typical pathways', p.pathways)}
+      <div class="tci-stats">
+        <div><strong>${fmtLbs(d.county_total_lbs)}</strong><span>released in ${d.county} Co. (${d.year})</span></div>
+        <div><strong>${fmtLbs(d.statewide_total_lbs)}</strong><span>released statewide (${d.year})</span></div>
+      </div>
+      ${line('Released in-county via', paths)}
+      <div class="tci-sub2">Facilities releasing it in ${d.county} County</div>
+      <div class="tci-facs">${facs}</div>
+      ${p.sourced === false ? '<p class="muted small tci-nolookup">Descriptive detail for this chemical is not in our reference set; the figures above are from the reported TRI data.</p>' : ''}
+      <div class="tri-note">Release data: EPA Toxics Release Inventory. Health &amp; carcinogen classifications: EPA / IARC.</div>
+    `;
   }
 
   // ---------- Wind roses & pesticide-drift overlay ----------
@@ -2081,6 +2184,15 @@
     $('sources-close').addEventListener('click', () => hide($('sources-modal')));
     $('sources-modal').addEventListener('click', (e) => {
       if (e.target.id === 'sources-modal') hide($('sources-modal'));
+    });
+
+    // TRI chemical info modal — close via ×, backdrop click, or Escape.
+    $('tri-info-close').addEventListener('click', () => hide($('tri-info-modal')));
+    $('tri-info-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'tri-info-modal') hide($('tri-info-modal'));
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hide($('tri-info-modal'));
     });
 
     bindSearch();

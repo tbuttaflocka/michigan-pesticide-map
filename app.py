@@ -16,6 +16,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 from app import database
 from app import cancer_data
 from app import contamination_data
+from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
@@ -2407,19 +2408,25 @@ def api_tri_sites():
         if len(vals) >= 2 and vals[0] > 0:
             change = (vals[-1] - vals[0]) / vals[0]
             trend = "up" if change > 0.15 else "down" if change < -0.15 else "flat"
+        top_chem = (chems.get(fid, {}).get(fac_latest, []))[:6]
+        summary = tri_reference.company_summary(
+            f["parent_company"], f["facility_name"], f["industry_sector"],
+            [c["chemical"] for c in top_chem], fac_latest)
         out.append({
             "facility_id": fid, "name": f["facility_name"],
             "parent_company": f["parent_company"], "city": f["city"],
+            "street_address": f["street_address"],
             "county": f["county"], "county_fips": f["county_fips"],
             "lat": f["latitude"], "lng": f["longitude"],
             "naics_code": f["naics_code"], "industry_sector": f["industry_sector"],
             "federal": bool(f["federal_facility"]),
+            "company_summary": summary["text"], "summary_sourced": summary["sourced"],
             "year": fac_latest,
             "total_lbs": round(cur["total"], 1),
             "air_lbs": round(cur["air"], 1), "water_lbs": round(cur["water"], 1),
             "land_lbs": round(cur["land"], 1),
             "underground_lbs": round(cur["underground"], 1),
-            "top_chemicals": (chems.get(fid, {}).get(fac_latest, []))[:6],
+            "top_chemicals": top_chem,
             "spark": spark, "trend": trend,
         })
     out.sort(key=lambda x: x["total_lbs"], reverse=True)
@@ -2493,17 +2500,20 @@ def api_tri_county():
         {"key": "land", "label": "Land", "lbs": round(p["l"] or 0.0, 1)},
         {"key": "underground", "label": "Underground", "lbs": round(p["u"] or 0.0, 1)},
     ]
-    top_f = [{"name": r["facility_name"], "industry": r["industry_sector"],
-              "lbs": round(r["t"] or 0.0, 1)}
+    top_f = [{"facility_id": r["facility_id"], "name": r["facility_name"],
+              "industry": r["industry_sector"], "lbs": round(r["t"] or 0.0, 1)}
              for r in conn.execute(
-        """SELECT f.facility_name, f.industry_sector, SUM(r.total_lbs) t
+        """SELECT f.facility_id, f.facility_name, f.industry_sector, SUM(r.total_lbs) t
              FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
             WHERE f.county_fips = ? AND r.year = ?
             GROUP BY r.facility_id ORDER BY t DESC LIMIT 5""", (fips, year))]
-    top_c = [{"chemical": (r["chemical"] or "").title(), "lbs": round(r["t"] or 0.0, 1),
+    # `key` is the raw chemical name (used to drill into /api/tri/chemical);
+    # `chemical` is the title-cased display form.
+    top_c = [{"key": r["chemical"], "chemical": (r["chemical"] or "").title(),
+              "cas": r["cas"], "lbs": round(r["t"] or 0.0, 1),
               "pfas": bool(r["pf"]), "carcinogen": bool(r["cc"])}
              for r in conn.execute(
-        """SELECT r.chemical, MAX(r.is_pfas) pf, MAX(r.is_carcinogen) cc,
+        """SELECT r.chemical, MAX(r.cas) cas, MAX(r.is_pfas) pf, MAX(r.is_carcinogen) cc,
                   SUM(r.total_lbs) t
              FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
             WHERE f.county_fips = ? AND r.year = ?
@@ -2513,6 +2523,63 @@ def api_tri_county():
         "fips": fips, "name": name_row["name"], "year": year,
         "total_lbs": round(p["t"] or 0.0, 1), "facilities": p["facs"] or 0,
         "pathways": pathways, "top_facilities": top_f, "top_chemicals": top_c,
+    })
+
+
+@app.route("/api/tri/chemical")
+def api_tri_chemical():
+    """Drill-down for one chemical in one county: sourced plain-language profile
+    (what it is, uses, health/carcinogen class, typical pathways), the county's
+    and the statewide total pounds released, the per-pathway split in the county,
+    and the county facilities that release it. ?fips= &chemical= (raw name)."""
+    fips = (request.args.get("fips") or "").strip()
+    chem = (request.args.get("chemical") or "").strip()
+    year = request.args.get("year", type=int)
+    conn = db()
+    latest = _tri_latest_year(conn)
+    if year is None:
+        year = latest
+    if not chem or latest is None:
+        conn.close()
+        return jsonify({"chemical": chem, "found": False})
+
+    name_row = conn.execute("SELECT name FROM counties WHERE fips = ?", (fips,)).fetchone()
+    # County-level totals + pathway split for this chemical (case-insensitive match).
+    c = conn.execute(
+        """SELECT MAX(r.cas) cas, MAX(r.is_pfas) pf, MAX(r.is_carcinogen) cc,
+                  SUM(r.total_lbs) t, SUM(r.air_lbs) a, SUM(r.water_lbs) w,
+                  SUM(r.land_lbs) l, SUM(r.underground_lbs) u
+             FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+            WHERE f.county_fips = ? AND r.year = ? AND UPPER(r.chemical) = UPPER(?)""",
+        (fips, year, chem)).fetchone()
+    statewide = conn.execute(
+        "SELECT SUM(total_lbs) t FROM tri_release WHERE year = ? AND UPPER(chemical) = UPPER(?)",
+        (year, chem)).fetchone()
+    facilities = [{"name": r["facility_name"], "lbs": round(r["t"] or 0.0, 1)}
+                  for r in conn.execute(
+        """SELECT f.facility_name, SUM(r.total_lbs) t
+             FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+            WHERE f.county_fips = ? AND r.year = ? AND UPPER(r.chemical) = UPPER(?)
+            GROUP BY r.facility_id ORDER BY t DESC""", (fips, year, chem))]
+    conn.close()
+
+    is_carc = bool(c["cc"]) if c else False
+    profile = tri_reference.chemical_profile(chem, c["cas"] if c else None, is_carc)
+    return jsonify({
+        "found": True,
+        "chemical": chem.title(), "cas": (c["cas"] if c else None),
+        "pfas": bool(c["pf"]) if c else False, "carcinogen": is_carc,
+        "county": name_row["name"] if name_row else None, "fips": fips, "year": year,
+        "county_total_lbs": round((c["t"] or 0.0) if c else 0.0, 1),
+        "statewide_total_lbs": round((statewide["t"] or 0.0) if statewide else 0.0, 1),
+        "pathways": [
+            {"key": "air", "label": "Air", "lbs": round((c["a"] or 0.0) if c else 0.0, 1)},
+            {"key": "water", "label": "Water", "lbs": round((c["w"] or 0.0) if c else 0.0, 1)},
+            {"key": "land", "label": "Land", "lbs": round((c["l"] or 0.0) if c else 0.0, 1)},
+            {"key": "underground", "label": "Underground", "lbs": round((c["u"] or 0.0) if c else 0.0, 1)},
+        ],
+        "facilities": facilities,
+        "profile": profile,
     })
 
 

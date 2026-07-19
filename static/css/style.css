@@ -1474,6 +1474,66 @@ a:hover { text-decoration: underline; }
 .tri-county-detail .tri-note { margin-top: 8px; }
 .tri-caveat .disclaimer-text { line-height: 1.5; margin: 6px 0 0; }
 
+/* company summary inside the facility marker popup */
+.tri-popup .tri-summary {
+  margin: 6px 0; padding: 6px 8px; border-radius: 6px;
+  background: rgba(47,135,131,.12); border-left: 2px solid #2f8783;
+  font-size: 11.5px; line-height: 1.45; color: var(--text);
+}
+
+/* clickable facility/chemical rows in the county TRI section */
+.tri-hint {
+  font-size: 9.5px; font-weight: 500; text-transform: none; letter-spacing: 0;
+  color: var(--accent-2); margin-left: 6px;
+}
+.tri-firow.tri-clickable {
+  cursor: pointer; border-radius: 6px; padding: 3px 6px; margin: 1px -6px;
+  transition: background .12s ease;
+}
+.tri-firow.tri-clickable:hover,
+.tri-firow.tri-clickable:focus-visible {
+  background: rgba(47,135,131,.14); outline: none;
+}
+.tri-firow.tri-clickable:hover .n,
+.tri-firow.tri-clickable:focus-visible .n { color: var(--text); text-decoration: underline; }
+.tri-firow.tri-clickable .v { display: inline-flex; align-items: center; gap: 4px; }
+.tri-chev { color: #2f8783; font-weight: 700; opacity: .55; }
+.tri-firow.tri-clickable:hover .tri-chev { opacity: 1; }
+
+/* TRI chemical info modal */
+.tri-info-card { max-width: 520px; }
+.tci-head { margin-bottom: 8px; }
+.tci-head h3 { margin: 0 0 3px; font-size: 17px; color: var(--text); }
+.tci-sub { color: var(--muted); font-size: 12px; }
+.tci-what { margin: 8px 0; line-height: 1.55; font-size: 13px; }
+.tci-row { display: flex; gap: 8px; margin: 5px 0; font-size: 12.5px; line-height: 1.5; }
+.tci-k { flex: none; width: 110px; color: var(--muted); font-weight: 600; }
+.tci-v { color: var(--text); }
+.tci-carc {
+  margin: 8px 0; padding: 7px 10px; border-radius: 6px;
+  background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.35);
+  color: #ff9d97; font-size: 12.5px; line-height: 1.45;
+}
+.tci-stats { display: flex; gap: 10px; margin: 12px 0; }
+.tci-stats > div {
+  flex: 1; background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; text-align: center;
+}
+.tci-stats strong { display: block; font-size: 16px; color: #4bb3ac; }
+.tci-stats span { font-size: 10.5px; color: var(--muted); }
+.tci-sub2 {
+  margin: 10px 0 4px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted); font-weight: 600;
+}
+.tci-facs { max-height: 160px; overflow-y: auto; }
+.tci-firow {
+  display: flex; justify-content: space-between; gap: 8px; margin: 2px 0;
+  font-size: 12.5px;
+}
+.tci-firow .n { color: var(--muted); }
+.tci-firow .v { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tci-nolookup { margin-top: 8px; }
+
 /* "TRI as a control" note in the Explore panel */
 .explore-tri-note {
   margin-top: 10px; padding: 9px 11px; border-radius: 8px;
