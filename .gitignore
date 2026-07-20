@@ -10,9 +10,16 @@ venv/
 .env.*
 !.env.example
 
-# Downloaded / generated data artifacts (recreate with `python -m app.data_loader`)
-data/
+# Downloaded / generated data artifacts (recreate with `python -m app.data_loader`).
+# Everything under data/ is ignored EXCEPT the small, read-only runtime files
+# committed below, so the app boots on a fresh host (e.g. Render) without having
+# to rebuild the ~76 MB database. Large build inputs (EPest .txt, the WQP CSV,
+# the 24 MB raw HUC-8 geojson, etc.) stay ignored.
+data/*
 !data/.gitkeep
+!data/michigan_pesticides.sqlite
+!data/michigan_counties.geojson
+!data/mi_huc8.simplified.geojson
 
 # Runtime / logs
 server.log

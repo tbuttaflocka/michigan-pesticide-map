@@ -1,7 +1,9 @@
-# Runtime dependency for the web app (everything else is Python stdlib —
-# sqlite3, urllib, json, csv). Install with:  pip install -r requirements.txt
+# Everything needed to run the app (local dev server AND production/Render).
+# All other dependencies are Python stdlib (sqlite3, urllib, json, csv).
+# Install with:  pip install -r requirements.txt
 Flask>=3.0
+waitress>=3.0        # production WSGI server used by serve.py and on Render
 
-# Optional — only needed to regenerate the app icon via scripts/make_icon.py.
-# Not required to run or use the app.
-Pillow>=10.0
+# NOTE: Pillow is NOT required to run the app — it is only used by
+# scripts/make_icon.py to regenerate the app icon. Install it separately if you
+# need that:  pip install Pillow

@@ -5,8 +5,8 @@
 threaded and not meant to face the public internet. For a public/shared
 deployment, run this instead:
 
-    pip install waitress          # one-time (also in requirements-prod.txt)
-    python serve.py               # serves on HOST:PORT (default 127.0.0.1:8080)
+    pip install -r requirements.txt   # includes Waitress
+    python serve.py                   # serves on HOST:PORT (default 127.0.0.1:8080)
 
 Behind a reverse proxy (nginx/Caddy/IIS) that terminates HTTPS, bind to
 localhost and let the proxy handle TLS + the public port:

@@ -1,8 +1,0 @@
-# Production dependencies — install on top of requirements.txt when serving
-# publicly with a real WSGI server instead of the Flask dev server:
-#     pip install -r requirements-prod.txt
-#     python serve.py
--r requirements.txt
-
-# Waitress: a pure-Python, production-grade WSGI server (works on Windows too).
-waitress>=3.0

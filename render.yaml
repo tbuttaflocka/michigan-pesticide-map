@@ -1,0 +1,21 @@
+# Render Blueprint — deploys this app as a free Python web service.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# On Render you can either point a new "Web Service" at this repo and use the
+# Build/Start commands below, or use this file as a Blueprint. The pre-built
+# SQLite database ships in the repo (data/michigan_pesticides.sqlite), so the
+# app boots with all data present — no build-time data download is needed.
+services:
+  - type: web
+    name: michigan-pesticide-map
+    runtime: python
+    plan: free
+    # Install runtime deps (Flask + Waitress). Python version comes from runtime.txt.
+    buildCommand: "pip install -r requirements.txt"
+    # serve.py runs Waitress and binds to $HOST:$PORT. Render sets PORT itself;
+    # HOST=0.0.0.0 (below) makes the app reachable from outside the container.
+    startCommand: "python serve.py"
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      # PORT is provided automatically by Render — serve.py reads it from the env.

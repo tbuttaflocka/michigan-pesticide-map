@@ -49,7 +49,7 @@ production-grade WSGI server that also runs on Windows) via the included
 `serve.py`:
 
 ```bash
-pip install -r requirements-prod.txt   # adds Waitress
+pip install -r requirements.txt        # includes Waitress
 python serve.py                        # serves HOST:PORT (default 127.0.0.1:8080)
 ```
 
@@ -84,6 +84,30 @@ Notes for a public deployment:
 - The app is **read-only** (no login, no user data, no write endpoints), so it
   needs no database credentials or session secret.
 - Run the data refresh on a schedule (see [Keeping the data fresh](#keeping-the-data-fresh)).
+
+### Deploying to Render
+
+This repo is ready to deploy on [Render](https://render.com) as a free Python web
+service. The pre-built database ships in the repo (`data/michigan_pesticides.sqlite`,
+~76 MB), so the app boots with all data present — no build-time data download.
+
+The included **`render.yaml`**, **`runtime.txt`**, and **`serve.py`** provide everything
+Render needs:
+
+| Setting | Value |
+|---|---|
+| Runtime | Python (`runtime.txt` → `python-3.13.4`) |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `python serve.py` |
+| Env var | `HOST=0.0.0.0` (Render sets `PORT` automatically; `serve.py` reads both) |
+
+Steps: push this repo to GitHub → in Render, **New → Web Service** → connect the repo →
+Render reads `render.yaml` (or enter the build/start commands above) → **Create**. Render
+provides HTTPS automatically on the `*.onrender.com` URL. On the free plan the service
+sleeps after inactivity, so the first request after idle takes ~30–60 s to wake.
+
+To update the deployed data later, re-run the loader/refresh locally, commit the updated
+`data/michigan_pesticides.sqlite`, and push — Render redeploys automatically.
 
 ### Optional API keys (`.env`)
 
