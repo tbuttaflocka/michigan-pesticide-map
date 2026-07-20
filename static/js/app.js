@@ -405,41 +405,51 @@
       case 'resp': {
         const c = state.resp.byFips.get(fips);
         const base = (state.resp.meta && !state.resp.countyLevel) ? ' · MI baseline' : '';
+        const units = (state.resp.meta && state.resp.meta.units) ? ` ${state.resp.meta.units}` : '';
         return (c && c.value != null)
-          ? `<div><span class="muted">${state.resp.hoverLabel}:</span> <span class="r-v">${c.value.toFixed(1)}</span>${base}</div>`
+          ? `<div><span class="muted">${state.resp.hoverLabel}:</span> <span class="r-v">${c.value.toFixed(1)}</span><span class="muted">${units}</span>${base}</div>`
           : '<div class="muted">No data</div>';
       }
       case 'cancer': {
         const c = state.cancer.byFips.get(fips);
         const base = (state.cancer.meta && state.cancer.meta.is_baseline) ? ' · MI baseline' : '';
+        const units = (state.cancer.meta && state.cancer.meta.units) ? ` ${state.cancer.meta.units}` : ' per 100,000';
         if (c && c.value != null) {
-          return `<div><span class="muted">${state.cancer.hoverLabel}:</span> <span class="v">${c.value.toFixed(1)}</span>${base}</div>`;
+          return `<div><span class="muted">${state.cancer.hoverLabel}:</span> <span class="v">${c.value.toFixed(1)}</span><span class="muted">${units}</span>${base}</div>`;
         }
         return `<div class="muted">${c && c.suppressed ? 'Suppressed (&lt;16 cases)' : 'No data'}</div>`;
       }
       case 'contam_density': {
         const c = state.contam.densityByFips.get(fips);
         return (c && c.value)
-          ? `<div><span class="muted">Contamination sites:</span> <span class="v">${c.value}</span></div>`
+          ? `<div><span class="muted">Contamination sites in county:</span> <span class="v">${c.value}</span></div>`
           : '<div class="muted">No mapped sites</div>';
       }
       case 'tri': {
         const c = state.tri.densityByFips.get(fips);
         if (!c || !c.value) return '<div class="muted">No TRI releases reported</div>';
-        return `<div><span class="muted">${triMetricLabel(state.tri.metric)}:</span> <span class="v">${fmtLbs(c.value)}</span></div>
-             <div><span class="muted">Facilities:</span> <span class="v">${c.facilities || 0}</span></div>`;
+        return `<div><span class="muted">${triMetricLabel(state.tri.metric)}:</span> <span class="v">${fmtLbs(c.value)}</span><span class="muted">/yr</span></div>
+             <div><span class="muted">TRI facilities:</span> <span class="v">${c.facilities || 0}</span></div>`;
       }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
-        const valLabel = state.normalize === 'per_sq_mile' ? 'lbs / mi²'
-          : state.normalize === 'per_acre' ? 'lbs / cropland acre' : 'Value';
         if (!c) return '<div class="muted">No pesticide data</div>';
-        const acreLine = (state.normalize === 'per_acre' && c.cropland_acres)
-          ? `<div><span class="muted">Cropland:</span> <span class="v">${Math.round(c.cropland_acres).toLocaleString()} ac</span></div>` : '';
-        return `<div><span class="muted">${valLabel}:</span> <span class="v">${fmtLbs(c.value)}</span></div>
-             <div><span class="muted">Total:</span> <span class="v">${fmtLbs(c.total_lbs)}</span></div>
+        const compounds = `<div><span class="muted">Compounds applied:</span> <span class="v">${c.compound_count}</span></div>`;
+        if (state.normalize === 'per_sq_mile') {
+          return `<div><span class="muted">Pesticide applied:</span> <span class="v">${fmtLbs(c.value)}/mi²</span></div>
+             <div><span class="muted">Total applied:</span> <span class="v">${fmtLbs(c.total_lbs)}</span></div>
+             ${compounds}`;
+        }
+        if (state.normalize === 'per_acre') {
+          const acreLine = c.cropland_acres
+            ? `<div><span class="muted">Cropland:</span> <span class="v">${Math.round(c.cropland_acres).toLocaleString()} ac</span></div>` : '';
+          return `<div><span class="muted">Pesticide intensity:</span> <span class="v">${fmtLbs(c.value)}/acre</span></div>
+             <div><span class="muted">Total applied:</span> <span class="v">${fmtLbs(c.total_lbs)}</span></div>
              ${acreLine}
-             <div><span class="muted">Compounds:</span> <span class="v">${c.compound_count}</span></div>`;
+             ${compounds}`;
+        }
+        return `<div><span class="muted">Pesticide applied:</span> <span class="v">${fmtLbs(c.value)}</span></div>
+             ${compounds}`;
       }
     }
   }
@@ -603,6 +613,31 @@
     // indicator, so keep its label in sync.
     const fabLabel = $('m-fab-label');
     if (fabLabel) fabLabel.textContent = label;
+    updateMapHint();          // the "press & hold" hint names the active layer
+  }
+
+  // Short plain-language phrase for what long-pressing a county reveals, keyed
+  // to the active choropleth (used in the mobile map hint). null = coloring off.
+  function layerPeekLabel() {
+    switch (state.activeChoropleth) {
+      case 'none':           return null;
+      case 'resp':           return 'respiratory rates';
+      case 'cancer':         return 'cancer rates';
+      case 'contam_density': return 'contamination-site counts';
+      case 'tri':            return 'toxic-release amounts';
+      default:               return 'pesticide amounts';
+    }
+  }
+
+  // Fill the mobile "how to use the map" hint, referencing the active layer so
+  // it always tells the user exactly what press-and-hold will show them.
+  function updateMapHint() {
+    const el = $('map-hint-text');
+    if (!el) return;
+    const peek = layerPeekLabel();
+    el.innerHTML = peek
+      ? `👆 <b>Tap</b> a county for full details · ✋ <b>press &amp; hold</b> to see its <b>${peek}</b>`
+      : `👆 <b>Tap</b> a county for full details · turn on county coloring, then <b>press &amp; hold</b> to compare values`;
   }
 
   // ---------- active choropleth switching (mutually exclusive) ----------
@@ -634,6 +669,7 @@
     restyleSelection();   // setStyle wiped the selection border — re-apply it
     renderLegend();
     updateActiveIndicator();
+    refreshCountyHeadline();   // keep an open county's headline in sync
 
     // Reflect state in the radio group (covers programmatic calls).
     const radio = document.querySelector(`input[name="choropleth"][value="${which}"]`);
@@ -660,6 +696,7 @@
       restyleSelection();
       renderLegend();
       updateActiveIndicator();
+      refreshCountyHeadline();   // pesticide filter changed → refresh headline
     } catch (e) {
       console.error(e);
     } finally {
@@ -1287,6 +1324,68 @@
     };
   }
 
+  // The two "big stat" cards at the top of the county panel reflect whatever
+  // layer is currently coloring the map, each clearly labeled with what it is
+  // and its units — never a bare number. `data` is the pesticide county payload.
+  function renderCountyHeadline(fips, data) {
+    const v1 = $('county-total'),   l1 = $('county-total-label');
+    const v2 = $('county-density'), l2 = $('county-density-label');
+    const card2 = $('county-stat-2');
+    const showCard2 = (on) => { if (card2) card2.style.display = on ? '' : 'none'; };
+    switch (state.activeChoropleth) {
+      case 'resp': {
+        const c = state.resp.byFips.get(fips);
+        const units = (state.resp.meta && state.resp.meta.units) || 'rate';
+        v1.textContent = (c && c.value != null) ? c.value.toFixed(1) : '—';
+        l1.textContent = `${state.resp.hoverLabel || 'Respiratory'} (${units})`;
+        showCard2(false);
+        break;
+      }
+      case 'cancer': {
+        const c = state.cancer.byFips.get(fips);
+        const units = (state.cancer.meta && state.cancer.meta.units) || 'per 100,000';
+        v1.textContent = (c && c.value != null) ? c.value.toFixed(1)
+          : (c && c.suppressed ? 'N/A' : '—');
+        l1.textContent = `${cancerTypeLabel(state.cancer.type)} · ${state.cancer.dataType} (${units})`;
+        showCard2(false);
+        break;
+      }
+      case 'contam_density': {
+        const c = state.contam.densityByFips.get(fips);
+        v1.textContent = (c && c.value) ? String(c.value) : '0';
+        l1.textContent = 'Known contamination sites';
+        showCard2(false);
+        break;
+      }
+      case 'tri': {
+        const c = state.tri.densityByFips.get(fips);
+        v1.textContent = (c && c.value) ? fmtLbs(c.value) + '/yr' : '—';
+        l1.textContent = `Industrial toxic releases · ${triMetricLabel(state.tri.metric).toLowerCase()} (TRI)`;
+        v2.textContent = (c && c.facilities) ? String(c.facilities) : '0';
+        l2.textContent = 'TRI facilities';
+        showCard2(true);
+        break;
+      }
+      default: {   // pesticide (also when coloring is off)
+        v1.textContent = fmtLbs(data.total_lbs);
+        l1.textContent = 'Pesticide applied (total)';
+        v2.textContent = data.lbs_per_sq_mile != null ? fmtLbs(data.lbs_per_sq_mile) + '/mi²' : '—';
+        l2.textContent = 'Pesticide per square mile';
+        showCard2(true);
+        break;
+      }
+    }
+  }
+
+  // Re-render the headline in place if a county panel is already open (e.g. the
+  // user switched the active layer while viewing a county).
+  function refreshCountyHeadline() {
+    if (!state.selectedFips || !state._countyData) return;
+    const panel = $('county-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    renderCountyHeadline(state.selectedFips, state._countyData);
+  }
+
   async function openCounty(fips) {
     showCountyPanel();     // county panel becomes the primary view, brought into view
     selectCounty(fips);    // persistent gold outline
@@ -1296,9 +1395,8 @@
     $('county-fips').textContent = `FIPS ${data.fips}`;
     $('county-area').textContent = data.area_sq_miles
       ? `${data.area_sq_miles.toFixed(0)} mi²` : '';
-    $('county-total').textContent = fmtLbs(data.total_lbs);
-    $('county-density').textContent = data.lbs_per_sq_mile != null
-      ? fmtLbs(data.lbs_per_sq_mile) : '—';
+    state._countyData = data;
+    renderCountyHeadline(fips, data);
     $('county-inspector').href = data.mdard_inspector_url;
 
     // Respiratory comparison table — one row per metric.
@@ -3172,6 +3270,18 @@
       body.classList.add('m-detail-open');
       const p = $('statewide-panel');
       if (p) p.scrollTop = 0;
+    });
+
+    // First-time "how to use the map" hint (mobile only, dismissible + remembered).
+    const HINT_KEY = 'pm_maphint_dismissed_v1';
+    updateMapHint();
+    let hintDismissed = false;
+    try { hintDismissed = localStorage.getItem(HINT_KEY) === '1'; } catch (e) {}
+    if (!hintDismissed) body.classList.add('show-map-hint');
+    const hintX = $('map-hint-x');
+    if (hintX) hintX.addEventListener('click', () => {
+      body.classList.remove('show-map-hint');
+      try { localStorage.setItem(HINT_KEY, '1'); } catch (e) {}
     });
 
     // Growing back to desktop width: drop mobile sheet state and re-measure the map.

@@ -40,7 +40,7 @@
     </div>
     <button id="m-summary-btn" class="m-only m-inline-btn" type="button">📊 View statewide summary</button>
     <section class="panel layer-control">
-      <h2>Map layers</h2>
+      <h2>Color the counties by <span class="lg-hint">choose one</span></h2>
 
       <div class="active-layer" id="active-layer-indicator">
         <span class="al-k">Currently showing</span>
@@ -48,7 +48,6 @@
       </div>
 
       <div class="layer-group">
-        <div class="layer-group-head">County coloring <span class="lg-hint">choose one</span></div>
         <label class="layer-radio" data-tip="Turn off county shading and show only the point overlays (markers, sites, wind)."><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
         <label class="layer-radio" data-tip="Shade each county by how much agricultural pesticide is applied. Source: USGS NAWQA EPest estimates."><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
         <label class="layer-radio" data-tip="Shade counties by asthma and COPD rates (age-adjusted). Source: CDC Environmental Public Health Tracking."><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
@@ -67,32 +66,12 @@
           </label>
         </div>
       </div>
-
-      <div class="layer-divider"></div>
-
-      <div class="layer-group">
-        <div class="layer-group-head">Overlays <span class="lg-hint">stack freely</span></div>
-        <label class="overlay-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
-        <label class="overlay-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
-        <label class="overlay-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
-        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
-        <div class="contam-subtoggles" id="contam-subtoggles">
-          <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
-          <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
-          <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
-          <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
-        </div>
-        <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
-        <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
-        <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
-        <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
-        <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
-        <label class="overlay-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
-      </div>
     </section>
 
+    <!-- Filters that refine the currently-selected coloring layer -->
     <section class="panel">
-      <h2>Filters</h2>
+      <h2>Pesticide filters</h2>
+      <p class="muted small" style="margin:-2px 0 8px">Refine the <em>Pesticide application</em> coloring.</p>
       <label class="field">
         <span>Compound category</span>
         <select id="filter-category">
@@ -134,20 +113,21 @@
     </section>
 
     <section class="panel">
-      <h2>Water contamination</h2>
-      <label class="field">
-        <span>Filter to compound</span>
-        <select id="wq-compound">
-          <option value="">— all pesticides —</option>
-        </select>
-      </label>
-      <label class="small"><input type="checkbox" id="wq-match-main" /> Match the main map's compound</label>
-      <p class="muted small" id="wq-stats">—</p>
+      <h2>Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></h2>
+      <div class="year-row">
+        <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
+        <button id="play-btn" class="btn-ghost" title="Animate years" data-tip="Play an animation stepping through every available year.">▶</button>
+      </div>
+      <input id="year-slider" type="range" min="0" max="0" step="1" data-tip="Drag to change the year of pesticide data shown on the map." />
+      <div class="year-ends">
+        <span id="year-min">—</span>
+        <span id="year-max">—</span>
+      </div>
     </section>
 
     <section class="panel">
       <h2>Respiratory health</h2>
-      <p class="muted small">Choose <em>Respiratory health</em> under Map layers to color the map by this metric.</p>
+      <p class="muted small">Choose <em>Respiratory health</em> above to color the map by this metric.</p>
       <label class="field" style="margin-top:8px">
         <span>Metric</span>
         <select id="resp-metric">
@@ -185,11 +165,55 @@
       <p class="resp-meta" id="cancer-meta">—</p>
     </section>
 
+    <!-- Point overlays: stack on top of whatever coloring is selected -->
+    <section class="panel">
+      <h2>Overlays <span class="lg-hint">stack on the coloring</span></h2>
+      <p class="muted small" style="margin:-2px 0 10px">Markers &amp; areas you can layer on top of the county colors — turn on as many as you like.</p>
+      <div class="layer-group">
+        <label class="overlay-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
+        <label class="overlay-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
+        <label class="overlay-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
+        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
+        <div class="contam-subtoggles" id="contam-subtoggles">
+          <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
+          <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
+          <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
+          <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
+        </div>
+        <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
+        <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
+        <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
+        <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
+        <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
+        <label class="overlay-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Legend <span class="info-i" data-tip="Explains the current map colors. Darker or more intense shading means a higher value; the labels show the value at each step.">?</span></h2>
+      <div id="legend" data-tip="Each color band corresponds to a range of values. Counties are shaded by which band they fall into."></div>
+      <p class="legend-note" id="legend-units">lbs applied</p>
+    </section>
+
+    <!-- Secondary details & data notes -->
+    <section class="panel">
+      <h2>Water contamination</h2>
+      <p class="muted small" style="margin:-2px 0 8px">Filters the <em>Water monitoring sites</em> &amp; <em>detection heatmap</em> overlays.</p>
+      <label class="field">
+        <span>Filter to compound</span>
+        <select id="wq-compound">
+          <option value="">— all pesticides —</option>
+        </select>
+      </label>
+      <label class="small"><input type="checkbox" id="wq-match-main" /> Match the main map's compound</label>
+      <p class="muted small" id="wq-stats">—</p>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h2>Industrial contamination</h2>
       </div>
-      <p class="muted small">Site markers &amp; impact zones are under Map layers → Overlays.
+      <p class="muted small">Site markers &amp; impact zones are in the <em>Overlays</em> section above.
         For county coloring, choose <em>Contamination site density</em>.</p>
       <p class="muted small" id="contam-stats">—</p>
     </section>
@@ -200,7 +224,7 @@
       </div>
       <p class="muted small">Active facilities' <em>self-reported</em> annual toxic releases —
         what industry is putting into the air, water, and land <em>now</em> (vs the legacy
-        Superfund layer). Factory markers are under Map layers → Overlays; for county coloring,
+        Superfund layer). Factory markers are in the <em>Overlays</em> section above; for county coloring,
         choose <em>TRI toxic releases</em>.</p>
       <p class="muted small" id="tri-stats">—</p>
       <details class="collapsible tri-caveat">
@@ -213,25 +237,6 @@
           Source: EPA Toxics Release Inventory via Envirofacts.</p>
       </details>
     </section>
-
-    <section class="panel">
-      <h2>Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></h2>
-      <div class="year-row">
-        <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
-        <button id="play-btn" class="btn-ghost" title="Animate years" data-tip="Play an animation stepping through every available year.">▶</button>
-      </div>
-      <input id="year-slider" type="range" min="0" max="0" step="1" data-tip="Drag to change the year of pesticide data shown on the map." />
-      <div class="year-ends">
-        <span id="year-min">—</span>
-        <span id="year-max">—</span>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>Legend <span class="info-i" data-tip="Explains the current map colors. Darker or more intense shading means a higher value; the labels show the value at each step.">?</span></h2>
-      <div id="legend" data-tip="Each color band corresponds to a range of values. Counties are shaded by which band they fall into."></div>
-      <p class="legend-note" id="legend-units">lbs applied</p>
-    </section>
   </aside>
 
   <div id="map"></div>
@@ -240,8 +245,8 @@
     <section class="panel statewide" id="statewide-panel">
       <h2 id="state-heading">Statewide summary</h2>
       <div class="big-stats">
-        <div><strong id="stat-total">—</strong><span>total lbs applied</span></div>
-        <div><strong id="stat-compounds">—</strong><span>active compounds</span></div>
+        <div><strong id="stat-total">—</strong><span>total lbs pesticide applied</span></div>
+        <div><strong id="stat-compounds">—</strong><span>active pesticide compounds</span></div>
         <div><strong id="stat-counties">—</strong><span>counties with data</span></div>
       </div>
 
@@ -286,9 +291,9 @@
       <h2 id="county-name">—</h2>
       <p class="county-meta"><span id="county-fips"></span> · <span id="county-area"></span></p>
 
-      <div class="big-stats">
-        <div><strong id="county-total">—</strong><span>lbs applied</span></div>
-        <div><strong id="county-density">—</strong><span>lbs / mi²</span></div>
+      <div class="big-stats county-headline">
+        <div id="county-stat-1"><strong id="county-total">—</strong><span id="county-total-label">Pesticide applied (total)</span></div>
+        <div id="county-stat-2"><strong id="county-density">—</strong><span id="county-density-label">Pesticide per square mile</span></div>
       </div>
 
       <h3>Top 10 compounds</h3>
@@ -360,6 +365,10 @@
   </aside>
 
   <!-- Mobile-only map controls (hidden on desktop via CSS) -->
+  <div id="map-hint" class="map-hint" role="status" aria-live="polite">
+    <span id="map-hint-text">Tap a county for full details · press &amp; hold to see its value</span>
+    <button id="map-hint-x" class="map-hint-x" type="button" aria-label="Dismiss this hint">×</button>
+  </div>
   <button id="m-layers-fab" class="m-fab m-only" type="button" aria-label="Open layers and filters">
     <span class="m-fab-ico">☰</span><span id="m-fab-label">Layers &amp; filters</span>
   </button>

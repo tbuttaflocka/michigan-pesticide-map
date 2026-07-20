@@ -299,6 +299,17 @@ a:hover { text-decoration: underline; }
 .hover-tooltip strong { display: block; margin-bottom: 2px; font-size: 13px; }
 .hover-tooltip .v { color: var(--accent-2); font-variant-numeric: tabular-nums; }
 
+/* Mobile "how to use the map" hint — hidden by default; shown only on phones
+   (via the mobile media query) while body.show-map-hint is set. */
+.map-hint { display: none; }
+.map-hint-x {
+  flex: 0 0 auto; width: 26px; height: 26px; padding: 0;
+  background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  font-size: 16px; line-height: 1; cursor: pointer;
+}
+.map-hint b { color: var(--text); }
+
 /* ---------- statewide / county panels ---------- */
 .big-stats {
   display: grid;
@@ -323,6 +334,16 @@ a:hover { text-decoration: underline; }
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: .6px;
+}
+/* The county headline labels are full sentences ("Pesticide applied (total)")
+   that switch with the active layer — keep them readable, not shouty caps. */
+.big-stats.county-headline span {
+  text-transform: none;
+  letter-spacing: .2px;
+  font-size: 11px;
+  line-height: 1.25;
+  display: block;
+  margin-top: 2px;
 }
 
 .top-list {
@@ -1738,6 +1759,21 @@ a:hover { text-decoration: underline; }
   .m-fab #m-fab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .m-fab-ico { font-size: 16px; flex: 0 0 auto; }
   body.m-layers-open .m-fab, body.m-detail-open .m-fab { display: none; }
+
+  /* --- first-time map-usage hint (tap vs press-and-hold) --- */
+  body.show-map-hint #view-map .map-hint {
+    display: flex; align-items: center; gap: 8px;
+    position: absolute; top: 8px; left: 8px; right: 8px;
+    z-index: 1200;
+    background: rgba(13,17,23,.94);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; font-size: 12px; line-height: 1.35;
+    color: var(--muted);
+    box-shadow: 0 4px 14px rgba(0,0,0,.5);
+  }
+  body.show-map-hint #view-map #map-hint-text { flex: 1; }
+  /* while a bottom sheet is open, don't let the hint peek above it */
+  body.m-layers-open .map-hint, body.m-detail-open .map-hint { display: none !important; }
   .m-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.5);
     z-index: 2900; opacity: 0; pointer-events: none; transition: opacity .25s;
