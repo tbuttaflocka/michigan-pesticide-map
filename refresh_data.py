@@ -558,7 +558,7 @@ def cmd_list(log: RunLogger) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        description="Refresh the Michigan Pesticide Heat Map data sources.")
+        description="Refresh the Michigan Pollution Map data sources.")
     p.add_argument("--source", help="refresh only this source id (see --list)")
     p.add_argument("--all", action="store_true",
                    help="refresh every source (default when --source is omitted)")

@@ -1,5 +1,5 @@
 @echo off
-title Michigan Pesticide Heat Map Server
+title Michigan Pollution Map Server
 cd /d "%~dp0"
 
 if exist ".venv\Scripts\python.exe" (
@@ -11,7 +11,7 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 echo ============================================================
-echo  Michigan Pesticide Application Heat Map
+echo  Michigan Pollution Map
 echo  Interpreter: %PY%
 echo  Working dir: %CD%
 echo ============================================================

@@ -57,7 +57,7 @@ $ws  = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut('{esc(shortcut_path)}')
 $lnk.TargetPath       = '{esc(TARGET)}'
 $lnk.WorkingDirectory = '{esc(PROJECT_ROOT)}'
-$lnk.Description      = 'Michigan Pesticide Application Heat Map — launches the local server and opens the browser.'
+$lnk.Description      = 'Michigan Pollution Map — launches the local server and opens the browser.'
 $lnk.WindowStyle      = 1
 """
     if icon_arg:

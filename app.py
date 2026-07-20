@@ -3037,5 +3037,5 @@ def api_correlation_contamination():
 # ---------- entrypoint ----------
 
 if __name__ == "__main__":
-    print(f" * Michigan Pesticide Heat Map serving on http://{HOST}:{PORT}")
+    print(f" * Michigan Pollution Map serving on http://{HOST}:{PORT}")
     app.run(host=HOST, port=PORT, debug=False)

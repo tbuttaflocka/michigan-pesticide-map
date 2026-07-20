@@ -1,8 +1,8 @@
-# Michigan Pesticide & Environmental Health Map
+# Michigan Pollution Map
 
-Interactive single-page web app that brings together county-level environmental and
-health data for Michigan's 83 counties on one map so you can explore it and ask
-questions. It combines agricultural **pesticide use** (USGS NAWQA EPest), **water-quality**
+Interactive single-page web app that brings together county-level pollution,
+contamination, and community-health data for Michigan's 83 counties on one map so
+you can explore it and ask questions. It combines agricultural **pesticide use** (USGS NAWQA EPest), **water-quality**
 sampling, **industrial contamination** (EPA Superfund) and active **industrial toxic
 releases** (EPA Toxics Release Inventory), **respiratory** and **cancer** health measures,
 crop acreage, and growing-season **wind/drift**. Built with Flask + SQLite + Leaflet +
@@ -168,7 +168,7 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
   State Cancer Profiles values (2018–2022); picking a compound like Glyphosate
   on the main map pre-loads its "Glyphosate vs NHL" deep dive.
 - **Industrial contamination overlay** — Michigan's contamination legacy on
-  top of the pesticide map: 105 sites (66 active Superfund NPL + deleted/
+  top of the map: 105 sites (66 active Superfund NPL + deleted/
   proposed, plus compiled PFAS/state sites). Toggleable in the left sidebar
   with status sub-filters (Superfund NPL / PFAS / state cleanup / deleted),
   translucent impact zones for sites with a known spread radius, and a magenta

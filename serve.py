@@ -41,6 +41,6 @@ if __name__ == "__main__":
     # Render (and most PaaS) provide the port to listen on via the PORT env var;
     # fall back to 8080 for local runs.
     port = int(os.environ.get("PORT", "8080"))
-    print(f" * Waitress serving Michigan Pesticide Map on http://0.0.0.0:{port}",
+    print(f" * Waitress serving Michigan Pollution Map on http://0.0.0.0:{port}",
           flush=True)
     serve(application, host="0.0.0.0", port=port, threads=8)
