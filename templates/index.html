@@ -68,6 +68,30 @@
       </div>
     </section>
 
+    <!-- Point overlays: stack on top of whatever coloring is selected -->
+    <section class="panel">
+      <h2>Overlays <span class="lg-hint">stack on the coloring</span></h2>
+      <p class="muted small" style="margin:-2px 0 10px">Markers &amp; areas you can layer on top of the county colors — turn on as many as you like.</p>
+      <div class="layer-group">
+        <label class="overlay-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
+        <label class="overlay-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
+        <label class="overlay-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
+        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
+        <div class="contam-subtoggles" id="contam-subtoggles">
+          <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
+          <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
+          <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
+          <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
+        </div>
+        <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
+        <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
+        <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
+        <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
+        <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
+        <label class="overlay-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
+      </div>
+    </section>
+
     <!-- Filters that refine the currently-selected coloring layer -->
     <section class="panel">
       <h2>Pesticide filters</h2>
@@ -163,30 +187,6 @@
         </div>
       </label>
       <p class="resp-meta" id="cancer-meta">—</p>
-    </section>
-
-    <!-- Point overlays: stack on top of whatever coloring is selected -->
-    <section class="panel">
-      <h2>Overlays <span class="lg-hint">stack on the coloring</span></h2>
-      <p class="muted small" style="margin:-2px 0 10px">Markers &amp; areas you can layer on top of the county colors — turn on as many as you like.</p>
-      <div class="layer-group">
-        <label class="overlay-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
-        <label class="overlay-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
-        <label class="overlay-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
-        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
-        <div class="contam-subtoggles" id="contam-subtoggles">
-          <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
-          <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
-          <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
-          <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
-        </div>
-        <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
-        <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
-        <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
-        <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
-        <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
-        <label class="overlay-toggle" data-tip="When on, click any county to see the area downwind of it where spray drift could travel."><input type="checkbox" id="wind-driftzone" /> <span>Show drift zone on county click</span></label>
-      </div>
     </section>
 
     <section class="panel">
