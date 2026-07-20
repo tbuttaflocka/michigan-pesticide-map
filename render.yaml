@@ -12,10 +12,7 @@ services:
     plan: free
     # Install runtime deps (Flask + Waitress). Python version comes from runtime.txt.
     buildCommand: "pip install -r requirements.txt"
-    # serve.py runs Waitress and binds to $HOST:$PORT. Render sets PORT itself;
-    # HOST=0.0.0.0 (below) makes the app reachable from outside the container.
+    # serve.py runs Waitress. It always binds 0.0.0.0 (so Render can reach it)
+    # and reads the port from the PORT env var that Render provides — no extra
+    # env vars are required.
     startCommand: "python serve.py"
-    envVars:
-      - key: HOST
-        value: "0.0.0.0"
-      # PORT is provided automatically by Render — serve.py reads it from the env.

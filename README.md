@@ -58,10 +58,12 @@ WSGI app as `serve:application` (so `waitress-serve --listen=127.0.0.1:8080
 serve:application`, or gunicorn `serve:application` on Linux, also work).
 
 **Put HTTPS in front of it.** Waitress speaks plain HTTP; terminate TLS with a
-reverse proxy and bind the app to localhost so only the proxy is exposed:
+reverse proxy in front of it. `serve.py` always binds `0.0.0.0` on `$PORT`
+(default 8080), so restrict outside access to that port at the firewall/proxy
+layer and let the proxy handle TLS and the public port:
 
 ```bash
-HOST=127.0.0.1 PORT=8080 python serve.py
+PORT=8080 python serve.py
 ```
 
 - **Caddy** (automatic HTTPS via Let's Encrypt) — simplest:
@@ -99,7 +101,7 @@ Render needs:
 | Runtime | Python (`runtime.txt` → `python-3.13.4`) |
 | Build command | `pip install -r requirements.txt` |
 | Start command | `python serve.py` |
-| Env var | `HOST=0.0.0.0` (Render sets `PORT` automatically; `serve.py` reads both) |
+| Env vars | none required — `serve.py` binds `0.0.0.0` and reads the `PORT` Render sets automatically |
 
 Steps: push this repo to GitHub → in Render, **New → Web Service** → connect the repo →
 Render reads `render.yaml` (or enter the build/start commands above) → **Create**. Render
