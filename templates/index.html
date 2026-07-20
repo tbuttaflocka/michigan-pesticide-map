@@ -92,8 +92,10 @@
       </div>
     </section>
 
-    <!-- Filters that refine the currently-selected coloring layer -->
-    <section class="panel">
+    <!-- Filters that refine the currently-selected coloring layer.
+         Each layer-specific panel carries data-layer-filters and is shown only
+         when its choropleth is the active one (see applyLayerFilterVisibility). -->
+    <section class="panel layer-filter-panel" data-layer-filters="pesticide">
       <h2>Pesticide filters</h2>
       <p class="muted small" style="margin:-2px 0 8px">Refine the <em>Pesticide application</em> coloring.</p>
       <label class="field">
@@ -136,7 +138,7 @@
       </label>
     </section>
 
-    <section class="panel">
+    <section class="panel layer-filter-panel" data-layer-filters="pesticide">
       <h2>Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></h2>
       <div class="year-row">
         <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
@@ -149,7 +151,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel layer-filter-panel" data-layer-filters="resp">
       <h2>Respiratory health</h2>
       <p class="muted small">Choose <em>Respiratory health</em> above to color the map by this metric.</p>
       <label class="field" style="margin-top:8px">
@@ -169,7 +171,7 @@
       <p class="resp-meta" id="resp-meta">—</p>
     </section>
 
-    <section class="panel">
+    <section class="panel layer-filter-panel" data-layer-filters="cancer">
       <div class="panel-head">
         <h2>Cancer incidence</h2>
         <button id="cancer-evidence-btn" class="info-btn" title="Pesticide–cancer evidence">ℹ️</button>
@@ -209,7 +211,7 @@
       <p class="muted small" id="wq-stats">—</p>
     </section>
 
-    <section class="panel">
+    <section class="panel layer-filter-panel" data-layer-filters="contam_density">
       <div class="panel-head">
         <h2>Industrial contamination</h2>
       </div>
@@ -218,7 +220,7 @@
       <p class="muted small" id="contam-stats">—</p>
     </section>
 
-    <section class="panel">
+    <section class="panel layer-filter-panel" data-layer-filters="tri">
       <div class="panel-head">
         <h2>Industrial releases (TRI) <span class="info-i" data-gloss="TRI">?</span></h2>
       </div>

@@ -310,6 +310,14 @@ a:hover { text-decoration: underline; }
 }
 .map-hint b { color: var(--text); }
 
+/* Layer-specific filter panels fade in when their choropleth becomes active,
+   so swapping the visible filter block doesn't snap the sidebar around. */
+.layer-filter-panel:not(.hidden) { animation: lfp-fade-in .18s ease both; }
+@keyframes lfp-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ---------- statewide / county panels ---------- */
 .big-stats {
   display: grid;

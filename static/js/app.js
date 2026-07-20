@@ -640,6 +640,19 @@
       : `👆 <b>Tap</b> a county for full details · turn on county coloring, then <b>press &amp; hold</b> to compare values`;
   }
 
+  // Show only the filter panel(s) that belong to the active choropleth. Panels
+  // tag themselves with data-layer-filters="pesticide|resp|cancer|contam_density|tri"
+  // (space-separated for multiple). The point-overlay section and universal
+  // controls (Legend, Water contamination) have no such tag and stay visible,
+  // so stackable overlays remain toggleable regardless of the active layer.
+  function applyLayerFilterVisibility() {
+    const active = state.activeChoropleth;
+    document.querySelectorAll('[data-layer-filters]').forEach((el) => {
+      const owns = el.getAttribute('data-layer-filters').split(/\s+/).includes(active);
+      el.classList.toggle('hidden', !owns);
+    });
+  }
+
   // ---------- active choropleth switching (mutually exclusive) ----------
   async function setActiveChoropleth(which) {
     if (!which) return;
@@ -670,6 +683,7 @@
     renderLegend();
     updateActiveIndicator();
     refreshCountyHeadline();   // keep an open county's headline in sync
+    applyLayerFilterVisibility();
 
     // Reflect state in the radio group (covers programmatic calls).
     const radio = document.querySelector(`input[name="choropleth"][value="${which}"]`);
@@ -3140,6 +3154,7 @@
       }
 
       renderChoropleth();
+      applyLayerFilterVisibility();   // hide non-active layers' filters at startup
       await loadWaterCompounds();
       bindFilters();
       await refreshAll();
