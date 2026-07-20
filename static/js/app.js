@@ -2,6 +2,8 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const fmtLbs = window.PMCharts.fmtLbs;
+  // Phone / portrait-tablet layout (matches the CSS mobile breakpoint).
+  const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
 
   // ---------- state ----------
   const state = {
@@ -327,8 +329,13 @@
     hide($('statewide-panel'));
     show($('county-panel'));
     const p = $('county-panel');
-    if (window.innerWidth <= 900) {
-      // Stacked mobile layout: the right sidebar is below the map — scroll to it.
+    if (isMobile()) {
+      // Phone: the county detail slides up as a bottom sheet over the map.
+      document.body.classList.remove('m-layers-open');
+      document.body.classList.add('m-detail-open');
+      p.scrollTop = 0;
+    } else if (window.innerWidth <= 900) {
+      // Small stacked window: the right sidebar is below the map — scroll to it.
       try { p.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
     } else {
       const sb = p.closest('.sidebar');
@@ -344,6 +351,7 @@
   function closeCountyPanel() {
     hide($('county-panel'));
     show($('statewide-panel'));
+    document.body.classList.remove('m-detail-open');   // close the mobile sheet
     clearSelectedCounty();
     clearDriftZone();
   }
@@ -591,6 +599,10 @@
     if (panel) panel.textContent = label;
     const badge = $('active-layer-badge');
     if (badge) badge.innerHTML = `<span class="alb-k">Currently showing</span> ${label}`;
+    // On mobile the "Layers & filters" button doubles as the current-layer
+    // indicator, so keep its label in sync.
+    const fabLabel = $('m-fab-label');
+    if (fabLabel) fabLabel.textContent = label;
   }
 
   // ---------- active choropleth switching (mutually exclusive) ----------
@@ -2400,6 +2412,8 @@
   const VIEWS = ['map', 'explore', 'respiratory', 'cancer'];
   function switchView(v, updateHash) {
     if (!VIEWS.includes(v)) v = 'map';
+    // Leaving the map view — dismiss any open mobile bottom sheets.
+    document.body.classList.remove('m-layers-open', 'm-detail-open');
     document.querySelectorAll('#view-switch button').forEach((x) =>
       x.classList.toggle('active', x.dataset.view === v));
     VIEWS.forEach((name) =>
@@ -3134,8 +3148,46 @@
     window.addEventListener('scroll', hide, true);
   }
 
+  // ---------- mobile bottom-sheet controls ----------
+  function setupMobileUI() {
+    const body = document.body;
+    const closeSheets = () => body.classList.remove('m-layers-open', 'm-detail-open');
+
+    const fab = $('m-layers-fab');
+    if (fab) fab.addEventListener('click', () => {
+      body.classList.remove('m-detail-open');
+      body.classList.add('m-layers-open');
+    });
+    const layersClose = $('m-layers-close');
+    if (layersClose) layersClose.addEventListener('click', () =>
+      body.classList.remove('m-layers-open'));
+    const backdrop = $('m-backdrop');
+    if (backdrop) backdrop.addEventListener('click', closeSheets);
+
+    // "View statewide summary" opens the right-side sheet on the statewide panel.
+    const summaryBtn = $('m-summary-btn');
+    if (summaryBtn) summaryBtn.addEventListener('click', () => {
+      closeCountyPanel();                 // ensure the statewide panel is the one shown
+      body.classList.remove('m-layers-open');
+      body.classList.add('m-detail-open');
+      const p = $('statewide-panel');
+      if (p) p.scrollTop = 0;
+    });
+
+    // Growing back to desktop width: drop mobile sheet state and re-measure the map.
+    let rt = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => {
+        if (!isMobile()) closeSheets();
+        if (state.map) state.map.invalidateSize();
+      }, 200);
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     setupTooltips();
+    setupMobileUI();
     wireIntro();
     maybeShowIntroOnFirstVisit();
     boot();

@@ -1627,18 +1627,136 @@ a:hover { text-decoration: underline; }
   .branding h1 { font-size: 17px; }
   #search { width: 200px; }
 }
-@media (max-width: 900px) {
+/* Small desktop windows (769–900px): stack the columns as before. */
+@media (min-width: 769px) and (max-width: 900px) {
   .app-body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; }
   .sidebar.left, .sidebar.right { border: none; border-bottom: 1px solid var(--line); }
   .correlation-grid { grid-template-columns: 1fr; }
 }
-/* Narrow phones: let the header wrap instead of overflowing, and give the
-   search box and view switch room to reflow onto their own lines. */
-@media (max-width: 600px) {
-  .app-header { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
-  .header-actions { flex-wrap: wrap; gap: 8px; width: 100%; }
-  .view-switch { flex-wrap: wrap; }
-  #search { width: 100%; flex: 1 1 160px; }
-  .search-dropdown { right: 0; width: 100%; }
-  .branding h1 { font-size: 16px; }
+
+/* ================================================================
+   MOBILE (phones + portrait tablets, <=768px): the map goes full-screen
+   and controls live in bottom sheets. Desktop (>768px) is unchanged.
+   ================================================================ */
+.m-only { display: none; }              /* mobile-only elements hidden on desktop */
+
+@media (max-width: 768px) {
+  .m-only { display: flex; }
+
+  /* --- compact header: row 1 = title + ?/Data-sources, row 2 = search,
+         row 3 = horizontally-scrollable tabs (never wrapping). We flatten
+         .header-actions with display:contents so its children become direct
+         flex items of the header and can each take their own row. --- */
+  .app-header { position: relative; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; }
+  .header-actions { display: contents; }
+  .branding { order: 0; flex: 1 1 0; min-width: 0; }   /* basis 0 so title shares row 1 with the buttons */
+  .branding h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .branding .subtitle { display: none; }
+  #open-intro { order: 1; }
+  #open-sources { order: 2; }
+  #search { order: 3; flex-basis: 100%; width: 100%; padding: 11px 12px; }
+  .search-dropdown { position: absolute; top: 100%; left: 8px; right: 8px; width: auto; margin-top: 4px; }
+  .view-switch {
+    order: 4; flex-basis: 100%; width: 100%;
+    overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .view-switch::-webkit-scrollbar { display: none; }
+  .view-switch button { flex: 0 0 auto; white-space: nowrap; padding: 10px 16px; min-height: 44px; }
+  #open-intro, #open-sources { min-height: 40px; padding: 8px 12px; }
+
+  /* --- map fills the whole view; sidebars leave the flow to become sheets --- */
+  #view-map.app-body { display: block; position: relative; }
+  #view-map > #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* footer hides — Leaflet's own attribution control keeps the OSM/CARTO credit */
+  .app-footer { display: none; }
+
+  /* the floating "currently showing" badge + its sidebar twin are redundant here */
+  .active-layer-badge { display: none !important; }
+  .active-layer { display: none; }
+
+  /* --- Layers & filters bottom sheet (the left sidebar) --- */
+  .sidebar.left {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+    width: auto; max-height: 82dvh;
+    border: none; border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.55);
+    transform: translateY(102%); transition: transform .28s ease;
+    z-index: 3000;
+    padding: 0 14px calc(16px + env(safe-area-inset-bottom));
+  }
+  body.m-layers-open .sidebar.left { transform: translateY(0); }
+  .m-sheet-head {
+    position: sticky; top: 0; z-index: 2;
+    align-items: center; gap: 8px; padding: 14px 0 8px; margin: 0 -14px 6px;
+    padding-left: 14px; padding-right: 14px;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+  }
+  .m-sheet-grip {
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    width: 40px; height: 4px; border-radius: 2px; background: var(--line);
+  }
+  .m-sheet-title { flex: 1; font-weight: 600; font-size: 14px; }
+  .m-sheet-close, .m-inline-btn {
+    align-items: center; justify-content: center; font: inherit; cursor: pointer;
+  }
+  .m-sheet-close {
+    background: var(--accent); color: #0a0f17; border: none;
+    border-radius: 8px; padding: 8px 18px; font-weight: 600; min-height: 40px;
+  }
+  .m-inline-btn {
+    gap: 6px; width: 100%;
+    background: var(--bg-3); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; min-height: 46px; margin-bottom: 4px;
+  }
+
+  /* --- detail / summary bottom sheet (the right sidebar) --- */
+  .sidebar.right {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+    width: auto; background: transparent; border: none; padding: 0; gap: 0;
+    overflow: visible; z-index: 2800; pointer-events: none;
+    transform: translateY(102%); transition: transform .28s ease;
+  }
+  body.m-detail-open .sidebar.right { transform: translateY(0); }
+  #statewide-panel, .county-panel {
+    pointer-events: auto; max-height: 82dvh; overflow-y: auto; margin: 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.55);
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  /* --- floating action button + backdrop --- */
+  .m-fab {
+    position: fixed; left: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+    align-items: center; gap: 8px;
+    background: var(--accent); color: #0a0f17; border: none;
+    border-radius: 24px; padding: 12px 18px; font: inherit; font-weight: 600;
+    font-size: 14px; min-height: 48px; max-width: 70vw;
+    box-shadow: 0 4px 14px rgba(0,0,0,.5); z-index: 1500; cursor: pointer;
+  }
+  .m-fab #m-fab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m-fab-ico { font-size: 16px; flex: 0 0 auto; }
+  body.m-layers-open .m-fab, body.m-detail-open .m-fab { display: none; }
+  .m-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    z-index: 2900; opacity: 0; pointer-events: none; transition: opacity .25s;
+  }
+  body.m-layers-open .m-backdrop { opacity: 1; pointer-events: auto; }
+
+  /* --- modals near full-screen with a comfortable close target --- */
+  .modal-card { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 18px 16px; }
+  .modal .close { width: 44px; height: 44px; font-size: 26px; }
+
+  /* --- comfortable touch targets throughout the sheets --- */
+  .layer-radio, .overlay-toggle, .contam-subtoggles label,
+  .tri-suboptions label, .toggle-chip { min-height: 44px; }
+  .seg button { min-height: 40px; padding: 9px 12px; }
+  .field select, .tri-suboptions select, #wq-compound, #resp-metric,
+  #cancer-type, #explore-x, #explore-y { min-height: 44px; }
+  .top-list li { padding: 10px 6px; }
+  .btn-ghost { min-height: 40px; }
+
+  /* explore / respiratory / cancer views: single column */
+  .correlation-grid, .explore-wrap { grid-template-columns: 1fr; }
 }

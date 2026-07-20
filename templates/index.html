@@ -33,6 +33,12 @@
 
 <main class="app-body" id="view-map">
   <aside class="sidebar left">
+    <div class="m-sheet-head m-only">
+      <span class="m-sheet-grip"></span>
+      <span class="m-sheet-title">Layers &amp; filters</span>
+      <button id="m-layers-close" class="m-sheet-close" type="button" aria-label="Close">Done</button>
+    </div>
+    <button id="m-summary-btn" class="m-only m-inline-btn" type="button">📊 View statewide summary</button>
     <section class="panel layer-control">
       <h2>Map layers</h2>
 
@@ -352,6 +358,12 @@
       </p>
     </section>
   </aside>
+
+  <!-- Mobile-only map controls (hidden on desktop via CSS) -->
+  <button id="m-layers-fab" class="m-fab m-only" type="button" aria-label="Open layers and filters">
+    <span class="m-fab-ico">☰</span><span id="m-fab-label">Layers &amp; filters</span>
+  </button>
+  <div id="m-backdrop" class="m-backdrop m-only"></div>
 </main>
 
 <!-- ===================== Explore Correlations (unified) ===================== -->
