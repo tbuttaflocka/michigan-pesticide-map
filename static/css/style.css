@@ -1593,6 +1593,18 @@ a:hover { text-decoration: underline; }
   margin: 10px 0 4px; font-size: 10.5px; text-transform: uppercase;
   letter-spacing: .6px; color: var(--muted); font-weight: 600;
 }
+/* PubChem enrichment: property chips, synonyms, and the source link. */
+.tci-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.tci-chip {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: var(--bg-2); border: 1px solid var(--line); color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tci-syn { font-size: 12px; color: var(--text); margin: 4px 0; line-height: 1.5; }
+.tci-syn .tci-k { display: inline; width: auto; margin-right: 4px; }
+.tci-pubchem { margin: 10px 0 2px; font-size: 12px; }
+.tci-pubchem a { color: var(--accent-2); text-decoration: none; }
+.tci-pubchem a:hover { text-decoration: underline; }
 .tci-facs { max-height: 160px; overflow-y: auto; }
 .tci-firow {
   display: flex; justify-content: space-between; gap: 8px; margin: 2px 0;

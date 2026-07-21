@@ -351,6 +351,25 @@ CREATE TABLE IF NOT EXISTS tri_release (
 CREATE INDEX IF NOT EXISTS ix_tri_rel_fac  ON tri_release(facility_id);
 CREATE INDEX IF NOT EXISTS ix_tri_rel_year ON tri_release(year);
 CREATE INDEX IF NOT EXISTS ix_tri_rel_chem ON tri_release(chemical);
+
+-- Cached PubChem enrichment for every chemical/compound that appears in the
+-- data (pesticide compounds, TRI chemicals, water-quality detections). Keyed by
+-- the upper-cased name so popups resolve instantly with no live API call.
+-- Populated by enrich_chemicals.py / app.chemical_reference.
+CREATE TABLE IF NOT EXISTS chemical_reference (
+    name_key           TEXT PRIMARY KEY,   -- UPPER(name) lookup key
+    name               TEXT,               -- display name as it appears in data
+    cas                TEXT,               -- CAS number (from data or PubChem)
+    pubchem_cid        INTEGER,            -- PubChem Compound ID
+    description        TEXT,               -- plain-language summary from PubChem
+    description_source TEXT,               -- attribution for the description
+    molecular_formula  TEXT,
+    molecular_weight   REAL,
+    iupac_name         TEXT,
+    synonyms           TEXT,               -- JSON array of a few common synonyms
+    source             TEXT,               -- 'pubchem' | 'none'
+    fetched_at         TEXT                -- ISO timestamp of the fetch
+);
 """
 
 

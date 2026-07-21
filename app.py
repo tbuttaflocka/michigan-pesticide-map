@@ -2816,6 +2816,28 @@ def api_chemical():
         return jsonify({"found": False, "name": name})
     conn = db()
 
+    # --- cached PubChem enrichment (real description, formula, CAS, CID) --- #
+    chem = conn.execute(
+        "SELECT name, cas, pubchem_cid, description, description_source, "
+        "       molecular_formula, molecular_weight, iupac_name, synonyms "
+        "  FROM chemical_reference WHERE name_key = UPPER(?)", (name,)).fetchone()
+    pubchem = None
+    if chem and chem["pubchem_cid"]:
+        try:
+            syns = json.loads(chem["synonyms"]) if chem["synonyms"] else []
+        except (TypeError, ValueError):
+            syns = []
+        pubchem = {
+            "cid": chem["pubchem_cid"],
+            "description": chem["description"],
+            "description_source": chem["description_source"],
+            "molecular_formula": chem["molecular_formula"],
+            "molecular_weight": chem["molecular_weight"],
+            "iupac_name": chem["iupac_name"],
+            "synonyms": syns,
+            "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{chem['pubchem_cid']}",
+        }
+
     # --- pesticide side (agricultural use) -------------------------------- #
     pc = conn.execute(
         "SELECT category, toxicity_class FROM pesticide_categories "
@@ -2874,11 +2896,16 @@ def api_chemical():
     conn.close()
 
     profile = tri_reference.chemical_profile(name, cas, carcinogen)
-    # A pesticide that isn't an industrial TRI chemical shouldn't inherit the
-    # TRI-flavored fallback blurb; drop it and show only what we truly have.
-    if not profile.get("sourced") and is_pesticide and not is_tri:
+    # The curated fallback blurb is TRI-flavored ("tracked by the EPA TRI"); only
+    # keep it for chemicals that really are TRI chemicals. For everything else the
+    # PubChem description (or the honest no-info note) carries the explanation.
+    if not profile.get("sourced") and not is_tri:
         profile = {"what": None, "uses": None, "health": None,
                    "carcinogen": None, "pathways": None, "sourced": False}
+
+    # Fall back to the CAS PubChem resolved when the TRI data didn't carry one.
+    if not cas and chem and chem["cas"]:
+        cas = chem["cas"]
 
     return jsonify({
         "found": True,
@@ -2890,6 +2917,7 @@ def api_chemical():
         "pesticide": pest,
         "is_tri": is_tri,
         "tri": tri,
+        "pubchem": pubchem,
         "profile": profile,
     })
 

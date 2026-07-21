@@ -64,6 +64,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from app import data_loader as dl          # noqa: E402
+from app import chemical_reference as chem_ref  # noqa: E402
 from app import database                    # noqa: E402
 from app.config import DB_PATH, DATA_DIR    # noqa: E402
 
@@ -246,6 +247,20 @@ SOURCES: list[Source] = [
         # newly-finalized year when it lands.
         interval_months=12, min_abs=500, floor_frac=0.5,
         coverage=year_range("tri_release", "year"),
+    ),
+    Source(
+        id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
+        loaders=[chem_ref.load_chemical_reference],
+        targets=["chemical_reference"],
+        primary_target="chemical_reference", primary_source_id="pubchem_chem",
+        interval_months=12, min_abs=50, floor_frac=0.8,
+        coverage=lambda conn: (None, None),
+        # Enrichment reads the chemical names from the pesticide/TRI/water tables
+        # and appends only the newly-seen chemicals onto the existing cache
+        # (incremental). Parents are seeded before children for FK integrity.
+        seed_extra=("pesticide_use", "tri_facility", "tri_release",
+                    "water_quality_sites", "water_quality_results",
+                    "chemical_reference"),
     ),
 ]
 

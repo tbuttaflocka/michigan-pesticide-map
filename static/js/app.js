@@ -1996,23 +1996,42 @@
         + (facs ? `<div class="tci-sub2">Facilities releasing it${t.county ? ' in ' + t.county + ' County' : ''}</div><div class="tci-facs">${facs}</div>` : '');
     }
 
-    const subtitle = (d.cas ? 'CAS ' + d.cas + ' · ' : '')
-      + (flags || (d.is_pesticide ? 'agricultural pesticide' : ''));
-    const noProfile = !p.what && !p.uses && !p.health && !p.carcinogen;
+    // Real PubChem enrichment (cached): description, formula/weight, synonyms, CID.
+    const pc = d.pubchem || null;
+    const subtitle = flags || (d.is_pesticide ? 'agricultural pesticide' : '');
+    const syn = (pc && pc.synonyms && pc.synonyms.length)
+      ? `<div class="tci-syn"><span class="tci-k">Also known as</span> ${pc.synonyms.slice(0, 4).join(', ')}</div>` : '';
+    const chips = [];
+    if (pc && pc.molecular_formula) chips.push(`<span class="tci-chip">${pc.molecular_formula}</span>`);
+    if (pc && pc.molecular_weight) chips.push(`<span class="tci-chip">${(Math.round(pc.molecular_weight * 100) / 100)} g/mol</span>`);
+    if (d.cas) chips.push(`<span class="tci-chip">CAS ${d.cas}</span>`);
+    const chipRow = chips.length ? `<div class="tci-chips">${chips.join('')}</div>` : '';
+    // Prefer PubChem's real plain-language description; fall back to the curated
+    // hazard blurb if PubChem had none.
+    const descText = (pc && pc.description) ? pc.description : (p.what || '');
+    const pubLink = pc
+      ? `<a href="${pc.url}" target="_blank" rel="noopener">Full profile on PubChem — CID ${pc.cid} ↗</a>` : '';
+    const srcBits = ['Hazard classes: EPA / IARC', 'Pesticide use: USGS', 'Industrial releases: EPA TRI'];
+    if (pc) srcBits.unshift('Description &amp; properties: PubChem (NCBI)'
+      + (pc.description_source ? ` via ${pc.description_source}` : ''));
+    const noInfo = !descText && !p.uses && !p.health && !p.carcinogen && !(pc && pc.molecular_formula);
     return `
       <div class="tci-head">
         <h3>${d.name}</h3>
-        <div class="tci-sub">${subtitle}</div>
+        ${subtitle ? `<div class="tci-sub">${subtitle}</div>` : ''}
       </div>
-      ${p.what ? `<p class="tci-what">${p.what}</p>` : ''}
+      ${chipRow}
+      ${syn}
+      ${descText ? `<p class="tci-what">${descText}</p>` : ''}
       ${line('Used for', p.uses)}
       ${line('Health', p.health)}
       ${p.carcinogen ? `<div class="tci-carc">⚠ ${p.carcinogen}</div>` : ''}
       ${line('Typical pathways', p.pathways)}
       ${pestBlock}
       ${triBlock}
-      ${noProfile ? '<p class="muted small tci-nolookup">We don\'t have a curated hazard write-up for this chemical — the figures above are from the data we actually have. See EPA / PubChem for its full toxicology profile.</p>' : ''}
-      <div class="tri-note">Hazard classes: EPA / IARC · Pesticide use: USGS · Industrial releases: EPA TRI.</div>
+      ${pubLink ? `<div class="tci-pubchem">${pubLink}</div>` : ''}
+      ${noInfo ? '<p class="muted small tci-nolookup">We couldn\'t find a public description for this chemical — the figures above are from the data we actually have (EPA / IARC / USGS). See PubChem for more.</p>' : ''}
+      <div class="tri-note">${srcBits.join(' · ')}.</div>
     `;
   }
 
