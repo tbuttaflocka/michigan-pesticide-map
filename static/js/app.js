@@ -806,7 +806,7 @@
             <th class="right" data-tip="How many samples exceeded the EPA legal drinking-water limit (MCL).">Exc.</th></tr>
           ${rows.map((r) => `
             <tr class="${r.exceedances ? 'exceeds' : (r.detections ? 'detected' : '')}">
-              <td>${r.compound}${r.mcl ? ` <span class="wq-meta" data-gloss="MCL">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
+              <td>${chemLink(r.compound)}${r.mcl ? ` <span class="wq-meta" data-gloss="MCL">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
               <td class="right">${r.samples}</td>
               <td class="right">${r.detections}</td>
               <td class="right">${r.exceedances}</td>
@@ -1269,7 +1269,7 @@
       const li = document.createElement('li');
       li.classList.add('clickable');
       li.innerHTML =
-        `<span>${r.compound} <span class="muted small">${r.category}</span></span>` +
+        `<span>${chemLink(r.compound)} <span class="muted small">${r.category}</span></span>` +
         `<span class="v">${fmtLbs(r.lbs)}</span>`;
       li.addEventListener('click', () => {
         $('filter-compound').value = r.compound;
@@ -1321,7 +1321,7 @@
     list.innerHTML = compounds.map((r) => {
       const col = PMCharts.CATEGORY_COLORS[r.category] || '#9aa4b2';
       return `<div class="cl-row"><span class="cl-dot" style="background:${col}"></span>` +
-        `<span class="cl-name">${r.compound}</span>` +
+        `<span class="cl-name">${chemLink(r.compound, { fips: state.selectedFips })}</span>` +
         `<span class="cl-val">${fmtLbs(r.lbs || 0)}</span></div>`;
     }).join('');
     list.classList.add('hidden');
@@ -1748,7 +1748,7 @@
     const path = (label, v) => v > 0
       ? `<div class="row"><span class="k">${label}</span> <b>${fmtLbs(v)}</b></div>` : '';
     const chem = (f.top_chemicals || []).slice(0, 5).map((c) =>
-      `<div class="tri-chem"><span class="cn">${c.chemical}`
+      `<div class="tri-chem"><span class="cn">${chemLink(c.chemical)}`
       + `${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}`
       + `${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span>`
       + `<span class="cv">${fmtLbs(c.lbs)}</span></div>`).join('');
@@ -1880,7 +1880,7 @@
         const fac = target.closest('.tri-fac');
         if (fac) { focusTriFacility(fac.dataset.fid); return; }
         const ch = target.closest('.tri-chem-item');
-        if (ch) { openTriChemInfo(el.dataset.fips, decodeURIComponent(ch.dataset.chem)); }
+        if (ch) { openChemInfo(decodeURIComponent(ch.dataset.chem), { fips: el.dataset.fips }); }
       };
       el.addEventListener('click', (e) => act(e.target));
       el.addEventListener('keydown', (e) => {
@@ -1928,52 +1928,91 @@
     }
   }
 
-  // Chemical drill-down modal for a chemical in the current county.
-  async function openTriChemInfo(fips, chemKey) {
+  // ---------- reusable chemical-info popup ----------
+  // A clickable chemical/compound name anywhere in the app. Encodes the raw name
+  // (chem names can contain commas, e.g. "2,4-D"); the delegated handler decodes.
+  function chemLink(name, opts) {
+    opts = opts || {};
+    if (!name) return '';
+    const fips = opts.fips ? ` data-chem-fips="${opts.fips}"` : '';
+    const label = opts.label != null ? opts.label : name;
+    return `<span class="chem-link" role="button" tabindex="0" data-chem="${encodeURIComponent(name)}"${fips}`
+      + ` title="What is ${name}? — tap for details">${label}</span>`;
+  }
+
+  // Open the shared chemical-info modal for any chemical/compound. Merges the
+  // curated hazard profile with reported pesticide use and TRI releases; passing
+  // a fips adds that county's TRI breakdown. Reused everywhere a name is shown.
+  async function openChemInfo(name, opts) {
+    opts = opts || {};
     const modal = $('tri-info-modal');
     const body = $('tri-info-body');
     if (!modal || !body) return;
     body.innerHTML = '<p class="muted">Loading…</p>';
     show(modal);
     let d;
-    try { d = await api('/api/tri/chemical', { fips, chemical: chemKey }); }
+    try { d = await api('/api/chemical', { name, fips: opts.fips || '' }); }
     catch (e) { body.innerHTML = '<p class="muted">Could not load chemical info.</p>'; return; }
-    if (!d || !d.found) { body.innerHTML = '<p class="muted">No data for this chemical.</p>'; return; }
-    body.innerHTML = triChemInfoHtml(d);
+    if (!d || !d.found) { body.innerHTML = `<p class="muted">No information available for ${name}.</p>`; return; }
+    body.innerHTML = chemInfoHtml(d);
   }
 
-  function triChemInfoHtml(d) {
+  function chemInfoHtml(d) {
     const p = d.profile || {};
     const flags =
       (d.carcinogen ? '<span class="tri-flag carc">carcinogen</span> ' : '')
       + (d.pfas ? '<span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : '');
     const line = (label, val) => val
       ? `<div class="tci-row"><span class="tci-k">${label}</span><span class="tci-v">${val}</span></div>` : '';
-    const paths = (d.pathways || []).filter((x) => x.lbs > 0)
-      .map((x) => `${x.label} ${fmtLbs(x.lbs)}`).join(' · ') || 'not reported this year';
-    const facs = (d.facilities || []).map((f) =>
-      `<div class="tci-firow"><span class="n">${f.name}</span><span class="v">${fmtLbs(f.lbs)}</span></div>`).join('')
-      || '<p class="muted small">None in this county this year.</p>';
-    const carcBlock = p.carcinogen ? `<div class="tci-carc">⚠ ${p.carcinogen}</div>` : '';
+
+    // Reported agricultural pesticide use, when this compound is one.
+    let pestBlock = '';
+    if (d.is_pesticide && d.pesticide) {
+      const pe = d.pesticide;
+      const cat = pe.category ? pe.category.replace(/_/g, ' ') : null;
+      pestBlock =
+        '<div class="tci-sub2">Agricultural pesticide use</div>'
+        + (cat ? `<div class="tci-row"><span class="tci-k">Pesticide type</span><span class="tci-v">${cat}</span></div>` : '')
+        + (pe.toxicity_class ? `<div class="tci-row"><span class="tci-k">Toxicity class</span><span class="tci-v">${pe.toxicity_class}</span></div>` : '')
+        + (pe.statewide_lbs != null
+            ? `<div class="tci-stats"><div><strong>${fmtLbs(pe.statewide_lbs)}</strong><span>applied statewide (${pe.latest_year})</span></div></div>` : '');
+    }
+
+    // Reported industrial TRI releases, when this chemical is one.
+    let triBlock = '';
+    if (d.is_tri && d.tri) {
+      const t = d.tri;
+      const paths = (t.pathways || []).filter((x) => x.lbs > 0)
+        .map((x) => `${x.label} ${fmtLbs(x.lbs)}`).join(' · ');
+      const facs = (t.facilities || []).map((f) =>
+        `<div class="tci-firow"><span class="n">${f.name}</span><span class="v">${fmtLbs(f.lbs)}</span></div>`).join('');
+      triBlock =
+        '<div class="tci-sub2">Industrial releases (TRI)</div>'
+        + '<div class="tci-stats">'
+        + (t.county != null ? `<div><strong>${fmtLbs(t.county_lbs)}</strong><span>released in ${t.county} Co. (${t.year})</span></div>` : '')
+        + `<div><strong>${fmtLbs(t.statewide_lbs)}</strong><span>released statewide (${t.year})</span></div>`
+        + '</div>'
+        + (paths ? line('Released via', paths) : '')
+        + (facs ? `<div class="tci-sub2">Facilities releasing it${t.county ? ' in ' + t.county + ' County' : ''}</div><div class="tci-facs">${facs}</div>` : '');
+    }
+
+    const subtitle = (d.cas ? 'CAS ' + d.cas + ' · ' : '')
+      + (flags || (d.is_pesticide ? 'agricultural pesticide' : ''));
+    const noProfile = !p.what && !p.uses && !p.health && !p.carcinogen;
     return `
       <div class="tci-head">
-        <h3>${d.chemical}</h3>
-        <div class="tci-sub">${d.cas ? 'CAS ' + d.cas + ' · ' : ''}${flags}</div>
+        <h3>${d.name}</h3>
+        <div class="tci-sub">${subtitle}</div>
       </div>
       ${p.what ? `<p class="tci-what">${p.what}</p>` : ''}
       ${line('Used for', p.uses)}
       ${line('Health', p.health)}
-      ${carcBlock}
+      ${p.carcinogen ? `<div class="tci-carc">⚠ ${p.carcinogen}</div>` : ''}
       ${line('Typical pathways', p.pathways)}
-      <div class="tci-stats">
-        <div><strong>${fmtLbs(d.county_total_lbs)}</strong><span>released in ${d.county} Co. (${d.year})</span></div>
-        <div><strong>${fmtLbs(d.statewide_total_lbs)}</strong><span>released statewide (${d.year})</span></div>
-      </div>
-      ${line('Released in-county via', paths)}
-      <div class="tci-sub2">Facilities releasing it in ${d.county} County</div>
-      <div class="tci-facs">${facs}</div>
-      ${p.sourced === false ? '<p class="muted small tci-nolookup">Descriptive detail for this chemical is not in our reference set; the figures above are from the reported TRI data.</p>' : ''}
-      <div class="tri-note">Release data: EPA Toxics Release Inventory. Health &amp; carcinogen classifications: EPA / IARC.</div>
+      ${pestBlock}
+      ${triBlock}
+      ${noProfile ? '<p class="muted small tci-nolookup">We don\'t have a curated hazard write-up for this chemical — the figures above are from the data we actually have. See EPA / PubChem for its full toxicology profile.</p>' : ''}
+      <div class="tri-note">Hazard classes: EPA / IARC · Pesticide use: USGS · Industrial releases: EPA TRI.</div>
     `;
   }
 
@@ -3310,9 +3349,28 @@
     });
   }
 
+  // Any element with class "chem-link" (chemical/compound name) opens the shared
+  // chemical-info modal. Delegated in the CAPTURE phase + stopPropagation so a
+  // click inside a Leaflet popup or a filter row doesn't also trigger that
+  // element's own handler (e.g. the statewide list's compound filter).
+  function setupChemLinks() {
+    const activate = (e) => {
+      const link = e.target.closest && e.target.closest('.chem-link');
+      if (!link) return;
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+      openChemInfo(decodeURIComponent(link.dataset.chem || ''),
+        { fips: link.dataset.chemFips || '' });
+    };
+    document.addEventListener('click', activate, true);
+    document.addEventListener('keydown', activate, true);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     setupTooltips();
     setupMobileUI();
+    setupChemLinks();
     wireIntro();
     maybeShowIntroOnFirstVisit();
     boot();

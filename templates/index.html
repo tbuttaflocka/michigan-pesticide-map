@@ -49,10 +49,99 @@
 
       <div class="layer-group">
         <label class="layer-radio" data-tip="Turn off county shading and show only the point overlays (markers, sites, wind)."><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
+
         <label class="layer-radio" data-tip="Shade each county by how much agricultural pesticide is applied. Source: USGS NAWQA EPest estimates."><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
+        <div class="layer-inline" data-layer-filters="pesticide">
+          <label class="field">
+            <span>Compound category</span>
+            <select id="filter-category">
+              <option value="all">All compounds</option>
+              <option value="herbicide">Herbicides</option>
+              <option value="insecticide">Insecticides</option>
+              <option value="fungicide">Fungicides</option>
+              <option value="growth_regulator">Growth regulators</option>
+              <option value="other">Other / fumigants</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Specific compound</span>
+            <select id="filter-compound">
+              <option value="">— none —</option>
+            </select>
+          </label>
+          <div class="featured-compounds" id="featured-compounds"></div>
+          <label class="field">
+            <span>Estimate <span class="info-i" data-tip="USGS reports pesticide use as a low–high range (the EPest estimate), because it's modeled from sales and crop data, not measured directly. Pick which end of the range to show.">?</span></span>
+            <div class="seg">
+              <button data-val="low" data-tip="Lower bound of the USGS estimate — the conservative figure.">Low</button>
+              <button data-val="avg" class="active" data-tip="Midpoint of the USGS low–high estimate range.">Average</button>
+              <button data-val="high" data-tip="Upper bound of the USGS estimate — the higher figure.">High</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>Normalization <span class="info-i" data-tip="Total lbs shows the raw amount applied. Per square mile divides by county area. Per cropland acre divides by farmland actually harvested — the best measure of how intensively fields are treated.">?</span></span>
+            <div class="seg" id="seg-normalize">
+              <button data-val="total" class="active" data-tip="Raw pounds of pesticide applied in the county.">Total lbs</button>
+              <button data-val="per_sq_mile" data-tip="Pounds applied per square mile of the county — accounts for county size.">lbs / mi²</button>
+              <button data-val="per_acre" data-tip="Pounds applied per acre of harvested cropland (USDA NASS). The truest measure of application intensity — urban counties with little farmland are left uncolored.">lbs / acre</button>
+            </div>
+          </label>
+          <div class="li-year">
+            <div class="li-sub">Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></div>
+            <div class="year-row">
+              <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
+              <button id="play-btn" class="btn-ghost" title="Animate years" data-tip="Play an animation stepping through every available year.">▶</button>
+            </div>
+            <input id="year-slider" type="range" min="0" max="0" step="1" data-tip="Drag to change the year of pesticide data shown on the map." />
+            <div class="year-ends">
+              <span id="year-min">—</span>
+              <span id="year-max">—</span>
+            </div>
+          </div>
+        </div>
+
         <label class="layer-radio" data-tip="Shade counties by asthma and COPD rates (age-adjusted). Source: CDC Environmental Public Health Tracking."><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
+        <div class="layer-inline" data-layer-filters="resp">
+          <label class="field">
+            <span>Metric</span>
+            <select id="resp-metric">
+              <option value="combined">All Respiratory (combined)</option>
+              <option value="asthma_ed">Asthma — ED Visits</option>
+              <option value="asthma_hosp">Asthma — Hospitalizations</option>
+              <option value="copd_ed">COPD — ED Visits</option>
+              <option value="copd_hosp">COPD — Hospitalizations</option>
+              <option value="acute_bronchitis">Acute Bronchitis</option>
+              <option value="pneumonia_influenza">Pneumonia &amp; Influenza</option>
+              <option value="upper_respiratory">Upper Respiratory Infections</option>
+              <option value="all_respiratory_mort">All Respiratory Mortality</option>
+            </select>
+          </label>
+          <p class="resp-meta" id="resp-meta">—</p>
+        </div>
+
         <label class="layer-radio" data-tip="Shade counties by cancer incidence (new cases per 100,000, age-adjusted). Source: NCI State Cancer Profiles."><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
+        <div class="layer-inline" data-layer-filters="cancer">
+          <label class="field">
+            <span>Cancer type</span>
+            <select id="cancer-type"></select>
+          </label>
+          <label class="field">
+            <span>Measure</span>
+            <div class="seg" id="seg-cancer-dtype">
+              <button data-val="incidence" class="active">Incidence</button>
+              <button data-val="mortality">Mortality</button>
+            </div>
+          </label>
+          <p class="resp-meta" id="cancer-meta">—</p>
+          <button id="cancer-evidence-btn" class="link-btn" type="button" data-tip="How strong is the research link between pesticides and each cancer?">Pesticide–cancer evidence ›</button>
+        </div>
+
         <label class="layer-radio" data-tip="Shade counties by the number of known contaminated sites. Source: EPA Superfund + compiled records."><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
+        <div class="layer-inline" data-layer-filters="contam_density">
+          <p class="muted small">County color = number of known contaminated sites. Site markers &amp; impact zones are in the <em>Overlays</em> section below.</p>
+          <p class="muted small" id="contam-stats">—</p>
+        </div>
+
         <label class="layer-radio" data-tip="Shade counties by the pounds of toxic chemicals industrial facilities self-report releasing each year. Source: EPA Toxics Release Inventory (TRI)."><input type="radio" name="choropleth" value="tri" /> <span class="lr-dot tri"></span> <span>TRI toxic releases</span></label>
         <div class="tri-suboptions hidden" id="tri-suboptions">
           <label class="small" data-tip="Which release pathway to color counties by. Air = fugitive + smokestack emissions; Water = surface-water discharge; Land = on-site landfill/disposal; PFAS = 'forever chemicals' only.">Pathway
@@ -64,6 +153,19 @@
               <option value="pfas">PFAS releases only</option>
             </select>
           </label>
+        </div>
+        <div class="layer-inline" data-layer-filters="tri">
+          <p class="muted small">Active facilities' <em>self-reported</em> annual toxic releases — what industry is putting into the air, water, and land <em>now</em> (vs the legacy Superfund layer). Factory markers are in the <em>Overlays</em> section below.</p>
+          <p class="muted small" id="tri-stats">—</p>
+          <details class="collapsible tri-caveat">
+            <summary><span class="info-icon">ℹ️</span>&nbsp;About this data &amp; caveats</summary>
+            <p class="disclaimer-text small">TRI data is <strong>self-reported</strong> annually by
+              facilities above certain size and chemical-use thresholds. It <strong>undercounts</strong> —
+              small emitters and non-covered industries aren't included. Releases being reported doesn't
+              necessarily mean they're illegal or unsafe; it means the facility disclosed them as
+              <span data-gloss="EPCRA">required by law</span>. Quantities are pounds released per year.
+              Source: EPA Toxics Release Inventory via Envirofacts.</p>
+          </details>
         </div>
       </div>
     </section>
@@ -92,105 +194,6 @@
       </div>
     </section>
 
-    <!-- Filters that refine the currently-selected coloring layer.
-         Each layer-specific panel carries data-layer-filters and is shown only
-         when its choropleth is the active one (see applyLayerFilterVisibility). -->
-    <section class="panel layer-filter-panel" data-layer-filters="pesticide">
-      <h2>Pesticide filters</h2>
-      <p class="muted small" style="margin:-2px 0 8px">Refine the <em>Pesticide application</em> coloring.</p>
-      <label class="field">
-        <span>Compound category</span>
-        <select id="filter-category">
-          <option value="all">All compounds</option>
-          <option value="herbicide">Herbicides</option>
-          <option value="insecticide">Insecticides</option>
-          <option value="fungicide">Fungicides</option>
-          <option value="growth_regulator">Growth regulators</option>
-          <option value="other">Other / fumigants</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Specific compound</span>
-        <select id="filter-compound">
-          <option value="">— none —</option>
-        </select>
-      </label>
-
-      <div class="featured-compounds" id="featured-compounds"></div>
-
-      <label class="field">
-        <span>Estimate <span class="info-i" data-tip="USGS reports pesticide use as a low–high range (the EPest estimate), because it's modeled from sales and crop data, not measured directly. Pick which end of the range to show.">?</span></span>
-        <div class="seg">
-          <button data-val="low" data-tip="Lower bound of the USGS estimate — the conservative figure.">Low</button>
-          <button data-val="avg" class="active" data-tip="Midpoint of the USGS low–high estimate range.">Average</button>
-          <button data-val="high" data-tip="Upper bound of the USGS estimate — the higher figure.">High</button>
-        </div>
-      </label>
-
-      <label class="field">
-        <span>Normalization <span class="info-i" data-tip="Total lbs shows the raw amount applied. Per square mile divides by county area. Per cropland acre divides by farmland actually harvested — the best measure of how intensively fields are treated.">?</span></span>
-        <div class="seg" id="seg-normalize">
-          <button data-val="total" class="active" data-tip="Raw pounds of pesticide applied in the county.">Total lbs</button>
-          <button data-val="per_sq_mile" data-tip="Pounds applied per square mile of the county — accounts for county size.">lbs / mi²</button>
-          <button data-val="per_acre" data-tip="Pounds applied per acre of harvested cropland (USDA NASS). The truest measure of application intensity — urban counties with little farmland are left uncolored.">lbs / acre</button>
-        </div>
-      </label>
-    </section>
-
-    <section class="panel layer-filter-panel" data-layer-filters="pesticide">
-      <h2>Year <span class="info-i" data-tip="Pesticide-use data is published one year at a time. Drag the slider to see a different year, or press ▶ to animate through all years.">?</span></h2>
-      <div class="year-row">
-        <span id="year-label" class="year-label" data-tip="The year of pesticide-use data currently shown on the map.">—</span>
-        <button id="play-btn" class="btn-ghost" title="Animate years" data-tip="Play an animation stepping through every available year.">▶</button>
-      </div>
-      <input id="year-slider" type="range" min="0" max="0" step="1" data-tip="Drag to change the year of pesticide data shown on the map." />
-      <div class="year-ends">
-        <span id="year-min">—</span>
-        <span id="year-max">—</span>
-      </div>
-    </section>
-
-    <section class="panel layer-filter-panel" data-layer-filters="resp">
-      <h2>Respiratory health</h2>
-      <p class="muted small">Choose <em>Respiratory health</em> above to color the map by this metric.</p>
-      <label class="field" style="margin-top:8px">
-        <span>Metric</span>
-        <select id="resp-metric">
-          <option value="combined">All Respiratory (combined)</option>
-          <option value="asthma_ed">Asthma — ED Visits</option>
-          <option value="asthma_hosp">Asthma — Hospitalizations</option>
-          <option value="copd_ed">COPD — ED Visits</option>
-          <option value="copd_hosp">COPD — Hospitalizations</option>
-          <option value="acute_bronchitis">Acute Bronchitis</option>
-          <option value="pneumonia_influenza">Pneumonia &amp; Influenza</option>
-          <option value="upper_respiratory">Upper Respiratory Infections</option>
-          <option value="all_respiratory_mort">All Respiratory Mortality</option>
-        </select>
-      </label>
-      <p class="resp-meta" id="resp-meta">—</p>
-    </section>
-
-    <section class="panel layer-filter-panel" data-layer-filters="cancer">
-      <div class="panel-head">
-        <h2>Cancer incidence</h2>
-        <button id="cancer-evidence-btn" class="info-btn" title="Pesticide–cancer evidence">ℹ️</button>
-      </div>
-      <p class="muted small">Choose <em>Cancer incidence</em> under Map layers to color the map by this type.</p>
-      <label class="field" style="margin-top:8px">
-        <span>Cancer type</span>
-        <select id="cancer-type"></select>
-      </label>
-      <label class="field" style="margin-top:8px">
-        <span>Measure</span>
-        <div class="seg" id="seg-cancer-dtype">
-          <button data-val="incidence" class="active">Incidence</button>
-          <button data-val="mortality">Mortality</button>
-        </div>
-      </label>
-      <p class="resp-meta" id="cancer-meta">—</p>
-    </section>
-
     <section class="panel">
       <h2>Legend <span class="info-i" data-tip="Explains the current map colors. Darker or more intense shading means a higher value; the labels show the value at each step.">?</span></h2>
       <div id="legend" data-tip="Each color band corresponds to a range of values. Counties are shaded by which band they fall into."></div>
@@ -211,34 +214,6 @@
       <p class="muted small" id="wq-stats">—</p>
     </section>
 
-    <section class="panel layer-filter-panel" data-layer-filters="contam_density">
-      <div class="panel-head">
-        <h2>Industrial contamination</h2>
-      </div>
-      <p class="muted small">Site markers &amp; impact zones are in the <em>Overlays</em> section above.
-        For county coloring, choose <em>Contamination site density</em>.</p>
-      <p class="muted small" id="contam-stats">—</p>
-    </section>
-
-    <section class="panel layer-filter-panel" data-layer-filters="tri">
-      <div class="panel-head">
-        <h2>Industrial releases (TRI) <span class="info-i" data-gloss="TRI">?</span></h2>
-      </div>
-      <p class="muted small">Active facilities' <em>self-reported</em> annual toxic releases —
-        what industry is putting into the air, water, and land <em>now</em> (vs the legacy
-        Superfund layer). Factory markers are in the <em>Overlays</em> section above; for county coloring,
-        choose <em>TRI toxic releases</em>.</p>
-      <p class="muted small" id="tri-stats">—</p>
-      <details class="collapsible tri-caveat">
-        <summary><span class="info-icon">ℹ️</span>&nbsp;About this data &amp; caveats</summary>
-        <p class="disclaimer-text small">TRI data is <strong>self-reported</strong> annually by
-          facilities above certain size and chemical-use thresholds. It <strong>undercounts</strong> —
-          small emitters and non-covered industries aren't included. Releases being reported doesn't
-          necessarily mean they're illegal or unsafe; it means the facility disclosed them as
-          <span data-gloss="EPCRA">required by law</span>. Quantities are pounds released per year.
-          Source: EPA Toxics Release Inventory via Envirofacts.</p>
-      </details>
-    </section>
   </aside>
 
   <div id="map"></div>

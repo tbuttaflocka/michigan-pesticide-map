@@ -2801,6 +2801,99 @@ def api_tri_chemical():
     })
 
 
+@app.route("/api/chemical")
+def api_chemical():
+    """General chemical-info lookup, reusable wherever a chemical/compound name
+    appears (water-site popups, TRI popups, county compound lists, trends).
+
+    Merges three honest sources: the curated hazard profile (tri_reference),
+    reported agricultural pesticide use, and reported industrial TRI releases.
+    Whatever isn't available is simply omitted — no health claims are invented.
+    ?name= (required), optional ?fips= to add county-level TRI detail."""
+    name = (request.args.get("name") or "").strip()
+    fips = (request.args.get("fips") or "").strip()
+    if not name:
+        return jsonify({"found": False, "name": name})
+    conn = db()
+
+    # --- pesticide side (agricultural use) -------------------------------- #
+    pc = conn.execute(
+        "SELECT category, toxicity_class FROM pesticide_categories "
+        "WHERE UPPER(compound) = UPPER(?)", (name,)).fetchone()
+    puse = conn.execute(
+        "SELECT year, SUM(epest_high_kg) kg FROM pesticide_use "
+        "WHERE UPPER(compound) = UPPER(?) GROUP BY year ORDER BY year", (name,)).fetchall()
+    is_pesticide = bool(pc) or bool(puse)
+    pest = None
+    if is_pesticide:
+        latest = puse[-1] if puse else None
+        pest = {
+            "category": pc["category"] if pc else None,
+            "toxicity_class": pc["toxicity_class"] if pc else None,
+            "latest_year": latest["year"] if latest else None,
+            "statewide_lbs": round((latest["kg"] or 0.0) * KG_TO_LB, 1) if latest else None,
+        }
+
+    # --- TRI side (industrial releases) ----------------------------------- #
+    tri_latest = _tri_latest_year(conn)
+    trow = conn.execute(
+        "SELECT MAX(cas) cas, MAX(is_pfas) pf, MAX(is_carcinogen) cc, SUM(total_lbs) t "
+        "FROM tri_release WHERE year = ? AND UPPER(chemical) = UPPER(?)",
+        (tri_latest, name)).fetchone() if tri_latest is not None else None
+    is_tri = bool(trow and (trow["t"] or 0) > 0)
+    cas = trow["cas"] if trow else None
+    carcinogen = bool(trow["cc"]) if trow else False
+    pfas = bool(trow["pf"]) if trow else False
+    tri = None
+    if is_tri:
+        tri = {"year": tri_latest, "statewide_lbs": round(trow["t"] or 0.0, 1)}
+        if fips:
+            cc = conn.execute(
+                "SELECT SUM(r.total_lbs) t, SUM(r.air_lbs) a, SUM(r.water_lbs) w, "
+                "       SUM(r.land_lbs) l, SUM(r.underground_lbs) u "
+                "  FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id "
+                " WHERE f.county_fips = ? AND r.year = ? AND UPPER(r.chemical) = UPPER(?)",
+                (fips, tri_latest, name)).fetchone()
+            nm = conn.execute("SELECT name FROM counties WHERE fips = ?", (fips,)).fetchone()
+            tri["county"] = nm["name"] if nm else None
+            tri["county_lbs"] = round((cc["t"] or 0.0) if cc else 0.0, 1)
+            tri["pathways"] = [
+                {"label": "Air", "lbs": round((cc["a"] or 0.0) if cc else 0.0, 1)},
+                {"label": "Water", "lbs": round((cc["w"] or 0.0) if cc else 0.0, 1)},
+                {"label": "Land", "lbs": round((cc["l"] or 0.0) if cc else 0.0, 1)},
+                {"label": "Underground", "lbs": round((cc["u"] or 0.0) if cc else 0.0, 1)},
+            ]
+            tri["facilities"] = [
+                {"name": r["facility_name"], "lbs": round(r["t"] or 0.0, 1)}
+                for r in conn.execute(
+                    "SELECT f.facility_name, SUM(r.total_lbs) t "
+                    "  FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id "
+                    " WHERE f.county_fips = ? AND r.year = ? AND UPPER(r.chemical) = UPPER(?) "
+                    " GROUP BY r.facility_id ORDER BY t DESC LIMIT 6",
+                    (fips, tri_latest, name))]
+    conn.close()
+
+    profile = tri_reference.chemical_profile(name, cas, carcinogen)
+    # A pesticide that isn't an industrial TRI chemical shouldn't inherit the
+    # TRI-flavored fallback blurb; drop it and show only what we truly have.
+    if not profile.get("sourced") and is_pesticide and not is_tri:
+        profile = {"what": None, "uses": None, "health": None,
+                   "carcinogen": None, "pathways": None, "sourced": False}
+
+    return jsonify({
+        "found": True,
+        "name": name.title(),
+        "cas": cas,
+        "carcinogen": carcinogen,
+        "pfas": pfas,
+        "is_pesticide": is_pesticide,
+        "pesticide": pest,
+        "is_tri": is_tri,
+        "tri": tri,
+        "profile": profile,
+    })
+
+
 @app.route("/api/tri/trend")
 def api_tri_trend():
     """Year-over-year TRI releases — statewide (no fips) or one county — broken
