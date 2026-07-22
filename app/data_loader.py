@@ -52,8 +52,9 @@ from .water_quality import (
     AQUATIC_LIFE_BENCHMARKS,
     NAWQA_MI_STREAMS,
     PESTICIDE_MCL,
+    benchmark_for,
     canonicalize_compound,
-    threshold_for,
+    mcl_for,
     to_ugl,
 )
 from .respiratory_data import (
@@ -1077,14 +1078,17 @@ def load_water_quality(conn: sqlite3.Connection, *,
                 (s["site_id"], s["name"], s["lat"], s["lon"], s["huc8"]),
             )
             for compound in s["pesticides_detected"]:
-                threshold, _ = threshold_for(compound)
+                # Presence-only records (SIR 2007-5077 reported detections, not
+                # concentrations) — no value to compare, so neither standard is
+                # flagged; we still record which limits apply for reference.
                 cur.execute(
                     """INSERT INTO water_quality_results(
                           site_id, sample_date, compound, result_value, unit,
-                          detected, exceeds_mcl, mcl_value, medium)
+                          detected, exceeds_mcl, mcl_value,
+                          exceeds_benchmark, benchmark_value, medium)
                        VALUES (?, '2002-2005', ?, NULL, 'unspecified',
-                               1, 0, ?, 'Water')""",
-                    (s["site_id"], compound, threshold),
+                               1, 0, ?, 0, ?, 'Water')""",
+                    (s["site_id"], compound, mcl_for(compound), benchmark_for(compound)),
                 )
         conn.commit()
 
@@ -1216,25 +1220,33 @@ def _ingest_wqp_results(conn: sqlite3.Connection, path: Path) -> int:
             detected = 0
             if result_value is not None and result_value > 0 and "non-detect" not in detect_flag:
                 detected = 1
-            # MCL exceedance — converting unit to µg/L when needed.
-            mcl, _ = threshold_for(compound)
-            exceeds = 0
-            ugl = None
-            if detected and result_value is not None and mcl is not None:
+            # Exceedances — compared in µg/L. The human drinking-water MCL and
+            # the ecological aquatic-life benchmark are SEPARATE standards; a
+            # sample can exceed either, both, or neither, so we flag them
+            # independently and never conflate them.
+            mcl = mcl_for(compound)
+            benchmark = benchmark_for(compound)
+            exceeds_mcl = 0
+            exceeds_benchmark = 0
+            if detected and result_value is not None:
                 ugl = _to_ugl(result_value, unit)
-                if ugl is not None and ugl > mcl:
-                    exceeds = 1
+                if ugl is not None:
+                    if mcl is not None and ugl > mcl:
+                        exceeds_mcl = 1
+                    if benchmark is not None and ugl > benchmark:
+                        exceeds_benchmark = 1
             batch.append((
                 site_id, sample_date, compound,
                 result_value, unit, detection_limit,
-                detected, exceeds, mcl, medium,
+                detected, exceeds_mcl, mcl, exceeds_benchmark, benchmark, medium,
             ))
             if len(batch) >= 5000:
                 cur.executemany(
                     """INSERT INTO water_quality_results(
                           site_id, sample_date, compound, result_value, unit,
-                          detection_limit, detected, exceeds_mcl, mcl_value, medium)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                          detection_limit, detected, exceeds_mcl, mcl_value,
+                          exceeds_benchmark, benchmark_value, medium)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     batch,
                 )
                 inserted += len(batch)
@@ -1243,8 +1255,9 @@ def _ingest_wqp_results(conn: sqlite3.Connection, path: Path) -> int:
         cur.executemany(
             """INSERT INTO water_quality_results(
                   site_id, sample_date, compound, result_value, unit,
-                  detection_limit, detected, exceeds_mcl, mcl_value, medium)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                  detection_limit, detected, exceeds_mcl, mcl_value,
+                  exceeds_benchmark, benchmark_value, medium)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             batch,
         )
         inserted += len(batch)

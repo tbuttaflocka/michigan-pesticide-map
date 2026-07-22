@@ -589,6 +589,15 @@
       ? '<div class="mk-title">Overlays on top</div>' + active.map((k) =>
           `<div class="mk"><span class="mk-dot" style="background:${k.c}"></span>${k.t}</div>`).join('')
       : '';
+    // Water-site severity key — makes the two DISTINCT standards explicit so
+    // the violet aquatic-life color is never read as a red drinking-water one.
+    if (state.water.showSites) {
+      html += '<div class="mk-title" style="margin-top:8px">Water sites</div>' +
+        `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.exceeds_mcl}"></span>exceeds drinking-water MCL (human)</div>` +
+        `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.exceeds_benchmark}"></span>exceeds aquatic-life benchmark (ecological)</div>` +
+        `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.detected}"></span>detected, within limits</div>` +
+        `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.tested_no_detect}"></span>tested, none detected</div>`;
+    }
     // Watershed color-scale legend (the layer is a choropleth by detections).
     if (state.water.showWatersheds) {
       html += '<div class="mk-title" style="margin-top:8px">Watersheds · pesticide detections</div>' +
@@ -719,11 +728,15 @@
   }
 
   // ---------- Water-quality overlay ----------
+  // Red is reserved for human drinking-water (MCL) violations. Aquatic-life
+  // benchmark exceedances get a distinct violet so an ecological exceedance is
+  // never mistaken for a drinking-water violation.
   const WQ_COLOR = {
-    exceeds_mcl:     '#f85149',
-    detected:        '#f0b429',
-    tested_no_detect:'#3fb950',
-    no_data:         '#6e7681',
+    exceeds_mcl:       '#f85149',   // above human drinking-water limit (MCL)
+    exceeds_benchmark: '#bc8cff',   // above aquatic-life benchmark (ecological)
+    detected:          '#f0b429',
+    tested_no_detect:  '#3fb950',
+    no_data:           '#6e7681',
   };
 
   function activeWaterCompound() {
@@ -759,13 +772,15 @@
     const compound = activeWaterCompound();
     const data = await api('/api/water/sites', compound ? { compound } : {});
     const grp = newWaterSiteLayer();
-    let detected = 0, exceeds = 0, tested = 0;
+    let detected = 0, exceeds = 0, benchmark = 0, tested = 0;
     for (const s of data.sites) {
       if (s.latitude == null || s.longitude == null) continue;
       if (compound && s.detections === 0) continue;   // filter-mode hides non-detect sites
+      const radius = s.exceedances > 0 ? 8
+        : (s.benchmark_exceedances > 0 ? 7 : (s.detections > 0 ? 6 : 4));
       const m = L.circleMarker([s.latitude, s.longitude], {
         pane: 'water',                 // render above the choropleth so clicks land
-        radius: s.exceedances > 0 ? 8 : (s.detections > 0 ? 6 : 4),
+        radius,
         color: '#0d1117', weight: 0.8,
         fillColor: WQ_COLOR[s.severity] || WQ_COLOR.no_data,
         fillOpacity: 0.92,
@@ -777,6 +792,7 @@
       m.on('popupopen', () => openWaterPopup(m, s));
       grp.addLayer(m);
       if (s.severity === 'exceeds_mcl') exceeds++;
+      else if (s.severity === 'exceeds_benchmark') benchmark++;
       else if (s.severity === 'detected') detected++;
       else if (s.severity === 'tested_no_detect') tested++;
     }
@@ -784,7 +800,8 @@
     state.water.sitesLayer = grp;
     const lbl = compound ? `${compound} only` : 'all pesticides';
     $('wq-stats').textContent =
-      `${exceeds} exceed MCL · ${detected} detected · ${tested} clean (${lbl})`;
+      `${exceeds} exceed drinking-water MCL · ${benchmark} exceed aquatic-life benchmark · `
+      + `${detected} detected · ${tested} clean (${lbl})`;
   }
 
   async function openWaterPopup(layer, site) {
@@ -801,17 +818,27 @@
         </div>
         <table>
           <tr><th></th>
-            <th class="right" data-tip="How many water samples were tested for this chemical.">Samples</th>
-            <th class="right" data-tip="How many of those samples actually contained the chemical (above the detection limit).">Detections</th>
-            <th class="right" data-tip="How many samples exceeded the EPA legal drinking-water limit (MCL).">Exc.</th></tr>
-          ${rows.map((r) => `
-            <tr class="${r.exceedances ? 'exceeds' : (r.detections ? 'detected' : '')}">
-              <td>${chemLink(r.compound, { site: site.site_id, fips: site.county_fips })}${r.mcl ? ` <span class="wq-meta" data-gloss="MCL">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
+            <th class="right" data-tip="How many water samples were tested for this chemical.">Samp.</th>
+            <th class="right" data-tip="How many of those samples actually contained the chemical (above the detection limit).">Det.</th>
+            <th class="right wq-mcl-h" data-tip="Samples above the EPA legal human drinking-water limit (MCL).">MCL&nbsp;✗</th>
+            <th class="right wq-bench-h" data-gloss="aquatic-life benchmark" data-tip="Samples above the USGS/EPA aquatic-life benchmark — a threshold for ecological harm to fish and aquatic insects, not a drinking-water limit.">Aq.&nbsp;life&nbsp;✗</th></tr>
+          ${rows.map((r) => {
+            const cls = r.exceedances ? 'exceeds' : (r.benchmark_exceedances ? 'exceeds-bench' : (r.detections ? 'detected' : ''));
+            const lim = [];
+            if (r.mcl) lim.push(`<span class="wq-meta" data-gloss="MCL">MCL ${r.mcl}</span>`);
+            if (r.benchmark) lim.push(`<span class="wq-meta wq-bench" data-gloss="aquatic-life benchmark">aq-life ${r.benchmark}</span>`);
+            return `
+            <tr class="${cls}">
+              <td>${chemLink(r.compound, { site: site.site_id, fips: site.county_fips })}${lim.length ? ` <span class="wq-lims">(${lim.join(' · ')} µg/L)</span>` : ''}</td>
               <td class="right">${r.samples}</td>
               <td class="right">${r.detections}</td>
-              <td class="right">${r.exceedances}</td>
-            </tr>`).join('')}
+              <td class="right wq-mcl-c">${r.exceedances || '·'}</td>
+              <td class="right wq-bench-c">${r.benchmark_exceedances || '·'}</td>
+            </tr>`;
+          }).join('')}
         </table>
+        <div class="wq-meta wq-legend"><span class="dot mcl"></span>MCL = human drinking-water limit ·
+          <span class="dot bench"></span>aquatic-life = ecological (fish/insects), often far lower</div>
         <div class="wq-meta" style="margin-top:6px">
           ${site.organization || ''} · source ${site.source}
         </div>
@@ -2011,15 +2038,25 @@
       const w = d.water;
       const where = w.site_name ? `at ${w.site_name}` : 'at this site';
       const county = w.county ? ` (${w.county} Co.)` : '';
+      // Show the applicable limits, each clearly named — the human MCL and the
+      // ecological aquatic-life benchmark are different standards.
+      const limBits = [];
+      if (w.mcl != null) limBits.push(`<span data-gloss="MCL">MCL ${w.mcl}</span>`);
+      if (w.benchmark != null) limBits.push(`<span data-gloss="aquatic-life benchmark">aquatic-life ${w.benchmark}</span>`);
       const maxLine = (w.detections && w.max_value != null)
-        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${w.mcl ? ` · limit ${w.mcl} µg/L` : ''}</span></div>`
+        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${limBits.length ? ` · limits ${limBits.join(' / ')} µg/L` : ''}</span></div>`
         : '';
+      const mclWarn = w.mcl_exceedances
+        ? `<div class="tci-carc">⚠ Exceeded the human <b>drinking-water limit (MCL)</b> in ${w.mcl_exceedances} sample${w.mcl_exceedances === 1 ? '' : 's'}</div>` : '';
+      const benchWarn = w.benchmark_exceedances
+        ? `<div class="tci-bench-warn">⚠ Exceeded the <b data-gloss="aquatic-life benchmark">aquatic-life benchmark</b> in ${w.benchmark_exceedances} sample${w.benchmark_exceedances === 1 ? '' : 's'} — potential ecological harm, not a drinking-water violation</div>` : '';
+      const benchNote = w.benchmark_exceedances
+        ? `<p class="muted small tci-bench-note">Aquatic-life benchmarks measure risk to fish, insects, and aquatic organisms. They are different from — and often much lower than — human drinking-water limits (MCLs). Exceeding one does not mean drinking water is unsafe, but indicates potential ecological harm. Source: ${w.benchmark_source || 'USGS/EPA aquatic-life benchmark'}.</p>` : '';
       waterBlock =
         '<div class="tci-sub2">Water monitoring</div>'
         + `<div class="tci-row"><span class="tci-k">${w.detections} of ${w.samples} samples</span>`
         + `<span class="tci-v">detected ${where}${county}</span></div>`
-        + (w.exceedances ? `<div class="tci-carc">⚠ Exceeded the EPA drinking-water limit (MCL) in ${w.exceedances} sample${w.exceedances === 1 ? '' : 's'}</div>` : '')
-        + maxLine;
+        + mclWarn + benchWarn + maxLine + benchNote;
     }
 
     // Real PubChem enrichment (cached): description, formula/weight, synonyms, CID.

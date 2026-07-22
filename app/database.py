@@ -162,8 +162,10 @@ CREATE TABLE IF NOT EXISTS water_quality_results (
     unit            TEXT,
     detection_limit REAL,
     detected        INTEGER DEFAULT 0,
-    exceeds_mcl     INTEGER DEFAULT 0,
-    mcl_value       REAL,
+    exceeds_mcl       INTEGER DEFAULT 0,   -- above human drinking-water MCL
+    mcl_value         REAL,                -- the MCL compared against (µg/L)
+    exceeds_benchmark INTEGER DEFAULT 0,   -- above aquatic-life benchmark (ecological)
+    benchmark_value   REAL,                -- the aquatic-life benchmark compared against (µg/L)
     medium          TEXT,
     FOREIGN KEY(site_id) REFERENCES water_quality_sites(site_id)
 );

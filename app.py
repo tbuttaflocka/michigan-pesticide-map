@@ -15,7 +15,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 
 from app import database
 from app import cancer_data
-from app.water_quality import to_ugl, threshold_for
+from app.water_quality import to_ugl, mcl_for, benchmark_for, AQUATIC_BENCHMARK_SOURCE
 from app import contamination_data
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
@@ -30,7 +30,6 @@ from app.respiratory_data import (
     URBAN_COUNTIES,
 )
 from app.stats import pearson, spearman, welch_t_test
-from app.water_quality import PESTICIDE_MCL, AQUATIC_LIFE_BENCHMARKS, threshold_for
 from app.wind_data import (
     DIRS_16,
     deg_to_dir16,
@@ -1274,11 +1273,18 @@ def api_correlation_respiratory_rankings():
 
 # ---------- Water quality endpoints ----------
 
-def _site_severity(detected: int, exceeds: int, total: int) -> str:
+def _site_severity(detected: int, exceeds_mcl: int, total: int,
+                   exceeds_benchmark: int = 0) -> str:
+    """Worst-case severity for a site's marker. A drinking-water MCL violation
+    (human-health) outranks an aquatic-life-benchmark exceedance (ecological),
+    which outranks a plain detection — so the two standards stay visually
+    distinct and an ecological exceedance never looks like a health violation."""
     if total == 0:
         return "no_data"
-    if exceeds > 0:
+    if exceeds_mcl > 0:
         return "exceeds_mcl"
+    if exceeds_benchmark > 0:
+        return "exceeds_benchmark"
     if detected > 0:
         return "detected"
     return "tested_no_detect"
@@ -1317,6 +1323,7 @@ def api_water_sites():
                COUNT(r.id) AS samples,
                SUM(CASE WHEN r.detected = 1 THEN 1 ELSE 0 END) AS detections,
                SUM(CASE WHEN r.exceeds_mcl = 1 THEN 1 ELSE 0 END) AS exceedances,
+               SUM(CASE WHEN r.exceeds_benchmark = 1 THEN 1 ELSE 0 END) AS benchmark_exceedances,
                COUNT(DISTINCT CASE WHEN r.detected = 1 THEN r.compound END) AS compounds
           FROM water_quality_sites s
      LEFT JOIN water_quality_results r ON r.site_id = s.site_id {med_clause}
@@ -1326,7 +1333,8 @@ def api_water_sites():
 
     out = []
     for r in rows:
-        sev = _site_severity(r["detections"] or 0, r["exceedances"] or 0, r["samples"] or 0)
+        sev = _site_severity(r["detections"] or 0, r["exceedances"] or 0,
+                             r["samples"] or 0, r["benchmark_exceedances"] or 0)
         out.append({
             "site_id": r["site_id"], "site_name": r["site_name"],
             "site_type": r["site_type"],
@@ -1335,7 +1343,9 @@ def api_water_sites():
             "huc8": r["huc8"], "organization": r["organization"],
             "source": r["source"],
             "samples": r["samples"], "detections": r["detections"],
-            "exceedances": r["exceedances"], "compounds": r["compounds"],
+            "exceedances": r["exceedances"],
+            "benchmark_exceedances": r["benchmark_exceedances"],
+            "compounds": r["compounds"],
             "severity": sev,
         })
     conn.close()
@@ -1358,13 +1368,15 @@ def api_water_site_detail(site_id: str):
         SELECT compound, MAX(sample_date) AS latest_date, COUNT(*) AS samples,
                SUM(CASE WHEN detected = 1 THEN 1 ELSE 0 END) AS detections,
                SUM(CASE WHEN exceeds_mcl = 1 THEN 1 ELSE 0 END) AS exceedances,
+               SUM(CASE WHEN exceeds_benchmark = 1 THEN 1 ELSE 0 END) AS benchmark_exceedances,
                MAX(CASE WHEN detected = 1 THEN result_value END) AS max_value,
                MAX(unit) AS unit,
-               MAX(mcl_value) AS mcl
+               MAX(mcl_value) AS mcl,
+               MAX(benchmark_value) AS benchmark
           FROM water_quality_results
          WHERE site_id = ?
          GROUP BY compound
-         ORDER BY exceedances DESC, detections DESC, samples DESC
+         ORDER BY exceedances DESC, benchmark_exceedances DESC, detections DESC, samples DESC
     """, (site_id,)).fetchall()
     conn.close()
     return jsonify({
@@ -2913,7 +2925,7 @@ def api_chemical():
     water = None
     if site:
         rows = conn.execute(
-            "SELECT result_value, unit, detected, exceeds_mcl "
+            "SELECT result_value, unit, detected, exceeds_mcl, exceeds_benchmark "
             "  FROM water_quality_results "
             " WHERE site_id = ? AND UPPER(compound) = UPPER(?)",
             (site, name)).fetchall()
@@ -2922,7 +2934,7 @@ def api_chemical():
             # mixed units (ng/L, µg/L, …), so a bare MAX(result_value) is
             # meaningless and can pair a value with another row's unit. Convert
             # each detection to µg/L and take the max, so it's comparable to the
-            # MCL shown beside it.
+            # limits shown beside it.
             max_ugl = None
             for r in rows:
                 if r["detected"] and r["result_value"] is not None:
@@ -2932,17 +2944,20 @@ def api_chemical():
             srow = conn.execute(
                 "SELECT site_name, county FROM water_quality_sites WHERE site_id = ?",
                 (site,)).fetchone()
-            mcl, _ = threshold_for(name)
             water = {
                 "scope": "site",
                 "site_name": srow["site_name"] if srow else site,
                 "county": srow["county"] if srow else None,
                 "samples": len(rows),
                 "detections": sum(1 for r in rows if r["detected"]),
-                "exceedances": sum(1 for r in rows if r["exceeds_mcl"]),
+                # Two SEPARATE standards, reported independently and never merged.
+                "mcl_exceedances": sum(1 for r in rows if r["exceeds_mcl"]),
+                "benchmark_exceedances": sum(1 for r in rows if r["exceeds_benchmark"]),
                 "max_value": round(max_ugl, 4) if max_ugl is not None else None,
                 "unit": "µg/L" if max_ugl is not None else None,
-                "mcl": mcl,
+                "mcl": mcl_for(name),
+                "benchmark": benchmark_for(name),
+                "benchmark_source": AQUATIC_BENCHMARK_SOURCE,
             }
     conn.close()
 

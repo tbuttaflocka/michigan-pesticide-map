@@ -38,8 +38,15 @@ PESTICIDE_MCL = {
     "TOXAPHENE":         3.0,
 }
 
-# USGS aquatic-life benchmarks (chronic invertebrate / fish, µg/L).
-# Cited values are the lower of the two for the common ag-pesticides.
+# USGS/EPA aquatic-life benchmarks (µg/L) — thresholds for ECOLOGICAL harm to
+# aquatic organisms, NOT human drinking-water limits. These are the EPA Office
+# of Pesticide Programs freshwater benchmarks that USGS publishes/uses in its
+# pesticide monitoring. For insecticides the freshwater-invertebrate CHRONIC
+# benchmark is the sensitive endpoint and is what we store here; for the older
+# ag-pesticides the value is the lower of the chronic invertebrate/fish
+# benchmarks. Exceeding one of these indicates potential ecological harm — it
+# does NOT mean drinking water is unsafe (see PESTICIDE_MCL for that).
+AQUATIC_BENCHMARK_SOURCE = "USGS/EPA aquatic-life benchmark (freshwater invertebrate, chronic)"
 AQUATIC_LIFE_BENCHMARKS = {
     "ATRAZINE":      1.0,
     "METOLACHLOR":   1.0,
@@ -52,7 +59,16 @@ AQUATIC_LIFE_BENCHMARKS = {
     "ACETOCHLOR":    1.7,
     "MALATHION":     0.035,
     "PERMETHRIN":    0.0014,
-    "IMIDACLOPRID":  0.385,
+    # Neonicotinoids + fipronil — EPA OPP freshwater-invertebrate chronic
+    # benchmarks (µg/L), reflecting EPA's post-2017 updates. Aquatic
+    # invertebrates are the sensitive taxon for these insecticides.
+    "IMIDACLOPRID":  0.01,      # EPA lowered from the pre-2017 0.385 value
+    "CLOTHIANIDIN":  0.05,
+    "THIAMETHOXAM":  0.74,
+    "ACETAMIPRID":   2.1,
+    "THIACLOPRID":   0.97,
+    "DINOTEFURAN":   95300.0,   # inverts are relatively insensitive to dinotefuran
+    "FIPRONIL":      0.011,
 }
 
 
@@ -91,16 +107,33 @@ def to_ugl(value: float | None, unit: str) -> float | None:
     return value * mult if mult is not None else None
 
 
-def threshold_for(compound: str) -> tuple[float | None, str]:
-    """Return (threshold µg/L, source label) for a compound name.
-    MCL takes precedence; aquatic-life benchmark is the fallback."""
+def mcl_for(compound: str) -> float | None:
+    """Human drinking-water MCL (µg/L) for a compound, or None. Regulatory
+    limit for human consumption — distinct from the aquatic-life benchmark."""
     if not compound:
-        return None, ""
-    key = compound.strip().upper()
-    if key in PESTICIDE_MCL:
-        return PESTICIDE_MCL[key], "EPA MCL"
-    if key in AQUATIC_LIFE_BENCHMARKS:
-        return AQUATIC_LIFE_BENCHMARKS[key], "USGS aquatic-life benchmark"
+        return None
+    return PESTICIDE_MCL.get(compound.strip().upper())
+
+
+def benchmark_for(compound: str) -> float | None:
+    """Aquatic-life benchmark (µg/L) for a compound, or None. Ecological
+    threshold (harm to aquatic organisms) — distinct from the human MCL."""
+    if not compound:
+        return None
+    return AQUATIC_LIFE_BENCHMARKS.get(compound.strip().upper())
+
+
+def threshold_for(compound: str) -> tuple[float | None, str]:
+    """Deprecated: returns the stricter of MCL / aquatic-life benchmark and a
+    source label. Retained only for callers that want a single "is this above
+    any threshold" number; new code should call mcl_for()/benchmark_for()
+    separately so the two standards are never conflated."""
+    mcl = mcl_for(compound)
+    bench = benchmark_for(compound)
+    if mcl is not None and (bench is None or mcl <= bench):
+        return mcl, "EPA MCL"
+    if bench is not None:
+        return bench, "USGS aquatic-life benchmark"
     return None, ""
 
 

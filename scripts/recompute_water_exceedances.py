@@ -1,20 +1,19 @@
-"""Recompute the water_quality_results.exceeds_mcl flag from stored values.
+"""Recompute the water_quality_results exceedance flags from stored values.
 
-The MCL-exceedance flag is set at ingest time by comparing each sample's
-concentration (normalised to µg/L) against the compound's drinking-water MCL
-(or aquatic-life benchmark). When the unit-conversion table (`_to_ugl`) misses
-a real volumetric unit — e.g. ``ppt``, ``pg/L``, or fused labels like
-``ugAtrazn/L`` — those samples are silently left unflagged, under-reporting
-genuine exceedances.
+Two SEPARATE standards are tracked, never conflated:
+  * exceeds_mcl       — sample above a human drinking-water MCL (EPA)
+  * exceeds_benchmark — sample above an aquatic-life benchmark (ecological harm
+                        to fish/insects/aquatic organisms; USGS/EPA OPP)
 
-This script re-derives the flag for every detected row directly from the
-already-stored ``result_value`` + ``unit`` + ``compound``, using the current
-(fixed) loader logic. It needs no network access and does not re-download the
-226 MB WQP export — it just corrects the flag in place.
+A sample can exceed either, both, or neither. Both flags are derived here
+directly from the already-stored ``result_value`` + ``unit`` + ``compound``
+(normalised to µg/L), using the current reference tables — no network access
+and no re-download of the 226 MB WQP export. Also adds the exceeds_benchmark /
+benchmark_value columns to an existing database if they are missing.
 
 Run from the project root:
-    py scripts/recompute_water_exceedances.py          # apply + report
-    py scripts/recompute_water_exceedances.py --dry-run # report only, no write
+    py scripts/recompute_water_exceedances.py            # migrate + apply + report
+    py scripts/recompute_water_exceedances.py --dry-run  # report only, no write
 """
 from __future__ import annotations
 
@@ -26,55 +25,70 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import DB_PATH
-from app.water_quality import threshold_for, to_ugl
+from app.water_quality import benchmark_for, mcl_for, to_ugl
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(water_quality_results)")}
+    if "exceeds_benchmark" not in cols:
+        conn.execute("ALTER TABLE water_quality_results "
+                     "ADD COLUMN exceeds_benchmark INTEGER DEFAULT 0")
+    if "benchmark_value" not in cols:
+        conn.execute("ALTER TABLE water_quality_results "
+                     "ADD COLUMN benchmark_value REAL")
+    conn.commit()
 
 
 def recompute(dry_run: bool = False) -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    if not dry_run:
+        _ensure_columns(conn)
 
-    before = conn.execute(
-        "SELECT COUNT(*) FROM water_quality_results WHERE exceeds_mcl = 1"
-    ).fetchone()[0]
+    def _count(col: str) -> int:
+        try:
+            return conn.execute(
+                f"SELECT COUNT(*) FROM water_quality_results WHERE {col} = 1"
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
 
-    updates: list[tuple[int, int]] = []   # (new_flag, rowid)
-    newly_flagged: list[sqlite3.Row] = []
-    newly_cleared: list[sqlite3.Row] = []
+    mcl_before = _count("exceeds_mcl")
+    bench_before = _count("exceeds_benchmark")
+
+    updates: list[tuple] = []          # (exceeds_mcl, mcl_value, exceeds_benchmark, benchmark_value, id)
+    mcl_after = bench_after = 0
+    bench_by_compound: dict[str, int] = {}
 
     for r in conn.execute(
-        "SELECT rowid, compound, result_value, unit, detected, exceeds_mcl "
+        "SELECT id, compound, result_value, unit, detected, exceeds_mcl "
         "  FROM water_quality_results"
     ):
-        new_flag = 0
+        e_mcl = e_bench = 0
+        # Re-derive BOTH stored thresholds from the reference tables. mcl_value
+        # was previously written as a blended MCL-or-benchmark fallback, so it
+        # held benchmark numbers for compounds with no MCL (e.g. imidacloprid,
+        # metolachlor) — correct it to the true MCL (None when there is none).
+        mcl = mcl_for(r["compound"])
+        bench = benchmark_for(r["compound"])
         if r["detected"] and r["result_value"] is not None:
-            mcl, _ = threshold_for(r["compound"])
-            if mcl is not None:
-                ugl = to_ugl(r["result_value"], r["unit"])
-                if ugl is not None and ugl > mcl:
-                    new_flag = 1
-        if new_flag != r["exceeds_mcl"]:
-            updates.append((new_flag, r["rowid"]))
-            (newly_flagged if new_flag else newly_cleared).append(r)
+            ugl = to_ugl(r["result_value"], r["unit"])
+            if ugl is not None:
+                if mcl is not None and ugl > mcl:
+                    e_mcl = 1
+                if bench is not None and ugl > bench:
+                    e_bench = 1
+        mcl_after += e_mcl
+        bench_after += e_bench
+        if e_bench:
+            bench_by_compound[r["compound"]] = bench_by_compound.get(r["compound"], 0) + 1
+        updates.append((e_mcl, mcl, e_bench, bench, r["id"]))
 
-    after = before + len(newly_flagged) - len(newly_cleared)
-    print(f"exceeds_mcl = 1  before: {before}")
-    print(f"exceeds_mcl = 1  after:  {after}")
-    print(f"  newly flagged (were missed):   {len(newly_flagged)}")
-    print(f"  newly cleared (were wrong):    {len(newly_cleared)}")
-
-    def _summ(rows: list[sqlite3.Row]) -> None:
-        by_unit: dict[str, int] = {}
-        for r in rows:
-            by_unit[r["unit"]] = by_unit.get(r["unit"], 0) + 1
-        for u, n in sorted(by_unit.items(), key=lambda x: -x[1]):
-            print(f"      {u!r:16} {n}")
-
-    if newly_flagged:
-        print("  newly-flagged by unit:")
-        _summ(newly_flagged)
-    if newly_cleared:
-        print("  newly-cleared by unit:")
-        _summ(newly_cleared)
+    print(f"MCL exceedances        before: {mcl_before:5}   after: {mcl_after}")
+    print(f"aquatic-benchmark exc. before: {bench_before:5}   after: {bench_after}")
+    print("\naquatic-life-benchmark exceedances by compound:")
+    for c, n in sorted(bench_by_compound.items(), key=lambda x: -x[1]):
+        print(f"    {c:24} {n}")
 
     if dry_run:
         print("\n[dry-run] no changes written.")
@@ -82,11 +96,14 @@ def recompute(dry_run: bool = False) -> None:
         return
 
     conn.executemany(
-        "UPDATE water_quality_results SET exceeds_mcl = ? WHERE rowid = ?", updates
+        "UPDATE water_quality_results "
+        "   SET exceeds_mcl = ?, mcl_value = ?, exceeds_benchmark = ?, benchmark_value = ? "
+        " WHERE id = ?",
+        updates,
     )
     conn.commit()
     conn.close()
-    print(f"\nWrote {len(updates)} corrected flags.")
+    print(f"\nWrote flags for {len(updates)} rows.")
 
 
 if __name__ == "__main__":

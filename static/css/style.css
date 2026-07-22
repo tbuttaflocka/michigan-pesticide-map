@@ -1004,7 +1004,30 @@ a:hover { text-decoration: underline; }
 .wq-popup td { padding: 2px 4px; border-bottom: 1px dashed var(--line); }
 .wq-popup td.right { text-align: right; font-variant-numeric: tabular-nums; }
 .wq-popup tr.exceeds td { color: #ff7a72; font-weight: 600; }
+.wq-popup tr.exceeds-bench td { color: #c9a6ff; font-weight: 600; }
 .wq-popup tr.detected td { color: var(--accent-2); }
+/* MCL column stays red-tinted; aquatic-life column violet — kept visually
+   distinct so an ecological exceedance never reads as a drinking-water one. */
+.wq-popup th.wq-mcl-h, .wq-popup td.wq-mcl-c { color: #ff7a72; }
+.wq-popup th.wq-bench-h, .wq-popup td.wq-bench-c { color: #c9a6ff; }
+.wq-popup .wq-lims { color: var(--muted); font-weight: 400; }
+.wq-popup .wq-lims .wq-bench { color: #c9a6ff; }
+.wq-popup .wq-legend { margin-top: 6px; line-height: 1.5; }
+.wq-popup .wq-legend .dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin: 0 3px 0 2px; vertical-align: middle;
+}
+.wq-popup .wq-legend .dot.mcl { background: #f85149; }
+.wq-popup .wq-legend .dot.bench { background: #bc8cff; }
+/* Aquatic-life benchmark warning + explainer in the chemical popup: violet,
+   distinct from the red carcinogen/MCL warning (.tci-carc). */
+.tci-bench-warn {
+  color: #c9a6ff;
+  background: rgba(188,140,255,.10);
+  border-left: 2px solid #bc8cff;
+  padding: 5px 8px; margin: 6px 0; border-radius: 4px; font-size: 12px;
+}
+.tci-bench-note { margin-top: 4px; }
 .wq-pill {
   display: inline-block;
   font-size: 10.5px;

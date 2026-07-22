@@ -23,7 +23,13 @@
       'and proprietary sales data — not a direct measurement. Reported as a low–high range.',
     'MCL':
       'Maximum Contaminant Level — the legal limit for a chemical in public drinking ' +
-      'water, set by the EPA. A result above the MCL exceeds the safety threshold.',
+      'water, set by the EPA to protect HUMAN health. A result above the MCL exceeds the ' +
+      'drinking-water safety threshold. This is different from an aquatic-life benchmark.',
+    'aquatic-life benchmark':
+      'A threshold for ECOLOGICAL harm — the concentration above which a chemical may hurt ' +
+      'fish, insects, and other aquatic organisms. Published by USGS/EPA and often MUCH ' +
+      'lower than the human drinking-water limit (MCL). Exceeding an aquatic-life benchmark ' +
+      'does NOT mean drinking water is unsafe, but it signals potential harm to aquatic life.',
     'HRS score':
       'Hazard Ranking System score (0–100). EPA scores contaminated sites on the risk ' +
       'they pose; a site scoring 28.5 or higher can be added to the Superfund list.',
