@@ -806,7 +806,7 @@
             <th class="right" data-tip="How many samples exceeded the EPA legal drinking-water limit (MCL).">Exc.</th></tr>
           ${rows.map((r) => `
             <tr class="${r.exceedances ? 'exceeds' : (r.detections ? 'detected' : '')}">
-              <td>${chemLink(r.compound)}${r.mcl ? ` <span class="wq-meta" data-gloss="MCL">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
+              <td>${chemLink(r.compound, { site: site.site_id, fips: site.county_fips })}${r.mcl ? ` <span class="wq-meta" data-gloss="MCL">(MCL ${r.mcl} µg/L)</span>` : ''}</td>
               <td class="right">${r.samples}</td>
               <td class="right">${r.detections}</td>
               <td class="right">${r.exceedances}</td>
@@ -1748,7 +1748,7 @@
     const path = (label, v) => v > 0
       ? `<div class="row"><span class="k">${label}</span> <b>${fmtLbs(v)}</b></div>` : '';
     const chem = (f.top_chemicals || []).slice(0, 5).map((c) =>
-      `<div class="tri-chem"><span class="cn">${chemLink(c.chemical)}`
+      `<div class="tri-chem"><span class="cn">${chemLink(c.chemical, { fips: f.county_fips })}`
       + `${c.pfas ? ' <span class="tri-flag pfas" data-gloss="PFAS">PFAS</span>' : ''}`
       + `${c.carcinogen ? ' <span class="tri-flag carc">carc.</span>' : ''}</span>`
       + `<span class="cv">${fmtLbs(c.lbs)}</span></div>`).join('');
@@ -1935,8 +1935,9 @@
     opts = opts || {};
     if (!name) return '';
     const fips = opts.fips ? ` data-chem-fips="${opts.fips}"` : '';
+    const site = opts.site ? ` data-chem-site="${encodeURIComponent(opts.site)}"` : '';
     const label = opts.label != null ? opts.label : name;
-    return `<span class="chem-link" role="button" tabindex="0" data-chem="${encodeURIComponent(name)}"${fips}`
+    return `<span class="chem-link" role="button" tabindex="0" data-chem="${encodeURIComponent(name)}"${fips}${site}`
       + ` title="What is ${name}? — tap for details">${label}</span>`;
   }
 
@@ -1951,7 +1952,7 @@
     body.innerHTML = '<p class="muted">Loading…</p>';
     show(modal);
     let d;
-    try { d = await api('/api/chemical', { name, fips: opts.fips || '' }); }
+    try { d = await api('/api/chemical', { name, fips: opts.fips || '', site: opts.site || '' }); }
     catch (e) { body.innerHTML = '<p class="muted">Could not load chemical info.</p>'; return; }
     if (!d || !d.found) { body.innerHTML = `<p class="muted">No information available for ${name}.</p>`; return; }
     body.innerHTML = chemInfoHtml(d);
@@ -1970,12 +1971,20 @@
     if (d.is_pesticide && d.pesticide) {
       const pe = d.pesticide;
       const cat = pe.category ? pe.category.replace(/_/g, ' ') : null;
+      // When opened from a county context, lead with that county's applied
+      // amount and keep the statewide figure beside it for scale.
+      const pStats = [];
+      if (pe.county != null && pe.county_lbs != null) {
+        pStats.push(`<div><strong>${fmtLbs(pe.county_lbs)}</strong><span>applied in ${pe.county} Co. (${pe.latest_year})</span></div>`);
+      }
+      if (pe.statewide_lbs != null) {
+        pStats.push(`<div><strong>${fmtLbs(pe.statewide_lbs)}</strong><span>applied statewide (${pe.latest_year})</span></div>`);
+      }
       pestBlock =
         '<div class="tci-sub2">Agricultural pesticide use</div>'
         + (cat ? `<div class="tci-row"><span class="tci-k">Pesticide type</span><span class="tci-v">${cat}</span></div>` : '')
         + (pe.toxicity_class ? `<div class="tci-row"><span class="tci-k">Toxicity class</span><span class="tci-v">${pe.toxicity_class}</span></div>` : '')
-        + (pe.statewide_lbs != null
-            ? `<div class="tci-stats"><div><strong>${fmtLbs(pe.statewide_lbs)}</strong><span>applied statewide (${pe.latest_year})</span></div></div>` : '');
+        + (pStats.length ? `<div class="tci-stats">${pStats.join('')}</div>` : '');
     }
 
     // Reported industrial TRI releases, when this chemical is one.
@@ -1996,6 +2005,23 @@
         + (facs ? `<div class="tci-sub2">Facilities releasing it${t.county ? ' in ' + t.county + ' County' : ''}</div><div class="tci-facs">${facs}</div>` : '');
     }
 
+    // Water monitoring detections at the specific site the popup was opened from.
+    let waterBlock = '';
+    if (d.water && d.water.samples) {
+      const w = d.water;
+      const where = w.site_name ? `at ${w.site_name}` : 'at this site';
+      const county = w.county ? ` (${w.county} Co.)` : '';
+      const maxLine = (w.detections && w.max_value != null)
+        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${w.mcl ? ` · MCL ${w.mcl}` : ''}</span></div>`
+        : '';
+      waterBlock =
+        '<div class="tci-sub2">Water monitoring</div>'
+        + `<div class="tci-row"><span class="tci-k">${w.detections} of ${w.samples} samples</span>`
+        + `<span class="tci-v">detected ${where}${county}</span></div>`
+        + (w.exceedances ? `<div class="tci-carc">⚠ Exceeded the EPA drinking-water limit (MCL) in ${w.exceedances} sample${w.exceedances === 1 ? '' : 's'}</div>` : '')
+        + maxLine;
+    }
+
     // Real PubChem enrichment (cached): description, formula/weight, synonyms, CID.
     const pc = d.pubchem || null;
     const subtitle = flags || (d.is_pesticide ? 'agricultural pesticide' : '');
@@ -2012,6 +2038,7 @@
     const pubLink = pc
       ? `<a href="${pc.url}" target="_blank" rel="noopener">Full profile on PubChem — CID ${pc.cid} ↗</a>` : '';
     const srcBits = ['Hazard classes: EPA / IARC', 'Pesticide use: USGS', 'Industrial releases: EPA TRI'];
+    if (d.water) srcBits.push('Water monitoring: Water Quality Portal (USGS/EPA)');
     if (pc) srcBits.unshift('Description &amp; properties: PubChem (NCBI)'
       + (pc.description_source ? ` via ${pc.description_source}` : ''));
     const noInfo = !descText && !p.uses && !p.health && !p.carcinogen && !(pc && pc.molecular_formula);
@@ -2029,6 +2056,7 @@
       ${line('Typical pathways', p.pathways)}
       ${pestBlock}
       ${triBlock}
+      ${waterBlock}
       ${pubLink ? `<div class="tci-pubchem">${pubLink}</div>` : ''}
       ${noInfo ? '<p class="muted small tci-nolookup">We couldn\'t find a public description for this chemical — the figures above are from the data we actually have (EPA / IARC / USGS). See PubChem for more.</p>' : ''}
       <div class="tri-note">${srcBits.join(' · ')}.</div>
@@ -3379,8 +3407,10 @@
       if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault();
       e.stopPropagation();
-      openChemInfo(decodeURIComponent(link.dataset.chem || ''),
-        { fips: link.dataset.chemFips || '' });
+      openChemInfo(decodeURIComponent(link.dataset.chem || ''), {
+        fips: link.dataset.chemFips || '',
+        site: link.dataset.chemSite ? decodeURIComponent(link.dataset.chemSite) : '',
+      });
     };
     document.addEventListener('click', activate, true);
     document.addEventListener('keydown', activate, true);

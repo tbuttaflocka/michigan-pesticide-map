@@ -2812,6 +2812,7 @@ def api_chemical():
     ?name= (required), optional ?fips= to add county-level TRI detail."""
     name = (request.args.get("name") or "").strip()
     fips = (request.args.get("fips") or "").strip()
+    site = (request.args.get("site") or "").strip()
     if not name:
         return jsonify({"found": False, "name": name})
     conn = db()
@@ -2855,6 +2856,17 @@ def api_chemical():
             "latest_year": latest["year"] if latest else None,
             "statewide_lbs": round((latest["kg"] or 0.0) * KG_TO_LB, 1) if latest else None,
         }
+        # County-specific applied amount, same (latest) year as the statewide
+        # figure so the two are directly comparable in the popup.
+        if fips and latest:
+            crow = conn.execute(
+                "SELECT SUM(epest_high_kg) kg FROM pesticide_use "
+                "WHERE UPPER(compound) = UPPER(?) AND county_fips = ? AND year = ?",
+                (name, fips, latest["year"])).fetchone()
+            cnm = conn.execute(
+                "SELECT name FROM counties WHERE fips = ?", (fips,)).fetchone()
+            pest["county"] = cnm["name"] if cnm else None
+            pest["county_lbs"] = round((crow["kg"] or 0.0) * KG_TO_LB, 1) if crow else 0.0
 
     # --- TRI side (industrial releases) ----------------------------------- #
     tri_latest = _tri_latest_year(conn)
@@ -2893,6 +2905,36 @@ def api_chemical():
                     " WHERE f.county_fips = ? AND r.year = ? AND UPPER(r.chemical) = UPPER(?) "
                     " GROUP BY r.facility_id ORDER BY t DESC LIMIT 6",
                     (fips, tri_latest, name))]
+
+    # --- water side (monitoring detections) ------------------------------- #
+    # When the popup is opened from a water monitoring site, surface how often
+    # this compound was found there (and county), for site/county context.
+    water = None
+    if site:
+        wr = conn.execute(
+            "SELECT COUNT(*) n, "
+            "       SUM(CASE WHEN detected = 1 THEN 1 ELSE 0 END) dets, "
+            "       SUM(CASE WHEN exceeds_mcl = 1 THEN 1 ELSE 0 END) exc, "
+            "       MAX(CASE WHEN detected = 1 THEN result_value END) maxv, "
+            "       MAX(unit) unit, MAX(mcl_value) mcl "
+            "  FROM water_quality_results "
+            " WHERE site_id = ? AND UPPER(compound) = UPPER(?)",
+            (site, name)).fetchone()
+        if wr and (wr["n"] or 0) > 0:
+            srow = conn.execute(
+                "SELECT site_name, county FROM water_quality_sites WHERE site_id = ?",
+                (site,)).fetchone()
+            water = {
+                "scope": "site",
+                "site_name": srow["site_name"] if srow else site,
+                "county": srow["county"] if srow else None,
+                "samples": wr["n"] or 0,
+                "detections": wr["dets"] or 0,
+                "exceedances": wr["exc"] or 0,
+                "max_value": round(wr["maxv"], 4) if wr["maxv"] is not None else None,
+                "unit": wr["unit"],
+                "mcl": wr["mcl"],
+            }
     conn.close()
 
     profile = tri_reference.chemical_profile(name, cas, carcinogen)
@@ -2917,6 +2959,7 @@ def api_chemical():
         "pesticide": pest,
         "is_tri": is_tri,
         "tri": tri,
+        "water": water,
         "pubchem": pubchem,
         "profile": profile,
     })
