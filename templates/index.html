@@ -187,6 +187,11 @@
         </div>
         <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
         <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
+        <label class="overlay-toggle" data-tip="A directory of Michigan's known organized spraying programs (county spongy-moth suppression, mosquito abatement, and the state's EEE/West Nile aerial response). Each links to its official page for current schedules — not a live spray-date feed."><input type="checkbox" id="spraying-programs" /> <span>Spraying programs (directory)</span></label>
+        <details class="collapsible spraying-caveat">
+          <summary><span class="info-icon">ℹ️</span>&nbsp;About the spraying-programs directory</summary>
+          <p class="disclaimer-text small">This is a directory of <strong>known, organized</strong> spraying programs in Michigan and links to their official pages for current schedules. It is <strong>not a complete list of all spraying</strong> — private agricultural spraying and many local treatments are not included, and it does not publish specific spray dates. For the most current spray dates and notices in your area, contact your county or the official program page linked in each marker.</p>
+        </details>
         <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
         <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
         <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>

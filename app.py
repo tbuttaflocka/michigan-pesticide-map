@@ -17,6 +17,7 @@ from app import database
 from app import cancer_data
 from app.water_quality import to_ugl, mcl_for, benchmark_for, AQUATIC_BENCHMARK_SOURCE
 from app import contamination_data
+from app import spraying_programs
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
@@ -3124,6 +3125,15 @@ def api_contamination_sites():
                      for k, v in contamination_data.STATUS_COLORS.items()],
         "sites": sites,
     })
+
+
+@app.route("/api/spraying/programs")
+def api_spraying_programs():
+    """Curated directory of Michigan's organized pest-control spraying programs
+    (spongy moth, mosquito abatement, state arbovirus response). A directory of
+    who-runs-what with links to official schedules — not a live spray-date feed.
+    Static reference data; no DB access."""
+    return jsonify(spraying_programs.programs_payload())
 
 
 @app.route("/api/contamination/county/<fips>")

@@ -1501,6 +1501,43 @@ a:hover { text-decoration: underline; }
 }
 .contam-popup .cp-record .k { color: var(--muted); font-weight: 600; }
 
+/* ---------- Spraying Programs directory ---------- */
+.spraying-divicon { background: transparent; border: 0; }
+.spraying-marker {
+  border-radius: 50% 50% 50% 0;      /* teardrop — reads as a "spray drop" pin */
+  transform: rotate(-45deg);
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 7px rgba(0,0,0,.65);
+  font-size: 13px; line-height: 1;
+}
+.spraying-marker span { transform: rotate(45deg); filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+
+.spraying-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.spraying-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.spraying-popup { max-width: 320px; font-size: 12.5px; }
+.spraying-popup .sp-type {
+  display: inline-block; color: #0d1117; font-weight: 700; font-size: 10.5px;
+  padding: 1px 8px; border-radius: 10px; margin-bottom: 6px;
+}
+.spraying-popup h4 { margin: 2px 0 4px; font-size: 14px; color: var(--text); }
+.spraying-popup .sp-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
+.spraying-popup .sp-desc { margin: 7px 0; line-height: 1.5; max-height: 150px; overflow-y: auto; }
+.spraying-popup .row { margin: 3px 0; line-height: 1.45; }
+.spraying-popup .row .k { color: var(--muted); }
+.spraying-popup .sp-official {
+  display: block; margin: 9px 0 4px; padding: 6px 8px;
+  background: rgba(88,166,255,.14); border: 1px solid rgba(88,166,255,.4);
+  border-radius: 5px; color: #79c0ff; font-weight: 600; text-align: center;
+}
+.spraying-popup .sp-official:hover { background: rgba(88,166,255,.24); }
+.spraying-popup .sp-source {
+  margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 11px; font-style: italic; color: var(--muted);
+}
+
 /* ---------- EPA Toxics Release Inventory (TRI) ---------- */
 .lr-dot.tri { background: #2f8783; }
 

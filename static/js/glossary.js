@@ -25,6 +25,28 @@
       'Maximum Contaminant Level — the legal limit for a chemical in public drinking ' +
       'water, set by the EPA to protect HUMAN health. A result above the MCL exceeds the ' +
       'drinking-water safety threshold. This is different from an aquatic-life benchmark.',
+    'spongy moth':
+      'An invasive leaf-eating moth (Lymantria dispar, formerly called the "gypsy moth"). ' +
+      'Its caterpillars can strip the leaves off oak and other hardwood trees in spring. ' +
+      'Michigan counties and cities run suppression programs — often aerial Btk spraying — ' +
+      'to knock back outbreaks.',
+    'Btk':
+      'Bacillus thuringiensis kurstaki — a naturally-occurring soil bacterium sprayed as a ' +
+      'biological insecticide. It kills caterpillars (like spongy moth) that eat treated ' +
+      'leaves but is considered low-risk to people, pets, birds, fish, and most other ' +
+      'insects, so it is the usual choice for spongy-moth suppression.',
+    'adulticide':
+      'A pesticide that kills adult (flying) mosquitoes, as opposed to a larvicide that ' +
+      'kills larvae in water. Mosquito-control programs often apply adulticides as an ' +
+      'ultra-low-volume (ULV) fog of fine droplets, sometimes from aircraft.',
+    'arbovirus':
+      'A virus spread by biting insects — "ARthropod-BOrne virus." For Michigan mosquitoes ' +
+      'the ones of concern are West Nile virus and Eastern Equine Encephalitis (EEE). In ' +
+      'high-risk years the state may run aerial mosquito spraying in response.',
+    'abatement district':
+      'A local government body funded (usually by a county millage) to control a nuisance — ' +
+      'here, a mosquito-abatement district that surveys mosquito populations and treats ' +
+      'larvae and adult mosquitoes across the county.',
     'aquatic-life benchmark':
       'A threshold for ECOLOGICAL harm — the concentration above which a chemical may hurt ' +
       'fish, insects, and other aquatic organisms. Published by USGS/EPA and often MUCH ' +

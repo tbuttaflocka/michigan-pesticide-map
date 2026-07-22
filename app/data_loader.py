@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterable
 
 from . import database
+from . import spraying_programs
 from . import stats
 from .categories import categorize
 from .config import (
@@ -571,6 +572,26 @@ def record_reference_sources(conn: sqlite3.Connection) -> None:
         "skipped", 0,
         "Hub contains licensing/inspection layers behind dynamic ArcGIS REST endpoints. "
         "Linked for users who want to drill in.",
+    )
+    # --- Spraying Programs directory (curated, links out to official pages) --- #
+    record_source(
+        conn, "spraying_programs",
+        "Michigan Spraying Programs (directory)",
+        "https://www.michigan.gov/invasives/id-report/insects/spongy-moth",
+        "reference", len(spraying_programs.SPRAYING_PROGRAMS),
+        "Curated directory of organized, publicly-documented Michigan spraying "
+        "programs (county spongy-moth suppression, county mosquito abatement, and "
+        "MDHHS arbovirus response). Each entry links to its official page for "
+        "current schedules; not a live spray-date feed and not a complete list of "
+        "all spraying.",
+    )
+    record_source(
+        conn, "mdhhs_arbovirus",
+        "MDHHS Arbovirus (EEE / West Nile) Response",
+        "https://www.michigan.gov/emergingdiseases/home/eastern-equine-encephalitis",
+        "reference", 0,
+        "State outbreak-year aerial ULV mosquito treatment response. Current-year "
+        "info at Michigan.gov/EEE. Linked in the Spraying Programs layer.",
     )
 
 

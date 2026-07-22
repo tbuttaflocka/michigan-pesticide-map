@@ -80,6 +80,13 @@
       density: null,               // L.geoJSON
       densityByFips: new Map(),
     },
+    spraying: {
+      loaded: false,
+      programs: [],                // from /api/spraying/programs
+      types: [],                   // type legend (key/glyph/color/label)
+      showMarkers: false,
+      markers: null,               // L.markerClusterGroup / layerGroup
+    },
     tri: {
       loaded: false,
       facilities: [],              // /api/tri/sites facilities
@@ -572,6 +579,7 @@
     { on: () => state.water.showWatersheds,  c: '#8db0ff', t: 'HUC-8 watersheds' },
     { on: () => state.contam.showSites,      c: '#f85149', t: 'Contamination sites' },
     { on: () => state.contam.showZones,      c: '#e8873c', t: 'Contamination impact zones' },
+    { on: () => state.spraying.showMarkers,  c: '#5dbb63', t: 'Spraying programs (directory)' },
     { on: () => state.tri.showSites,         c: '#d9772f', t: 'TRI facilities (size/red = more released)' },
     { on: () => state.wind.showRoses,        c: '#3fb950', t: 'Wind roses (Apr–Sep)' },
     { on: () => state.wind.showDrift,        c: '#e8873c', t: 'Drift arrows (downwind)' },
@@ -597,6 +605,13 @@
         `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.exceeds_benchmark}"></span>exceeds aquatic-life benchmark (ecological)</div>` +
         `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.detected}"></span>detected, within limits</div>` +
         `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.tested_no_detect}"></span>tested, none detected</div>`;
+    }
+    // Spraying-programs type key — the markers are colored by program type.
+    if (state.spraying.showMarkers && state.spraying.types.length) {
+      html += '<div class="mk-title" style="margin-top:8px">Spraying programs · by type</div>' +
+        state.spraying.types.map((t) =>
+          `<div class="mk"><span class="mk-dot" style="background:${t.color}"></span>${t.glyph} ${t.label}</div>`
+        ).join('');
     }
     // Watershed color-scale legend (the layer is a choropleth by detections).
     if (state.water.showWatersheds) {
@@ -1678,6 +1693,80 @@
     el.textContent = `${vis.length} sites shown · ${npl} active Superfund · click a marker for detail`;
   }
 
+  // ---------- Spraying Programs directory overlay ----------
+  // A curated directory of Michigan's organized spraying programs (spongy moth,
+  // mosquito abatement, state arbovirus response). Each marker links out to the
+  // official page for current schedules — this is NOT a live spray-date feed.
+  function sprayingPane() {
+    if (!state.map.getPane('spraying')) {
+      state.map.createPane('spraying').style.zIndex = 655;  // above contam markers
+    }
+    return 'spraying';
+  }
+
+  function newSprayingClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      return L.markerClusterGroup({
+        clusterPane: 'spraying', maxClusterRadius: 44, chunkedLoading: true,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: true,
+      });
+    }
+    return L.layerGroup();   // graceful fallback if the cluster plugin didn't load
+  }
+
+  async function loadSprayingPrograms() {
+    if (state.spraying.loaded) return;
+    const d = await api('/api/spraying/programs');
+    state.spraying.programs = d.programs || [];
+    state.spraying.types = d.types || [];
+    state.spraying.loaded = true;
+  }
+
+  function renderSprayingMarkers() {
+    if (state.spraying.markers) { state.spraying.markers.remove(); state.spraying.markers = null; }
+    if (!state.spraying.showMarkers) { renderMarkerKeys(); return; }
+    const pane = sprayingPane();
+    const grp = newSprayingClusterLayer();
+    for (const p of state.spraying.programs) {
+      if (p.lat == null || p.lon == null) continue;
+      const size = 30;
+      const m = L.marker([p.lat, p.lon], {
+        pane,
+        icon: L.divIcon({
+          className: 'spraying-divicon',
+          html: `<div class="spraying-marker" style="width:${size}px;height:${size}px;background:${p.color}"><span>${p.glyph}</span></div>`,
+          iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+        }),
+      });
+      m.bindPopup(sprayingPopupHtml(p), { maxWidth: 340, className: 'spraying-popup-wrap' });
+      grp.addLayer(m);
+    }
+    grp.addTo(state.map);
+    state.spraying.markers = grp;
+    renderMarkerKeys();
+  }
+
+  function sprayingPopupHtml(p) {
+    const row = (k, v) => v ? `<div class="row"><span class="k">${k}</span> ${v}</div>` : '';
+    // Chemical names are clickable → the shared PubChem chemical-info popup, so a
+    // resident can learn what e.g. permethrin or Btk actually is.
+    const chems = (p.pesticides || []).length
+      ? (p.pesticides).map((c) => chemLink(c)).join(', ')
+      : '<span class="muted">not specified — see official page</span>';
+    return `<div class="spraying-popup">
+      <div class="sp-type" style="background:${p.color}">${p.glyph} ${p.type_label}</div>
+      <h4>${p.name}</h4>
+      <div class="sp-meta">${p.area}</div>
+      ${p.description ? `<p class="sp-desc">${p.description}</p>` : ''}
+      ${row('Administered by:', p.administrator)}
+      ${row('Pesticide(s) typically used:', chems)}
+      ${row('Typical season:', p.season)}
+      <a class="sp-official" href="${p.url}" target="_blank" rel="noopener">View official program page &amp; current schedule →</a>
+      <div class="sp-source">Source: ${p.source}. Directory entry — confirm current dates on the official page.</div>
+    </div>`;
+  }
+
   function renderCountyContamination(c) {
     const el = $('county-contam-list');
     const count = $('county-contam-count');
@@ -2416,6 +2505,16 @@
       if (e.target.checked) await loadContamination();
       renderContamZones(); renderMarkerKeys();
     });
+
+    // Spraying-programs directory (independent overlay).
+    const sprayToggle = $('spraying-programs');
+    if (sprayToggle) {
+      sprayToggle.addEventListener('change', async (e) => {
+        state.spraying.showMarkers = e.target.checked;
+        if (e.target.checked) await loadSprayingPrograms();
+        renderSprayingMarkers();
+      });
+    }
 
     // TRI industrial-facility markers (independent overlay).
     $('tri-sites').addEventListener('change', async (e) => {
