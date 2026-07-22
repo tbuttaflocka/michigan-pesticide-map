@@ -11,6 +11,8 @@
   reported during the 2002–2005 sampling window.
 """
 
+import re
+
 # Federal EPA drinking-water MCLs in micrograms per litre. None means
 # "not regulated as MCL — use aquatic benchmark instead". Compounds in
 # uppercase because WQP characteristic names mix case; we match
@@ -52,6 +54,41 @@ AQUATIC_LIFE_BENCHMARKS = {
     "PERMETHRIN":    0.0014,
     "IMIDACLOPRID":  0.385,
 }
+
+
+# Multipliers from a per-litre concentration unit to micrograms-per-litre (µg/L).
+_PER_LITRE_UGL = {
+    "mg/l": 1000.0, "ug/l": 1.0, "ng/l": 0.001, "pg/l": 1e-6,
+    "milligrams per liter": 1000.0, "ppm": 1000.0,
+    "micrograms per liter": 1.0, "ppb": 1.0,
+    "nanograms per liter": 0.001, "ppt": 0.001,   # ppt = parts-per-trillion ≈ ng/L
+    "picograms per liter": 1e-6,
+}
+# "<prefix>g<analyte-junk>/l" — some feeds fuse the analyte into the unit label,
+# e.g. "ugAtrazn/L". We reduce it to its "<prefix>g/l" core.
+_FUSED_UNIT_RE = re.compile(r"^([munp])g[a-z0-9,\-]*/l$")
+
+
+def to_ugl(value: float | None, unit: str) -> float | None:
+    """Convert a per-litre water concentration to micrograms-per-litre (µg/L).
+
+    Returns None for units that are NOT volumetric water concentrations —
+    mass-per-mass ratios (ng/g, ug/kg → sediment/tissue) and physical readings
+    (psi, %, cfs) — because those cannot be compared against a µg/L drinking-
+    water MCL. Case- and label-tolerant: handles "ng/L" vs "ng/l", "µg/l",
+    spelled-out names, ppb/ppm/ppt, and fused labels like "ugAtrazn/L".
+    """
+    if value is None:
+        return None
+    u = (unit or "").strip().lower().replace("µ", "u")
+    if not u:
+        return None
+    u = u.split()[0]                       # drop trailing analyte label ("ug/l 2,4-d")
+    m = _FUSED_UNIT_RE.match(u)
+    if m:
+        u = m.group(1) + "g/l"
+    mult = _PER_LITRE_UGL.get(u)
+    return value * mult if mult is not None else None
 
 
 def threshold_for(compound: str) -> tuple[float | None, str]:

@@ -10,6 +10,7 @@ import csv
 import io
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -53,6 +54,7 @@ from .water_quality import (
     PESTICIDE_MCL,
     canonicalize_compound,
     threshold_for,
+    to_ugl,
 )
 from .respiratory_data import (
     MI_BROADER_RESP_BASELINE,
@@ -1250,16 +1252,8 @@ def _ingest_wqp_results(conn: sqlite3.Connection, path: Path) -> int:
     return inserted
 
 
-def _to_ugl(value: float, unit: str) -> float | None:
-    """Convert a result-measure value to micrograms-per-litre."""
-    u = (unit or "").strip().lower()
-    if u in ("ug/l", "µg/l", "micrograms per liter", "ppb"):
-        return value
-    if u in ("mg/l", "milligrams per liter", "ppm"):
-        return value * 1000.0
-    if u in ("ng/l", "nanograms per liter"):
-        return value / 1000.0
-    return None
+# Unit→µg/L normalisation lives with the MCL reference data (water_quality).
+_to_ugl = to_ugl
 
 
 def load_watersheds(conn: sqlite3.Connection) -> int:

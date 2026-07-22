@@ -15,6 +15,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 
 from app import database
 from app import cancer_data
+from app.water_quality import to_ugl, threshold_for
 from app import contamination_data
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
@@ -2911,29 +2912,37 @@ def api_chemical():
     # this compound was found there (and county), for site/county context.
     water = None
     if site:
-        wr = conn.execute(
-            "SELECT COUNT(*) n, "
-            "       SUM(CASE WHEN detected = 1 THEN 1 ELSE 0 END) dets, "
-            "       SUM(CASE WHEN exceeds_mcl = 1 THEN 1 ELSE 0 END) exc, "
-            "       MAX(CASE WHEN detected = 1 THEN result_value END) maxv, "
-            "       MAX(unit) unit, MAX(mcl_value) mcl "
+        rows = conn.execute(
+            "SELECT result_value, unit, detected, exceeds_mcl "
             "  FROM water_quality_results "
             " WHERE site_id = ? AND UPPER(compound) = UPPER(?)",
-            (site, name)).fetchone()
-        if wr and (wr["n"] or 0) > 0:
+            (site, name)).fetchall()
+        if rows:
+            # Highest detection normalised to µg/L — raw result values arrive in
+            # mixed units (ng/L, µg/L, …), so a bare MAX(result_value) is
+            # meaningless and can pair a value with another row's unit. Convert
+            # each detection to µg/L and take the max, so it's comparable to the
+            # MCL shown beside it.
+            max_ugl = None
+            for r in rows:
+                if r["detected"] and r["result_value"] is not None:
+                    ugl = to_ugl(r["result_value"], r["unit"])
+                    if ugl is not None and (max_ugl is None or ugl > max_ugl):
+                        max_ugl = ugl
             srow = conn.execute(
                 "SELECT site_name, county FROM water_quality_sites WHERE site_id = ?",
                 (site,)).fetchone()
+            mcl, _ = threshold_for(name)
             water = {
                 "scope": "site",
                 "site_name": srow["site_name"] if srow else site,
                 "county": srow["county"] if srow else None,
-                "samples": wr["n"] or 0,
-                "detections": wr["dets"] or 0,
-                "exceedances": wr["exc"] or 0,
-                "max_value": round(wr["maxv"], 4) if wr["maxv"] is not None else None,
-                "unit": wr["unit"],
-                "mcl": wr["mcl"],
+                "samples": len(rows),
+                "detections": sum(1 for r in rows if r["detected"]),
+                "exceedances": sum(1 for r in rows if r["exceeds_mcl"]),
+                "max_value": round(max_ugl, 4) if max_ugl is not None else None,
+                "unit": "µg/L" if max_ugl is not None else None,
+                "mcl": mcl,
             }
     conn.close()
 

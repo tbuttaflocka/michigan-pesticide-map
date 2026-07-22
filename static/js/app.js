@@ -2012,7 +2012,7 @@
       const where = w.site_name ? `at ${w.site_name}` : 'at this site';
       const county = w.county ? ` (${w.county} Co.)` : '';
       const maxLine = (w.detections && w.max_value != null)
-        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${w.mcl ? ` · MCL ${w.mcl}` : ''}</span></div>`
+        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${w.mcl ? ` · limit ${w.mcl} µg/L` : ''}</span></div>`
         : '';
       waterBlock =
         '<div class="tci-sub2">Water monitoring</div>'
