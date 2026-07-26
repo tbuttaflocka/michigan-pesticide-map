@@ -1680,6 +1680,68 @@ a:hover { text-decoration: underline; }
 }
 .landfill-popup .lf-foia-btn:hover { background: rgba(240,180,41,.26); }
 
+/* ---------- Golf courses (OpenStreetMap) ---------- */
+.golf-divicon { background: transparent; border: 0; }
+.golf-marker {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #fff; box-shadow: 0 2px 7px rgba(0,0,0,.6);
+  font-size: 12px; line-height: 1;
+}
+.golf-marker span { filter: drop-shadow(0 1px 1px rgba(0,0,0,.55)); }
+
+.golf-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.golf-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.golf-popup { max-width: 340px; font-size: 12.5px; }
+.golf-popup .golf-type {
+  display: inline-block; color: #06210f; font-weight: 700; font-size: 10.5px;
+  padding: 1px 8px; border-radius: 10px; margin-bottom: 6px;
+}
+.golf-popup .golf-operator { font-weight: 700; color: var(--accent-2); font-size: 11.5px; }
+.golf-popup h4 { margin: 2px 0 4px; font-size: 14px; color: var(--text); }
+.golf-popup .golf-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 4px; }
+.golf-popup .golf-sec {
+  margin: 8px 0; padding-top: 7px; border-top: 1px dashed var(--line);
+}
+.golf-popup .golf-h {
+  font-weight: 700; font-size: 12px; color: var(--text); margin-bottom: 3px;
+}
+.golf-popup .golf-note { margin: 0 0 6px; line-height: 1.4; }
+.golf-popup .golf-chem-cat { margin: 5px 0; }
+.golf-popup .golf-chem-cat .cc {
+  font-weight: 700; font-size: 11.5px; color: var(--accent-2);
+}
+.golf-popup .golf-chem-note { margin: 1px 0 2px; line-height: 1.35; }
+.golf-popup .golf-chem-list { line-height: 1.7; }
+.golf-popup .golf-intensity p { margin: 3px 0; line-height: 1.45; }
+.golf-popup .golf-cite { color: var(--muted); }
+.golf-popup .golf-cite a, .golf-popup .golf-links a { color: var(--accent-2); }
+.golf-popup .golf-disclose p { margin: 3px 0; line-height: 1.45; }
+.golf-popup .golf-disclose.muni {
+  background: rgba(63,185,80,.10); border: 1px solid rgba(63,185,80,.30);
+  border-radius: 8px; padding: 7px 9px; border-top: 1px solid rgba(63,185,80,.30);
+}
+.golf-popup .golf-guide {
+  background: rgba(63,185,80,.14); border-radius: 6px; padding: 5px 7px;
+  font-size: 11.8px;
+}
+.golf-popup .golf-xref { margin: 6px 0; line-height: 1.45; font-size: 11.8px; }
+.golf-popup .golf-xref .k { color: var(--muted); font-weight: 700; }
+.golf-popup .golf-xref.water {
+  background: rgba(56,142,201,.10); border: 1px solid rgba(56,142,201,.26);
+  border-radius: 7px; padding: 5px 8px;
+}
+.golf-popup .golf-links { margin: 6px 0 2px; font-size: 12px; }
+.golf-popup .golf-src {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.3px; font-style: italic; color: var(--muted); line-height: 1.4;
+}
+.legend-markers .mk.mk-sub {
+  color: var(--muted); font-size: 10px; margin-top: 2px; line-height: 1.35;
+}
+
 .foia-card {
   max-width: 640px; width: min(640px, 96vw); text-align: left;
   max-height: 92dvh; overflow-y: auto;

@@ -111,6 +111,15 @@
       densityByFips: new Map(),
       _densityMax: 1,
     },
+    golf: {
+      loaded: false,
+      sites: [],                   // from /api/golf/sites
+      legend: null,                // ownership legend + sourced turf context
+      showSites: false,
+      filters: { municipal: true, private: true, unknown: true },
+      markers: null,               // L.markerClusterGroup / layerGroup (centroid pins)
+      polys: null,                 // L.layerGroup of course footprint polygons
+    },
     wind: {
       showRoses: false,
       showDrift: false,
@@ -643,6 +652,15 @@
         state.landfill.legend.categories.map((t) =>
           `<div class="mk"><span class="mk-dot" style="background:${t.color}"></span>${t.glyph} ${t.label}</div>`
         ).join('');
+    }
+    // Golf-course ownership key — pins/footprints are colored by ownership,
+    // which is what determines records access (public = FOIA-able).
+    if (state.golf.showSites && state.golf.legend) {
+      html += '<div class="mk-title" style="margin-top:8px">Golf courses · ownership</div>' +
+        state.golf.legend.ownership.map((o) =>
+          `<div class="mk"><span class="mk-dot" style="background:${o.color}"></span>${o.glyph} ${o.label}</div>`
+        ).join('') +
+        '<div class="mk mk-sub">Footprint = land under turf management · locations only, no pesticide amounts</div>';
     }
     // Spraying-programs type key — the markers are colored by program type.
     if (state.spraying.showMarkers && state.spraying.types.length) {
@@ -1883,6 +1901,190 @@
     }).join('');
   }
 
+  // ---------- Golf courses overlay (OpenStreetMap) ----------
+  // Golf courses are a pesticide-intensive turf land use that the USGS EPest
+  // agricultural layer excludes entirely. This overlay maps WHERE that use
+  // happens; it NEVER shows or estimates per-course pesticide amounts, because
+  // Michigan publishes none (the popup's disclosure section explains why). The
+  // footprint polygon shows the land area under turf management; the popup
+  // carries the sourced turf-chemical list, the cited intensity comparison, and
+  // the records-access gap. See app/golf_data.py + app/golf_content.py.
+  function golfPane() {
+    if (!state.map.getPane('golf')) {
+      state.map.createPane('golf').style.zIndex = 646;   // ~ landfill markers
+    }
+    return 'golf';
+  }
+  function golfPolyPane() {
+    if (!state.map.getPane('golfpoly')) {
+      // Above the county choropleth/overlay panes, below the marker pins.
+      state.map.createPane('golfpoly').style.zIndex = 415;
+    }
+    return 'golfpoly';
+  }
+  function newGolfClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      return L.markerClusterGroup({
+        clusterPane: 'golf', maxClusterRadius: 48, chunkedLoading: true,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: true,
+      });
+    }
+    return L.layerGroup();   // graceful fallback if the cluster plugin didn't load
+  }
+  async function loadGolf() {
+    if (state.golf.loaded) return;
+    const d = await api('/api/golf/sites');
+    state.golf.sites = d.sites || [];
+    state.golf.legend = d.legend || null;
+    state.golf._shared = null;   // rebuilt from the fresh legend on first popup
+    state.golf.loaded = true;
+  }
+  function golfVisible(s) { return state.golf.filters[s.ownership_class] !== false; }
+  function golfStyle(s) {
+    const c = s.color || '#8b98a5';
+    return { color: c, weight: 1.4, opacity: 0.9, fillColor: c,
+             fillOpacity: 0.22, pane: golfPolyPane() };
+  }
+
+  function renderGolfCourses() {
+    if (state.golf.markers) { state.golf.markers.remove(); state.golf.markers = null; }
+    if (state.golf.polys) { state.golf.polys.remove(); state.golf.polys = null; }
+    if (!state.golf.showSites) { updateGolfStats(); renderMarkerKeys(); return; }
+    const pane = golfPane();
+    const grp = newGolfClusterLayer();
+    const polys = L.layerGroup();
+    for (const s of state.golf.sites) {
+      if (s.lat == null || s.lng == null || !golfVisible(s)) continue;
+      const html = golfPopupHtml(s);
+      // Footprint polygon (the whole point — it shows the land area under turf
+      // management). Clicking it opens the same popup as the pin.
+      if (s.geometry) {
+        const gj = L.geoJSON(s.geometry, { style: () => golfStyle(s) });
+        gj.bindPopup(html, { maxWidth: 340, className: 'golf-popup-wrap' });
+        polys.addLayer(gj);
+      }
+      // Centroid pin — discoverable and clusterable at every zoom (fallback when
+      // a course has no polygon, and a click target when the footprint is tiny).
+      const m = L.marker([s.lat, s.lng], {
+        pane,
+        icon: L.divIcon({
+          className: 'golf-divicon',
+          html: `<div class="golf-marker" style="background:${s.color}"><span>${s.glyph}</span></div>`,
+          iconSize: [24, 24], iconAnchor: [12, 12],
+        }),
+      });
+      m.bindPopup(html, { maxWidth: 340, className: 'golf-popup-wrap' });
+      grp.addLayer(m);
+    }
+    polys.addTo(state.map);
+    grp.addTo(state.map);
+    state.golf.polys = polys;
+    state.golf.markers = grp;
+    updateGolfStats();
+    renderMarkerKeys();
+  }
+
+  function updateGolfStats() {
+    const el = $('golf-stats');
+    if (!el) return;
+    if (!state.golf.loaded) { el.textContent = '—'; return; }
+    const vis = state.golf.sites.filter(golfVisible);
+    const muni = vis.filter((s) => s.ownership_class === 'municipal').length;
+    el.textContent = `${vis.length} golf courses · ${muni} public/municipal · `
+      + 'locations only — Michigan publishes no per-course pesticide amounts';
+  }
+
+  // The turf-chemical list + intensity comparison are identical for every course
+  // (they're general turf-management facts, not course records), so build that
+  // fragment once and reuse it in every popup.
+  function golfChem(n) {
+    // Show the full label; query PubChem on the clean name (drop parentheticals
+    // like "Mecoprop (MCPP)" -> "Mecoprop", "PCNB (quintozene)" -> "PCNB").
+    return chemLink(String(n).split(' (')[0].trim(), { label: n });
+  }
+  function golfSharedHtml() {
+    if (state.golf._shared) return state.golf._shared;
+    const lg = state.golf.legend || {};
+    const chem = lg.turf_chemicals || [];
+    const intensity = lg.intensity || {};
+    const chemBlocks = chem.map((cat) =>
+      `<div class="golf-chem-cat"><span class="cc">${cat.category}</span>`
+      + `<div class="golf-chem-note muted small">${cat.note || ''}</div>`
+      + `<div class="golf-chem-list">${(cat.chemicals || []).map(golfChem).join(', ')}</div>`
+      + `</div>`).join('');
+    const iSrc = intensity.source_url
+      ? `<a href="${intensity.source_url}" target="_blank" rel="noopener">${intensity.source || 'source'}</a>`
+      : (intensity.source || '');
+    state.golf._shared =
+      `<div class="golf-sec">
+         <div class="golf-h">What's typically applied to golf-course turf</div>
+         <p class="golf-note muted small">Chemicals commonly used in turfgrass management
+           <strong>generally</strong> — <strong>not</strong> a record of what this course
+           applies (no such record is public in Michigan). Tap any chemical for details.</p>
+         ${chemBlocks}
+       </div>
+       <div class="golf-sec golf-intensity">
+         <div class="golf-h">How intensive is golf-turf pesticide use?</div>
+         <p>${intensity.headline || ''}</p>
+         <p class="muted small">${intensity.basis_note || ''} ${intensity.regional_note || ''}</p>
+         <p class="golf-cite small">Source: ${iSrc}</p>
+       </div>`;
+    return state.golf._shared;
+  }
+
+  function golfPopupHtml(s) {
+    const lg = state.golf.legend || {};
+    const disc = lg.disclosure || {};
+    const loc = [s.city, s.county ? s.county + ' Co.' : ''].filter(Boolean).join(', ');
+    const acres = s.acres ? `${Math.round(s.acres).toLocaleString()} acres` : '';
+    const meta = [s.ownership_legend, loc, acres].filter(Boolean).join(' · ');
+    const isMuni = s.ownership_class === 'municipal';
+
+    // Disclosure gap — the substantive content. Municipal guidance is made
+    // prominent for publicly-owned courses (records ARE obtainable there).
+    let discHtml = `<div class="golf-sec golf-disclose${isMuni ? ' muni' : ''}">
+      <div class="golf-h">Can you find out what this course applies?</div>
+      <p>${disc.michigan || ''}</p>
+      <p>${disc.private_vs_public || ''}</p>`;
+    if (isMuni) {
+      discHtml += `<p class="golf-guide"><strong>This is a publicly-owned course.</strong> ${disc.municipal_guidance || ''}</p>`;
+    }
+    discHtml += `<p class="muted small">${disc.industry || ''}</p>`
+      + `<p class="muted small">${disc.could_exist || ''}</p></div>`;
+
+    // Cross-references — context only, never causal.
+    const agRank = s.county_ag_rank
+      ? `${s.county} County ranks #${s.county_ag_rank} of 83 for reported <em>agricultural</em> pesticide use${s.high_ag_use ? ' (top quartile)' : ''}. `
+      : '';
+    let xref = `<div class="golf-xref"><span class="k">County context:</span> ${agRank}`
+      + `The app's agricultural pesticide layer (USGS EPest) <strong>excludes</strong> golf `
+      + `courses, so this land use is <strong>not</strong> counted in county pesticide totals.</div>`;
+    if (s.water_site_id) {
+      const comps = (s.water_compounds || []).map(golfChem).join(', ');
+      xref += `<div class="golf-xref water"><span class="k">Nearby water monitoring (${s.water_site_km} km):</span> `
+        + `${comps} detected at ${s.water_site_name}. This is <strong>nearby monitoring, not `
+        + `attributable</strong> to this course — these turf-associated compounds also have `
+        + `agricultural, lawn, and other sources.</div>`;
+    }
+    const site = s.website
+      ? `<a href="${s.website}" target="_blank" rel="noopener">Course website →</a>` : '';
+
+    return `<div class="golf-popup">
+      <div class="golf-type" style="background:${s.color}">${s.glyph} ${s.ownership_legend}</div>
+      ${s.operator ? `<div class="golf-operator">${s.operator}</div>` : ''}
+      <h4>${s.name}</h4>
+      ${meta ? `<div class="golf-meta">${meta}</div>` : ''}
+      ${golfSharedHtml()}
+      ${discHtml}
+      <div class="golf-sec">${xref}</div>
+      ${site ? `<div class="golf-links">${site}</div>` : ''}
+      <div class="golf-src">Locations: OpenStreetMap (© OpenStreetMap contributors, ODbL)
+        via Overpass — crowd-sourced, so coverage may be incomplete or out of date. No
+        pesticide-use amounts are shown because Michigan publishes none for golf courses.</div>
+    </div>`;
+  }
+
   // "Request monitoring records (FOIA)" button inside a landfill popup: build a
   // facility-specific, type-adapted request and open the reusable FOIA modal.
   document.addEventListener('click', (e) => {
@@ -2786,6 +2988,24 @@
         renderLandfillMarkers();
       });
     });
+
+    // Golf courses (independent overlay) + ownership filters.
+    const golfToggle = $('golf-sites');
+    if (golfToggle) {
+      golfToggle.addEventListener('change', async (e) => {
+        state.golf.showSites = e.target.checked;
+        if (e.target.checked) await loadGolf();
+        renderGolfCourses();
+      });
+    }
+    ['municipal', 'private', 'unknown'].forEach((k) => {
+      const cb = $(`golf-f-${k}`);
+      if (cb) cb.addEventListener('change', (e) => {
+        state.golf.filters[k] = e.target.checked;
+        renderGolfCourses();
+      });
+    });
+
     // TRI choropleth pathway sub-option.
     $('tri-metric').addEventListener('change', async (e) => {
       state.tri.metric = e.target.value;

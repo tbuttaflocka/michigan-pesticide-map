@@ -334,6 +334,48 @@ CREATE TABLE IF NOT EXISTS landfill_sites (
 CREATE INDEX IF NOT EXISTS ix_landfill_county ON landfill_sites(county_fips);
 CREATE INDEX IF NOT EXISTS ix_landfill_cat    ON landfill_sites(category);
 
+-- ===== Golf courses (OpenStreetMap) =====
+-- Locations of Michigan golf courses, a pesticide-intensive turf land use that
+-- the USGS EPest agricultural layer excludes entirely. We map WHERE intensive
+-- turf pesticide use happens; actual per-course amounts are NOT public in
+-- Michigan and are never stored or estimated (see app/golf_data.py). Geometry is
+-- the OSM course footprint (GeoJSON) where available; acres is derived from that
+-- polygon, never guessed. Cross-refs to county ag-use and nearby water
+-- monitoring are context only — never attributed to the course.
+CREATE TABLE IF NOT EXISTS golf_courses (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_key        TEXT UNIQUE NOT NULL,   -- osm:way/<id> or osm:relation/<id>
+    osm_type          TEXT,                   -- way | relation
+    osm_id            INTEGER,
+    name              TEXT NOT NULL,
+    operator          TEXT,                   -- operator/owner string, if tagged
+    ownership_class   TEXT,                   -- municipal | private | unknown
+    ownership_label   TEXT,                   -- plain-language ownership description
+    access            TEXT,                   -- raw OSM access tag (private/public/…)
+    address           TEXT,
+    city              TEXT,
+    zip               TEXT,
+    county            TEXT,
+    county_fips       TEXT,
+    latitude          REAL NOT NULL,          -- representative point (polygon centroid)
+    longitude         REAL NOT NULL,
+    acres             REAL,                   -- from OSM polygon; NULL if point-only
+    has_polygon       INTEGER DEFAULT 0,
+    geometry          TEXT,                   -- GeoJSON geometry (Polygon/MultiPolygon)
+    website           TEXT,
+    -- cross-references (context only; NOT causal) --
+    high_ag_use       INTEGER DEFAULT 0,      -- county in top quartile of ag pesticide use
+    county_ag_rank    INTEGER,                -- 1 = highest-use county (latest EPest year)
+    county_ag_total_lbs REAL,                 -- county's latest-year ag pesticide total (lbs)
+    water_site_id     TEXT,                   -- nearest water-monitoring site w/ turf-compound detection
+    water_site_name   TEXT,
+    water_site_km     REAL,
+    water_compounds   TEXT,                   -- JSON list of turf-associated compounds detected there
+    source            TEXT DEFAULT 'OSM'
+);
+CREATE INDEX IF NOT EXISTS ix_golf_county ON golf_courses(county_fips);
+CREATE INDEX IF NOT EXISTS ix_golf_owner  ON golf_courses(ownership_class);
+
 -- ===== Wind / pesticide-drift modeling =====
 
 CREATE TABLE IF NOT EXISTS wind_data (

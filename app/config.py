@@ -190,3 +190,32 @@ IEM_ASOS_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 WIND_YEARS = [2021, 2022, 2023]
 WIND_SEASON_MONTHS = (4, 9)   # April through September, inclusive
 WIND_CACHE_DIR = DATA_DIR / "wind"
+
+# ---- Golf courses (OpenStreetMap via the Overpass API) ----
+#
+# Michigan has no golf-course-specific public pesticide-use reporting, so no
+# agency publishes course footprints. OpenStreetMap tags golf courses well
+# (leisure=golf_course, as closed ways and multipolygon relations) and has good
+# Michigan coverage, so we pull course LOCATIONS from Overpass. We never pull or
+# infer pesticide amounts — that data is not public (see app/golf_data.py).
+#
+# The query is bounded to Michigan's admin boundary (area, admin_level=4) rather
+# than a bbox so we don't pick up courses in neighbouring states/Ontario, and
+# `out geom` returns full polygon geometry so we can render course footprints.
+# Multiple public mirrors are tried in order — the main instance rate-limits.
+OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
+OVERPASS_GOLF_QUERY = (
+    "[out:json][timeout:180];"
+    'area["name"="Michigan"]["admin_level"="4"]["boundary"="administrative"]->.mi;'
+    "("
+    '  way["leisure"="golf_course"](area.mi);'
+    '  relation["leisure"="golf_course"](area.mi);'
+    '  way["landuse"="recreation_ground"]["sport"="golf"](area.mi);'
+    '  relation["landuse"="recreation_ground"]["sport"="golf"](area.mi);'
+    ");"
+    "out geom tags;"
+)

@@ -263,6 +263,22 @@ SOURCES: list[Source] = [
         seed_extra=("tri_facility", "tri_release", "contamination_sites"),
     ),
     Source(
+        id="golf_courses",
+        label="OpenStreetMap — Michigan golf courses (Overpass API)",
+        loaders=[dl.load_golf_courses],
+        targets=["golf_courses"],
+        primary_target="golf_courses", primary_source_id="osm_golf",
+        # Course LOCATIONS change rarely — an annual check is plenty. OSM/Overpass
+        # can rate-limit or time out, so allow_skip stays on and the loader keeps
+        # any previously loaded data if the fetch fails.
+        interval_months=12, min_abs=100, floor_frac=0.6,
+        coverage=lambda conn: (None, None),
+        # Seed staging with the agricultural-use and water tables so the loader
+        # can attach the (context-only) county ag-use rank and nearest turf-
+        # compound water-detection cross-references.
+        seed_extra=("pesticide_use", "water_quality_sites", "water_quality_results"),
+    ),
+    Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
         loaders=[chem_ref.load_chemical_reference],
         targets=["chemical_reference"],

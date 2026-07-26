@@ -21,6 +21,31 @@
     'EPest estimate':
       'A USGS ESTIMATE of how much of a pesticide was used, modeled from crop acreage ' +
       'and proprietary sales data — not a direct measurement. Reported as a low–high range.',
+    'EPest':
+      'The USGS pesticide-use estimates this app maps. They cover AGRICULTURAL use only — ' +
+      'modeled from crop acreage and sales data. Golf courses, lawns, parks, roadsides, and ' +
+      'other non-agricultural uses are NOT included, so county totals here exclude them entirely.',
+    'turfgrass management':
+      'The practice of maintaining turf (grass) on golf courses, lawns, and sports fields. ' +
+      'On golf courses it is unusually pesticide-intensive — especially fungicides, because ' +
+      'closely-mown, heavily-watered greens face constant disease pressure.',
+    'IPM':
+      'Integrated Pest Management — a strategy that combines monitoring, cultural practices, ' +
+      'and targeted pesticide use to control pests with less chemical than routine spraying. ' +
+      'Some states require golf courses to file an IPM plan; Michigan does not.',
+    'fungicide resistance':
+      'When repeated use of the same fungicide breeds fungi that survive it, so it stops ' +
+      'working. It drives golf-course superintendents to rotate among many fungicide classes, ' +
+      'which is one reason golf turf receives such a wide variety of fungicides.',
+    'non-agricultural pesticide use':
+      'Pesticide use that is NOT on farm crops — golf courses, lawns, parks, roadsides, ' +
+      'rights-of-way, and structures. The USGS EPest data this app maps covers agriculture ' +
+      'only, so none of this use appears in the county pesticide totals.',
+    'municipal course':
+      'A golf course owned by a local government (city, county, or township) or another ' +
+      'public body such as a public university. Because it is a "public body," its grounds ' +
+      'records — including pesticide applications — can generally be requested under ' +
+      "Michigan's Freedom of Information Act, unlike a privately-owned course.",
     'MCL':
       'Maximum Contaminant Level — the legal limit for a chemical in public drinking ' +
       'water, set by the EPA to protect HUMAN health. A result above the MCL exceeds the ' +

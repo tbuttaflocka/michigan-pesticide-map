@@ -66,6 +66,7 @@ from .respiratory_data import (
 from . import cancer_data
 from . import contamination_data
 from . import landfill_data
+from . import golf_data
 from .config import (
     CANCER_DATA_DIR,
     EPA_NPL_QUERY,
@@ -75,6 +76,9 @@ from .config import (
     EGLE_LANDFILL_QUERY,
     EGLE_TSDF_QUERY,
     EGLE_FOIA_URL,
+    GEOJSON_PATH,
+    OVERPASS_ENDPOINTS,
+    OVERPASS_GOLF_QUERY,
 )
 
 
@@ -2370,6 +2374,298 @@ def load_landfills(conn: sqlite3.Connection) -> int:
         "Federal hazardous-waste facility system behind the Part 111 TSDFs. "
         "The mapped disposal facilities come from EGLE's state layer.",
     )
+    return total
+
+
+# ---------- Golf courses (OpenStreetMap via Overpass) ----------
+#
+# We map golf-course LOCATIONS only. Michigan publishes no golf-course pesticide
+# data, so no amount is ever loaded or estimated (see app/golf_data.py). County
+# is derived from the course centroid by point-in-polygon against the Michigan
+# counties GeoJSON — OSM courses aren't reliably tagged with a county.
+
+def _build_county_locator():
+    """Return locate(lng, lat) -> (fips, name) using the counties GeoJSON.
+
+    Pure-Python ray-casting with a bbox pre-filter (no shapely dependency). Reads
+    the on-disk GeoJSON so it works identically in live and staging runs."""
+    try:
+        gj = json.loads(GEOJSON_PATH.read_text(encoding="utf-8"))
+    except OSError:
+        return lambda lng, lat: (None, None)
+    polys = []   # (fips, name, [ (ring, minx,miny,maxx,maxy), ... ])
+    for feat in gj.get("features", []):
+        props = feat.get("properties", {})
+        fips = props.get("fips")
+        name = props.get("name")
+        geom = feat.get("geometry") or {}
+        gtype = geom.get("type")
+        coords = geom.get("coordinates") or []
+        rings = []
+        if gtype == "Polygon":
+            rings = coords[:1]                       # outer ring only
+        elif gtype == "MultiPolygon":
+            rings = [poly[0] for poly in coords if poly]   # each part's outer ring
+        boxed = []
+        for ring in rings:
+            xs = [p[0] for p in ring]; ys = [p[1] for p in ring]
+            boxed.append((ring, min(xs), min(ys), max(xs), max(ys)))
+        if boxed:
+            polys.append((fips, name, boxed))
+
+    def _in_ring(x, y, ring) -> bool:
+        inside = False
+        n = len(ring)
+        j = n - 1
+        for i in range(n):
+            xi, yi = ring[i][0], ring[i][1]
+            xj, yj = ring[j][0], ring[j][1]
+            if ((yi > y) != (yj > y)) and \
+               (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-16) + xi):
+                inside = not inside
+            j = i
+        return inside
+
+    def locate(lng, lat):
+        for fips, name, boxed in polys:
+            for ring, minx, miny, maxx, maxy in boxed:
+                if minx <= lng <= maxx and miny <= lat <= maxy and _in_ring(lng, lat, ring):
+                    return fips, name
+        # Fallback for points that fall just outside a county polygon (coastal /
+        # island courses whose centroid lands over water): snap to the nearest
+        # county boundary vertex, but only within ~0.3° so we never assign a
+        # genuinely out-of-state point to a Michigan county.
+        best = None
+        for fips, name, boxed in polys:
+            for ring, minx, miny, maxx, maxy in boxed:
+                if lng < minx - 0.4 or lng > maxx + 0.4 or lat < miny - 0.4 or lat > maxy + 0.4:
+                    continue
+                for vx, vy in ring:
+                    d = (vx - lng) ** 2 + (vy - lat) ** 2
+                    if best is None or d < best[0]:
+                        best = (d, fips, name)
+        if best and best[0] <= 0.09:                 # (~0.3°)^2
+            return best[1], best[2]
+        return None, None
+
+    return locate
+
+
+def overpass_fetch(query: str, *, timeout: int = 180) -> dict:
+    """POST an Overpass QL query, trying each mirror in turn. Raises if all fail."""
+    data = query.encode("utf-8")
+    last_err = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            req = urllib.request.Request(
+                endpoint, data=data,
+                headers={"User-Agent": USER_AGENT,
+                         "Content-Type": "application/x-www-form-urlencoded"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read())
+        except Exception as e:                       # noqa: BLE001
+            last_err = e
+            log(f"  Overpass endpoint failed ({endpoint}): {e}", level="warn")
+    raise RuntimeError(f"all Overpass endpoints failed: {last_err}")
+
+
+def _golf_county_ag_context(conn: sqlite3.Connection):
+    """Rank Michigan counties by latest-year agricultural pesticide use (EPest).
+
+    Returns (rank_by_fips, total_lbs_by_fips, high_use_fips_set). 'High use' =
+    top quartile of counties by total applied. Context only — golf courses are
+    NOT in these agricultural totals (that's the whole point of the layer)."""
+    yr = conn.execute("SELECT MAX(year) FROM pesticide_use").fetchone()[0]
+    rank_by_fips, total_by_fips, high = {}, {}, set()
+    if yr is None:
+        return rank_by_fips, total_by_fips, high
+    rows = conn.execute(
+        "SELECT county_fips, SUM((epest_low_kg + epest_high_kg)/2.0) AS kg "
+        "FROM pesticide_use WHERE year = ? GROUP BY county_fips "
+        "HAVING kg > 0 ORDER BY kg DESC", (yr,)).fetchall()
+    for i, r in enumerate(rows):
+        rank_by_fips[r["county_fips"]] = i + 1
+        total_by_fips[r["county_fips"]] = r["kg"] * golf_data.LBS_PER_KG
+    cutoff = max(1, len(rows) // 4)
+    high = {r["county_fips"] for r in rows[:cutoff]}
+    return rank_by_fips, total_by_fips, high
+
+
+def _golf_water_sites(conn: sqlite3.Connection):
+    """Water-monitoring sites with >=1 detection of a turf-associated compound,
+    for a nearby-monitoring cross-reference. CONTEXT ONLY — never attributed to a
+    course. Returns [ {site_id, name, lat, lng, compounds:[...]} ]."""
+    placeholders = ",".join("?" * len(golf_data.TURF_WATER_COMPOUNDS))
+    rows = conn.execute(
+        f"""SELECT s.site_id, s.site_name, s.latitude AS lat, s.longitude AS lng,
+                   r.compound AS compound
+              FROM water_quality_results r
+              JOIN water_quality_sites s ON s.site_id = r.site_id
+             WHERE r.detected = 1
+               AND UPPER(r.compound) IN ({placeholders})
+               AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL""",
+        tuple(sorted(golf_data.TURF_WATER_COMPOUNDS))).fetchall()
+    by_site: dict = {}
+    for r in rows:
+        d = by_site.setdefault(r["site_id"], {
+            "site_id": r["site_id"], "name": r["site_name"],
+            "lat": r["lat"], "lng": r["lng"], "compounds": set()})
+        d["compounds"].add((r["compound"] or "").title())
+    for d in by_site.values():
+        d["compounds"] = sorted(d["compounds"])
+    return list(by_site.values())
+
+
+def load_golf_courses(conn: sqlite3.Connection) -> int:
+    """Load Michigan golf-course LOCATIONS from OpenStreetMap (Overpass), derive
+    county + acreage + footprint geometry, and attach context-only cross-refs
+    (county ag-use rank, nearest turf-compound water detection). No pesticide
+    amounts are loaded or estimated — Michigan publishes none for golf courses."""
+    log("Loading golf courses (OpenStreetMap via Overpass)...")
+    cur = conn.cursor()
+
+    try:
+        payload = overpass_fetch(OVERPASS_GOLF_QUERY)
+    except Exception as e:                           # noqa: BLE001
+        log(f"  Overpass fetch failed: {e}", level="warn")
+        record_source(
+            conn, "osm_golf", "OpenStreetMap — Michigan golf courses (Overpass API)",
+            "https://www.openstreetmap.org/copyright", "unavailable", 0,
+            "Overpass fetch failed on this run; keeping any previously loaded data.")
+        return 0
+
+    locate = _build_county_locator()
+    rank_by_fips, total_by_fips, high_use = _golf_county_ag_context(conn)
+    water_sites = _golf_water_sites(conn)
+    WATER_MAX_KM = 8.0
+
+    courses: dict[str, dict] = {}
+    for el in payload.get("elements", []):
+        osm_type = el.get("type")
+        if osm_type not in ("way", "relation"):
+            continue
+        tags = el.get("tags", {}) or {}
+        name = (tags.get("name") or "").strip()
+        if not name:
+            continue                                 # unnamed features: skip (can't identify)
+        geojson, rings = golf_data.geometry_geojson(osm_type, el)
+        if rings:
+            acres, clng, clat = golf_data.polygon_metrics(rings)
+        else:
+            # point-only fallback: use element center if present
+            c = el.get("center") or {}
+            clat, clng = c.get("lat"), c.get("lon")
+            acres = None
+        if clat is None or clng is None:
+            continue
+        # keep only points that land inside Michigan (defensive; query is bounded)
+        fips, county = locate(clng, clat)
+
+        oc, oc_label = golf_data.classify_ownership(tags)
+        addr_parts = [tags.get("addr:housenumber"), tags.get("addr:street")]
+        address = " ".join(p for p in addr_parts if p) or None
+
+        rec = {
+            "course_key": f"osm:{osm_type}/{el.get('id')}",
+            "osm_type": osm_type, "osm_id": el.get("id"),
+            "name": name,
+            "operator": (tags.get("operator") or tags.get("owner") or "").strip() or None,
+            "ownership_class": oc, "ownership_label": oc_label,
+            "access": (tags.get("access") or "").strip() or None,
+            "address": address,
+            "city": (tags.get("addr:city") or "").strip().title() or None,
+            "zip": (tags.get("addr:postcode") or "").strip() or None,
+            "county": county, "county_fips": fips,
+            "latitude": clat, "longitude": clng,
+            "acres": round(acres, 1) if acres else None,
+            "has_polygon": 1 if rings else 0,
+            "geometry": json.dumps(geojson) if geojson else None,
+            "website": (tags.get("website") or tags.get("contact:website")
+                        or "").strip() or None,
+            "high_ag_use": 1 if fips in high_use else 0,
+            "county_ag_rank": rank_by_fips.get(fips),
+            "county_ag_total_lbs": round(total_by_fips[fips]) if fips in total_by_fips else None,
+        }
+        # nearest turf-compound water-monitoring site within WATER_MAX_KM
+        best = None
+        for ws in water_sites:
+            if abs(ws["lat"] - clat) > 0.12 or abs(ws["lng"] - clng) > 0.16:
+                continue                             # ~13 km bbox pre-filter
+            km = golf_data.haversine_km(clat, clng, ws["lat"], ws["lng"])
+            if km <= WATER_MAX_KM and (best is None or km < best[0]):
+                best = (km, ws)
+        if best:
+            km, ws = best
+            rec["water_site_id"] = ws["site_id"]
+            rec["water_site_name"] = ws["name"]
+            rec["water_site_km"] = round(km, 1)
+            rec["water_compounds"] = json.dumps(ws["compounds"][:8])
+        courses[rec["course_key"]] = rec
+
+    # light dedupe: same normalized name within ~500 m (a relation + a stray
+    # member way, or a duplicated import). Keep the one with a polygon / more acres.
+    def _nkey(r):
+        return re.sub(r"[^a-z0-9]", "", (r["name"] or "").lower())
+    kept: list[dict] = []
+    for r in sorted(courses.values(),
+                    key=lambda x: (x["has_polygon"], x["acres"] or 0), reverse=True):
+        dup = False
+        for k in kept:
+            if _nkey(k) == _nkey(r) and golf_data.haversine_km(
+                    r["latitude"], r["longitude"], k["latitude"], k["longitude"]) < 0.5:
+                dup = True
+                break
+        if not dup:
+            kept.append(r)
+
+    cur.execute("DELETE FROM golf_courses")
+    for r in kept:
+        cur.execute(
+            """INSERT OR REPLACE INTO golf_courses(
+                 course_key, osm_type, osm_id, name, operator, ownership_class,
+                 ownership_label, access, address, city, zip, county, county_fips,
+                 latitude, longitude, acres, has_polygon, geometry, website,
+                 high_ag_use, county_ag_rank, county_ag_total_lbs,
+                 water_site_id, water_site_name, water_site_km, water_compounds,
+                 source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (r["course_key"], r["osm_type"], r["osm_id"], r["name"], r.get("operator"),
+             r["ownership_class"], r["ownership_label"], r.get("access"),
+             r.get("address"), r.get("city"), r.get("zip"), r.get("county"),
+             r.get("county_fips"), r["latitude"], r["longitude"], r.get("acres"),
+             r["has_polygon"], r.get("geometry"), r.get("website"),
+             r.get("high_ag_use", 0), r.get("county_ag_rank"),
+             r.get("county_ag_total_lbs"), r.get("water_site_id"),
+             r.get("water_site_name"), r.get("water_site_km"),
+             r.get("water_compounds"), "OSM"),
+        )
+    conn.commit()
+
+    total = len(kept)
+    polys = sum(1 for r in kept if r["has_polygon"])
+    muni = sum(1 for r in kept if r["ownership_class"] == "municipal")
+    water_links = sum(1 for r in kept if r.get("water_site_id"))
+    log(f"  golf courses: {total} ({polys} with footprint polygons, {muni} public/"
+        f"municipal, {water_links} near turf-compound water detections)",
+        level="ok" if total else "warn")
+    record_source(
+        conn, "osm_golf",
+        "OpenStreetMap — Michigan golf courses (Overpass API)",
+        "https://www.openstreetmap.org/copyright",
+        "ok" if total else "unavailable", total,
+        f"{total} Michigan golf courses from OpenStreetMap (leisure=golf_course) "
+        f"via the Overpass API, {polys} with footprint polygons. Crowd-sourced — "
+        f"coverage may be incomplete or out of date. LOCATIONS ONLY: no pesticide-"
+        f"use amounts (Michigan publishes none for golf courses). © OpenStreetMap "
+        f"contributors, ODbL.",
+    )
+    # Turf-management BMP references cited in the popup content (context sources).
+    for sid, src in (
+        ("gcsaa_bmp", golf_data.SOURCES[1]),
+        ("msu_turf", golf_data.SOURCES[2]),
+        ("ny_ag_toxic_fairways", golf_data.SOURCES[3]),
+    ):
+        record_source(conn, sid, src["title"], src["url"], "reference", 0, src["note"])
     return total
 
 

@@ -18,6 +18,7 @@ from app import cancer_data
 from app.water_quality import to_ugl, mcl_for, benchmark_for, AQUATIC_BENCHMARK_SOURCE
 from app import contamination_data
 from app import landfill_data
+from app import golf_data
 from app import spraying_programs
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
@@ -3280,6 +3281,61 @@ def api_landfill_density():
         "stats": {"max": max(counts) if counts else 0,
                   "counties_with_sites": len(counts),
                   "total_sites": sum(counts)},
+    })
+
+
+# ---------- Golf courses overlay (OpenStreetMap) ----------
+
+def _golf_row(r) -> dict:
+    """Parse a golf_courses row into a JSON-friendly dict with marker glyph/color,
+    ownership label, footprint geometry, and context-only cross-refs. No pesticide
+    amounts — Michigan publishes none for golf courses (see app/golf_data.py)."""
+    geom = None
+    if r["geometry"]:
+        try:
+            geom = json.loads(r["geometry"])
+        except (TypeError, ValueError):
+            geom = None
+    row = {
+        "course_key": r["course_key"], "osm_type": r["osm_type"],
+        "name": r["name"], "operator": r["operator"],
+        "ownership_class": r["ownership_class"],
+        "ownership_label": r["ownership_label"], "access": r["access"],
+        "address": r["address"], "city": r["city"], "zip": r["zip"],
+        "county": r["county"], "county_fips": r["county_fips"],
+        "lat": r["latitude"], "lng": r["longitude"],
+        "acres": r["acres"], "has_polygon": bool(r["has_polygon"]),
+        "geometry": geom, "website": r["website"],
+        "high_ag_use": bool(r["high_ag_use"]),
+        "county_ag_rank": r["county_ag_rank"],
+        "county_ag_total_lbs": r["county_ag_total_lbs"],
+        "water_site_id": r["water_site_id"],
+        "water_site_name": r["water_site_name"],
+        "water_site_km": r["water_site_km"],
+        "water_compounds": r["water_compounds"],
+    }
+    return golf_data.augment_row(row)
+
+
+@app.route("/api/golf/sites")
+def api_golf_sites():
+    """All Michigan golf courses from OpenStreetMap, plus the ownership legend and
+    the shared (sourced) turf-management context. Optional ?ownership= filter."""
+    ownership = request.args.get("ownership")
+    q = "SELECT * FROM golf_courses WHERE 1=1"
+    params: list = []
+    if ownership and ownership != "all":
+        q += " AND ownership_class = ?"
+        params.append(ownership)
+    q += " ORDER BY name"
+    conn = db()
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    sites = [_golf_row(r) for r in rows]
+    return jsonify({
+        "count": len(sites),
+        "legend": golf_data.legend_payload(),
+        "sites": sites,
     })
 
 
