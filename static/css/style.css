@@ -1708,6 +1708,43 @@ a:hover { text-decoration: underline; }
 }
 .foia-text:focus { border-color: var(--accent); outline: none; }
 .foia-hint { margin: 6px 0 12px; line-height: 1.4; }
+
+/* Per-field quick-copy block — EGLE's separate form boxes (address/city/zip/…) */
+.foia-fields {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.foia-fields.hidden { display: none; }
+.foia-fields-h { margin: 0 0 4px; font-size: 13.5px; }
+.foia-fields-lead { margin: 0 0 10px; line-height: 1.45; }
+.foia-field-list { display: flex; flex-direction: column; gap: 8px; }
+.foia-field {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+  padding: 7px 10px;
+}
+.foia-field-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.foia-field-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); font-weight: 700;
+}
+.foia-field-value {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px; color: var(--text); word-break: break-word; line-height: 1.35;
+}
+.foia-field-copy {
+  flex: none; cursor: pointer; font: inherit; font-weight: 600; font-size: 12px;
+  padding: 8px 12px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); min-height: 38px; min-width: 66px;
+}
+.foia-field-copy:hover { border-color: var(--accent); color: var(--accent); }
+.foia-field-copy.copied {
+  background: #2ea043; border-color: #2ea043; color: #fff;
+}
+.foia-fields-note {
+  margin: 10px 0 0; line-height: 1.45; color: var(--accent-2);
+  border-top: 1px dashed var(--line); padding-top: 9px;
+}
 .foia-guide {
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
   padding: 12px 14px; margin-bottom: 14px;
@@ -1731,6 +1768,9 @@ a:hover { text-decoration: underline; }
   .foia-text { min-height: 260px; font-size: 13px; }   /* larger tap/edit target on phones */
   .foia-copy { width: 100%; }
   .foia-req-head { align-items: stretch; }
+  /* Keep the value readable and the copy button a comfortable tap target. */
+  .foia-field-value { font-size: 14px; }
+  .foia-field-copy { min-height: 42px; min-width: 74px; padding: 9px 14px; }
 }
 
 /* county-panel TRI detail block */

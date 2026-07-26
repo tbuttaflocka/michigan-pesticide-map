@@ -1891,13 +1891,23 @@
     e.preventDefault();
     const s = state.landfill.sites.find((x) => x.site_key === btn.getAttribute('data-lf-foia'));
     if (!s) return;
+    // The EGLE license_id means different things per program: Part 115 carries
+    // the EGLE Site (WDS) ID; Part 111 carries the EPA/RCRA handler ID, with the
+    // EGLE-internal WDS ID surfaced separately as alt_id.
+    const licLabel = s.program === 'part111'
+      ? 'Facility ID (EPA / RCRA handler ID)'
+      : 'Facility ID (EGLE Site ID)';
     window.PMFoia.open({
       subject: s.name + (s.county ? ` · ${s.county} County` : ''),
       explainer: state.landfill.foiaAgency && state.landfill.foiaAgency.explainer,
       facility: {
         name: s.name, operator: s.operator, license_id: s.license_id,
-        address: s.address, city: s.city, county: s.county, type_label: s.type_label,
+        license_label: licLabel, alt_id: s.alt_id, alt_id_label: s.alt_id_label,
+        address: s.address, city: s.city, zip: s.zip, county: s.county,
+        type_label: s.type_label,
       },
+      formNote: 'EGLE limits each request to one facility address. To request '
+        + 'records for more than one facility, submit a separate request for each.',
       records: (s.foia && s.foia.records) || [],
       authority: s.foia && s.foia.authority,
       agency: state.landfill.foiaAgency,

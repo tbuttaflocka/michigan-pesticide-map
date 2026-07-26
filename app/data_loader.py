@@ -2196,6 +2196,10 @@ def load_landfills(conn: sqlite3.Connection) -> int:
                     "status_class": st_class,
                     "status_label": st_label,
                     "license_id": str(wdsid) if wdsid else None,
+                    # Part 115 carries a single facility ID (the WDS ID, above);
+                    # no distinct second identifier to surface.
+                    "alt_id": None,
+                    "alt_id_label": None,
                     "address": (a.get("addrline1") or "").strip() or None,
                     "city": (a.get("city") or "").strip().title() or None,
                     "zip": (a.get("zip") or "").strip() or None,
@@ -2237,6 +2241,7 @@ def load_landfills(conn: sqlite3.Connection) -> int:
             if lat is None or lng is None:
                 continue
             sid = a.get("SiteId") or a.get("WDSId")
+            wdsid = a.get("WDSId")
             key = f"tsdf:{sid}"
             county = _title_case_county(a.get("County"))
             commercial = 1 if "accepts" in (a.get("CommercialFacility") or "").lower() \
@@ -2254,6 +2259,14 @@ def load_landfills(conn: sqlite3.Connection) -> int:
                 "status_class": "active",
                 "status_label": "Active (Part 111 licensed)",
                 "license_id": str(sid) if sid else None,
+                # The Part 111 layer carries TWO identifiers: the EPA/RCRA handler
+                # ID (SiteId, used above as license_id) and EGLE's internal Waste
+                # Data System ID (WDSId). EGLE's records center asks for a facility
+                # ID, so expose the EGLE-native WDS ID as an additional field when
+                # it's genuinely a second, distinct identifier.
+                "alt_id": (str(wdsid) if wdsid and str(wdsid) != str(sid) else None),
+                "alt_id_label": ("EGLE Waste Data System (WDS) ID"
+                                 if wdsid and str(wdsid) != str(sid) else None),
                 "address": (a.get("Address") or "").strip() or None,
                 "city": (a.get("City") or "").strip().title() or None,
                 "zip": None,
@@ -2293,15 +2306,17 @@ def load_landfills(conn: sqlite3.Connection) -> int:
         cur.execute(
             """INSERT OR REPLACE INTO landfill_sites(
                  site_key, program, name, operator, category, type_label,
-                 facility_types, status_class, status_label, license_id, address,
+                 facility_types, status_class, status_label, license_id,
+                 alt_id, alt_id_label, address,
                  city, zip, county, county_fips, latitude, longitude, egle_url,
                  federal_regulated, commercial, tri_facility_id, tri_total_lbs,
                  tri_year, contam_site_key, contam_status, source)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (rec["site_key"], rec["program"], rec["name"], rec.get("operator"),
              rec["category"], rec["type_label"],
              json.dumps(rec["facility_types"]), rec["status_class"],
-             rec["status_label"], rec.get("license_id"), rec.get("address"),
+             rec["status_label"], rec.get("license_id"),
+             rec.get("alt_id"), rec.get("alt_id_label"), rec.get("address"),
              rec.get("city"), rec.get("zip"), rec.get("county"),
              rec.get("county_fips"), rec["latitude"], rec["longitude"],
              rec.get("egle_url"), rec.get("federal_regulated", 0),
@@ -2700,6 +2715,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative TEXT")
         conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative_source TEXT")
         conn.execute("ALTER TABLE contamination_sites ADD COLUMN narrative_refs TEXT")
+        conn.commit()
+
+    # landfill_sites: add extra-identifier columns (Part 111 EGLE WDS ID). Rows
+    # are rebuilt each run, so a non-destructive ALTER is enough.
+    lcols = {r[1] for r in conn.execute("PRAGMA table_info(landfill_sites)")}
+    if lcols and "alt_id" not in lcols:
+        log("schema migration: adding landfill_sites.alt_id / alt_id_label", level="warn")
+        conn.execute("ALTER TABLE landfill_sites ADD COLUMN alt_id TEXT")
+        conn.execute("ALTER TABLE landfill_sites ADD COLUMN alt_id_label TEXT")
         conn.commit()
 
     # data_sources: add provenance/freshness columns used by refresh_data.py.

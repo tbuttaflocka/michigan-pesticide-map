@@ -52,7 +52,9 @@
     const idLines = [];
     idLines.push(`  Facility:  ${f.name || '[facility name]'}`);
     if (f.operator && f.operator !== f.name) idLines.push(`  Operator:  ${f.operator}`);
-    idLines.push(`  EGLE license / site ID:  ${f.license_id || '[not listed — see EGLE record]'}`);
+    const licLabel = f.license_label || 'EGLE license / site ID';
+    idLines.push(`  ${licLabel}:  ${f.license_id || '[not listed — see EGLE record]'}`);
+    if (f.alt_id) idLines.push(`  ${f.alt_id_label || 'Additional facility ID'}:  ${f.alt_id}`);
     if (locBits.length > 1) idLines.push(`  Address:  ${locBits.join(', ')}`);
     if (f.type_label) idLines.push(`  Facility type:  ${f.type_label}`);
 
@@ -120,6 +122,13 @@
         </div>
         <textarea class="foia-text" id="foia-text" spellcheck="false" aria-label="FOIA request text"></textarea>
         <p class="foia-hint muted small" id="foia-hint"></p>
+        <div class="foia-fields hidden" id="foia-fields">
+          <h3 class="foia-fields-h">Other required form fields</h3>
+          <p class="foia-fields-lead muted small">EGLE's Public Records Center asks for the site's
+            address, city, ZIP, and county in separate boxes. Copy each straight into its field.</p>
+          <div class="foia-field-list" id="foia-field-list"></div>
+          <p class="foia-fields-note small" id="foia-fields-note"></p>
+        </div>
         <div class="foia-guide" id="foia-guide"></div>
         <a class="foia-submit" id="foia-submit" target="_blank" rel="noopener"></a>
         <a class="foia-official small" id="foia-official" target="_blank" rel="noopener"></a>
@@ -128,15 +137,64 @@
     els = {
       close: $('foia-close'), title: $('foia-title'), subject: $('foia-subject'),
       explainer: $('foia-explainer'), copy: $('foia-copy'), text: $('foia-text'),
-      hint: $('foia-hint'), guide: $('foia-guide'), submit: $('foia-submit'),
-      official: $('foia-official'),
+      hint: $('foia-hint'), fields: $('foia-fields'),
+      fieldList: $('foia-field-list'), fieldsNote: $('foia-fields-note'),
+      guide: $('foia-guide'), submit: $('foia-submit'), official: $('foia-official'),
     };
+    els.fieldValues = [];   // copy-payloads for the per-field buttons, by index
     els.close.addEventListener('click', close);
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !modal.classList.contains('hidden')) close();
     });
     els.copy.addEventListener('click', copyText);
+    // Delegated so it covers the per-field buttons rebuilt on every open().
+    els.fieldList.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.foia-field-copy');
+      if (!b) return;
+      const idx = parseInt(b.getAttribute('data-fidx'), 10);
+      copyString(els.fieldValues[idx] || '', b);
+    });
+  }
+
+  // Flash a button to "Copied ✓" then restore. Remembers the original label so
+  // repeated clicks don't stick on the checkmark.
+  function flashCopied(btn) {
+    if (!btn) return;
+    if (btn.getAttribute('data-label') == null) btn.setAttribute('data-label', btn.textContent);
+    const label = btn.getAttribute('data-label');
+    btn.textContent = 'Copied ✓';
+    btn.classList.add('copied');
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => { btn.textContent = label; btn.classList.remove('copied'); }, 1600);
+  }
+
+  // Copy an arbitrary string. Uses the async Clipboard API where available and
+  // falls back to a temporary <textarea> + execCommand so it also works on older
+  // mobile browsers and non-secure contexts (where navigator.clipboard is absent).
+  function copyString(str, btn) {
+    const done = () => flashCopied(btn);
+    const fallback = () => {
+      const t = document.createElement('textarea');
+      t.value = str;
+      t.setAttribute('readonly', '');
+      // Keep it in-viewport but invisible: iOS won't copy off-screen selections.
+      t.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;'
+        + 'padding:0;border:0;opacity:0;';
+      document.body.appendChild(t);
+      t.focus();
+      t.select();
+      t.setSelectionRange(0, str.length);
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(t);
+      if (ok) done();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(str).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
   }
 
   function copyText() {
@@ -144,20 +202,34 @@
     ta.focus();
     ta.select();
     ta.setSelectionRange(0, ta.value.length);   // iOS/mobile select-all
-    const done = () => {
-      const b = els.copy;
-      const old = b.textContent;
-      b.textContent = 'Copied ✓';
-      b.classList.add('copied');
-      setTimeout(() => { b.textContent = old; b.classList.remove('copied'); }, 1600);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(ta.value).then(done).catch(() => {
-        try { document.execCommand('copy'); done(); } catch (e) { /* leave selected */ }
-      });
-    } else {
-      try { document.execCommand('copy'); done(); } catch (e) { /* leave selected */ }
+    copyString(ta.value, els.copy);
+  }
+
+  // Render the per-field quick-copy block from [{label, value}, ...]. Fields with
+  // an empty value are dropped (e.g. Part 111 sites carry no ZIP in the EGLE feed).
+  function renderFields(fields, note) {
+    els.fieldValues = [];
+    const rows = (fields || []).filter((f) => f && f.value != null
+      && String(f.value).trim() !== '');
+    if (!rows.length) {
+      els.fields.classList.add('hidden');
+      els.fieldList.innerHTML = '';
+      return;
     }
+    els.fieldList.innerHTML = rows.map((f, i) => {
+      els.fieldValues.push(String(f.value));
+      return `<div class="foia-field">
+        <div class="foia-field-main">
+          <span class="foia-field-label">${esc(f.label)}</span>
+          <span class="foia-field-value">${esc(f.value)}</span>
+        </div>
+        <button class="foia-field-copy" type="button" data-fidx="${i}"
+          aria-label="Copy ${esc(f.label)}">Copy</button>
+      </div>`;
+    }).join('');
+    els.fieldsNote.textContent = note || '';
+    els.fieldsNote.style.display = note ? '' : 'none';
+    els.fields.classList.remove('hidden');
   }
 
   function guideHtml(agency) {
@@ -183,9 +255,30 @@
     return parts.join('');
   }
 
+  // Sensible per-field quick-copy list derived from a facility, so a caller can
+  // just pass `facility` and get address/city/zip/county/ID fields for free.
+  // Labels match EGLE's Public Records Center form boxes. A caller can override
+  // by passing an explicit `fields` array instead.
+  function defaultFields(f) {
+    f = f || {};
+    const out = [
+      { label: 'Address of Requested Site', value: f.address },
+      { label: 'City', value: f.city },
+      { label: 'Zip Code', value: f.zip },
+      { label: 'County (Select County)', value: f.county },
+    ];
+    if (f.license_id) {
+      out.push({ label: f.license_label || 'Facility ID', value: f.license_id });
+    }
+    if (f.alt_id) {
+      out.push({ label: f.alt_id_label || 'Additional facility ID', value: f.alt_id });
+    }
+    return out;
+  }
+
   // open(opts):
   //   title?, explainer?, subject (facility name), facility, records, authority,
-  //   agency (profile), periodYears?
+  //   agency (profile), periodYears?, fields? (override), formNote?
   function open(opts) {
     ensureModal();
     const agency = opts.agency || {};
@@ -196,6 +289,8 @@
     els.text.value = opts.requestText || buildRequest(opts);
     els.hint.textContent = 'The request above is a starting point — edit the time ' +
       'period, the records listed, and your contact details before sending.';
+    renderFields(opts.fields || defaultFields(opts.facility),
+      opts.formNote || (agency && agency.form_note));
     els.guide.innerHTML = guideHtml(agency);
     if (agency.submit_url) {
       els.submit.href = agency.submit_url;

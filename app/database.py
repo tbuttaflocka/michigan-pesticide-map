@@ -311,6 +311,8 @@ CREATE TABLE IF NOT EXISTS landfill_sites (
     status_class      TEXT,                   -- active|closed|post_closure|unknown
     status_label      TEXT,                   -- raw disposalareastatus text
     license_id        TEXT,                   -- EGLE wdsid / site id
+    alt_id            TEXT,                   -- extra facility identifier (Part 111: EGLE WDS ID)
+    alt_id_label      TEXT,                   -- human label for alt_id
     address           TEXT,
     city              TEXT,
     zip               TEXT,
