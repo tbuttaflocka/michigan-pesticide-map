@@ -17,6 +17,7 @@ from app import database
 from app import cancer_data
 from app.water_quality import to_ugl, mcl_for, benchmark_for, AQUATIC_BENCHMARK_SOURCE
 from app import contamination_data
+from app import landfill_data
 from app import spraying_programs
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
@@ -558,6 +559,20 @@ def api_county(fips: str):
         "sites": [dict(s) for s in contam_sites],
     }
 
+    lf = conn.execute(
+        """SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN category='hazardous' THEN 1 ELSE 0 END) AS hazardous
+             FROM landfill_sites WHERE county_fips = ?""", (fips,)).fetchone()
+    lf_sites = conn.execute(
+        """SELECT name, operator, category, type_label, status_class, tri_total_lbs
+             FROM landfill_sites WHERE county_fips = ?
+            ORDER BY (category='hazardous') DESC, name LIMIT 12""", (fips,)).fetchall()
+    landfills = {
+        "total": lf["total"] or 0,
+        "hazardous": lf["hazardous"] or 0,
+        "sites": [dict(s) for s in lf_sites],
+    }
+
     conn.close()
     return lb_jsonify({
         "fips": fips,
@@ -573,6 +588,7 @@ def api_county(fips: str):
         "respiratory": resp,
         "cancer": cancer_card,
         "contamination": contamination,
+        "landfills": landfills,
         "mdard_inspector_url":
             "https://www.michigan.gov/en/mdard/plant-pest/Pesticides/Pesticide-Regulatory-Info",
     })
@@ -3166,6 +3182,96 @@ def api_contamination_density():
     out = [{"fips": r["fips"], "name": r["name"], "value": r["total"],
             "total": r["total"], "npl": r["npl"] or 0, "pfas": r["pfas"] or 0,
             "max_hrs": r["max_hrs"]} for r in rows]
+    counts = [r["value"] for r in out if r["value"]]
+    return jsonify({
+        "counties": out,
+        "stats": {"max": max(counts) if counts else 0,
+                  "counties_with_sites": len(counts),
+                  "total_sites": sum(counts)},
+    })
+
+
+# ---------- Landfills & waste facilities overlay ----------
+
+def _landfill_row(r) -> dict:
+    """Parse a landfill_sites row into a JSON-friendly dict with marker
+    glyph/color, monitoring context, and TRI/contamination cross-links."""
+    def _json(v):
+        try:
+            return json.loads(v) if v else []
+        except (TypeError, ValueError):
+            return []
+    row = {
+        "site_key": r["site_key"], "program": r["program"],
+        "name": r["name"], "operator": r["operator"],
+        "category": r["category"], "type_label": r["type_label"],
+        "facility_types": _json(r["facility_types"]),
+        "status_class": r["status_class"], "status_label": r["status_label"],
+        "license_id": r["license_id"], "address": r["address"],
+        "city": r["city"], "zip": r["zip"], "county": r["county"],
+        "county_fips": r["county_fips"], "lat": r["latitude"], "lng": r["longitude"],
+        "egle_url": r["egle_url"],
+        "federal_regulated": bool(r["federal_regulated"]),
+        "commercial": bool(r["commercial"]),
+        "tri_facility_id": r["tri_facility_id"],
+        "tri_total_lbs": r["tri_total_lbs"], "tri_year": r["tri_year"],
+        "contam_site_key": r["contam_site_key"],
+        "contam_status": r["contam_status"],
+    }
+    return landfill_data.augment_row(row)
+
+
+@app.route("/api/landfill/sites")
+def api_landfill_sites():
+    """All Michigan landfills & disposal-capable hazardous-waste facilities,
+    optionally filtered by ?category=. Includes the type/status legend."""
+    category = request.args.get("category")
+    q = "SELECT * FROM landfill_sites WHERE 1=1"
+    params: list = []
+    if category and category != "all":
+        q += " AND category = ?"
+        params.append(category)
+    q += " ORDER BY (category='hazardous') DESC, name"
+    conn = db()
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    sites = [_landfill_row(r) for r in rows]
+    return jsonify({
+        "count": len(sites),
+        "legend": landfill_data.legend_payload(),
+        "sites": sites,
+    })
+
+
+@app.route("/api/landfill/county/<fips>")
+def api_landfill_county(fips: str):
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM landfill_sites WHERE county_fips = ? "
+        "ORDER BY (category='hazardous') DESC, name", (fips,)).fetchall()
+    conn.close()
+    return jsonify({"fips": fips, "count": len(rows),
+                    "sites": [_landfill_row(r) for r in rows]})
+
+
+@app.route("/api/landfill/density")
+def api_landfill_density():
+    """Per-county landfill counts for the density choropleth."""
+    conn = db()
+    rows = conn.execute("""
+        SELECT c.fips, c.name,
+               COUNT(l.id) AS total,
+               SUM(CASE WHEN l.category='hazardous' THEN 1 ELSE 0 END) AS hazardous,
+               SUM(CASE WHEN l.category='msw' THEN 1 ELSE 0 END) AS msw
+          FROM counties c
+     LEFT JOIN landfill_sites l ON l.county_fips = c.fips
+      GROUP BY c.fips, c.name
+      ORDER BY c.name
+    """).fetchall()
+    conn.close()
+    out = [{"fips": r["fips"], "name": r["name"], "value": r["total"],
+            "total": r["total"], "hazardous": r["hazardous"] or 0,
+            "msw": r["msw"] or 0} for r in rows]
     counts = [r["value"] for r in out if r["value"]]
     return jsonify({
         "counties": out,

@@ -101,6 +101,16 @@
       trendSw: null,
       trendCty: null,
     },
+    landfill: {
+      loaded: false,
+      sites: [],                   // from /api/landfill/sites
+      legend: null,                // category/status legend payload
+      showSites: false,
+      filters: { msw: true, industrial: true, coal_ash: true, hazardous: true },
+      markers: null,               // L.markerClusterGroup / layerGroup
+      densityByFips: new Map(),
+      _densityMax: 1,
+    },
     wind: {
       showRoses: false,
       showDrift: false,
@@ -250,6 +260,15 @@
         const idx = Math.min(TRI_PALETTE.length - 1,
           Math.floor(Math.sqrt(v / max) * TRI_PALETTE.length));
         return TRI_PALETTE[idx];
+      }
+      case 'landfill_density': {
+        const c = state.landfill.densityByFips.get(fips);
+        const v = c ? c.value : 0;
+        if (!v) return NO_DATA;
+        const max = state.landfill._densityMax || 1;
+        const idx = Math.min(LANDFILL_PALETTE.length - 1,
+          Math.floor(Math.sqrt(v / max) * LANDFILL_PALETTE.length));
+        return LANDFILL_PALETTE[idx];
       }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
@@ -438,6 +457,12 @@
         return `<div><span class="muted">${triMetricLabel(state.tri.metric)}:</span> <span class="v">${fmtLbs(c.value)}</span><span class="muted">/yr</span></div>
              <div><span class="muted">TRI facilities:</span> <span class="v">${c.facilities || 0}</span></div>`;
       }
+      case 'landfill_density': {
+        const c = state.landfill.densityByFips.get(fips);
+        if (!c || !c.value) return '<div class="muted">No mapped landfills</div>';
+        const haz = c.hazardous ? ` <span class="muted">(${c.hazardous} hazardous)</span>` : '';
+        return `<div><span class="muted">Landfills &amp; waste facilities:</span> <span class="v">${c.value}</span>${haz}</div>`;
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         if (!c) return '<div class="muted">No pesticide data</div>';
@@ -478,6 +503,7 @@
       case 'cancer': return `Cancer — ${cancerTypeLabel(state.cancer.type)} (${state.cancer.dataType})`;
       case 'contam_density': return 'Contamination site density';
       case 'tri':    return `TRI toxic releases — ${triMetricLabel(state.tri.metric).toLowerCase()}`;
+      case 'landfill_density': return 'Landfill density';
       default:       return `Pesticide — ${pestFilterLabel()}`;
     }
   }
@@ -568,6 +594,10 @@
         note.textContent = `${triMetricLabel(state.tri.metric).toLowerCase()} · lbs/yr` +
           (state.tri.latestYear ? ` (${state.tri.latestYear})` : '') + ' (lower → higher)';
         break;
+      case 'landfill_density':
+        paletteStrip(el, LANDFILL_PALETTE);
+        note.textContent = 'active landfills & waste facilities per county (lower → higher)';
+        break;
     }
     renderMarkerKeys();
   }
@@ -581,6 +611,7 @@
     { on: () => state.contam.showZones,      c: '#e8873c', t: 'Contamination impact zones' },
     { on: () => state.spraying.showMarkers,  c: '#5dbb63', t: 'Spraying programs (directory)' },
     { on: () => state.tri.showSites,         c: '#d9772f', t: 'TRI facilities (size/red = more released)' },
+    { on: () => state.landfill.showSites,    c: '#d96b35', t: 'Landfills & waste facilities (by type)' },
     { on: () => state.wind.showRoses,        c: '#3fb950', t: 'Wind roses (Apr–Sep)' },
     { on: () => state.wind.showDrift,        c: '#e8873c', t: 'Drift arrows (downwind)' },
   ];
@@ -605,6 +636,13 @@
         `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.exceeds_benchmark}"></span>exceeds aquatic-life benchmark (ecological)</div>` +
         `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.detected}"></span>detected, within limits</div>` +
         `<div class="mk"><span class="mk-dot" style="background:${WQ_COLOR.tested_no_detect}"></span>tested, none detected</div>`;
+    }
+    // Landfill type/status key — markers are colored by facility type.
+    if (state.landfill.showSites && state.landfill.legend) {
+      html += '<div class="mk-title" style="margin-top:8px">Landfills · by type</div>' +
+        state.landfill.legend.categories.map((t) =>
+          `<div class="mk"><span class="mk-dot" style="background:${t.color}"></span>${t.glyph} ${t.label}</div>`
+        ).join('');
     }
     // Spraying-programs type key — the markers are colored by program type.
     if (state.spraying.showMarkers && state.spraying.types.length) {
@@ -649,6 +687,7 @@
       case 'cancer':         return 'cancer rates';
       case 'contam_density': return 'contamination-site counts';
       case 'tri':            return 'toxic-release amounts';
+      case 'landfill_density': return 'landfill counts';
       default:               return 'pesticide amounts';
     }
   }
@@ -696,6 +735,7 @@
       if (which === 'cancer') await loadCancerData(); else updateCancerMeta(null);
       if (which === 'contam_density') await loadContamDensity();
       if (which === 'tri') await loadTriDensity(state.tri.metric);
+      if (which === 'landfill_density') await loadLandfillDensity();
     } catch (e) {
       console.error(e);
     } finally {
@@ -1493,6 +1533,8 @@
     renderCountyCancerCard(data.cancer);
     // Industrial contamination list
     renderCountyContamination(data.contamination);
+    // Landfills & waste facilities rollup
+    renderCountyLandfills(data.landfills);
     // Industrial toxic releases (TRI) — fetched separately (own tables).
     renderCountyTri(fips);
 
@@ -1692,6 +1734,177 @@
     const npl = vis.filter((s) => s.status_class === 'npl').length;
     el.textContent = `${vis.length} sites shown · ${npl} active Superfund · click a marker for detail`;
   }
+
+  // ---------- Landfills & waste facilities overlay ----------
+  // Michigan EGLE Part 115 solid-waste landfills + disposal-capable Part 111
+  // hazardous-waste facilities. Markers colored by facility type; popups carry
+  // regulatory status, what monitoring is REQUIRED (results are FOIA-only), and
+  // cross-links to the app's TRI + Superfund records when the same facility
+  // appears there. Earthy brown→tan density scale (unused by any other layer).
+  const LANDFILL_PALETTE = ['#2b2118', '#3d2e1c', '#523c20', '#6b4f24', '#876428',
+                            '#a67d2c', '#c39a3a', '#d9b458', '#ead089', '#f3e4b8'];
+  const LANDFILL_GLYPH = {
+    msw: '\u{1F5D1}', industrial: '\u{1F3ED}', cnd: '\u{1F9F1}',
+    coal_ash: '⚫', hazardous: '☣',
+  };
+
+  function landfillPane() {
+    if (!state.map.getPane('landfill')) {
+      // Above TRI (640), below contamination (650) + spraying (655).
+      state.map.createPane('landfill').style.zIndex = 645;
+    }
+    return 'landfill';
+  }
+
+  function newLandfillClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      return L.markerClusterGroup({
+        clusterPane: 'landfill', maxClusterRadius: 46, chunkedLoading: true,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: true,
+      });
+    }
+    return L.layerGroup();   // graceful fallback if the cluster plugin didn't load
+  }
+
+  async function loadLandfills() {
+    if (state.landfill.loaded) return;
+    const d = await api('/api/landfill/sites');
+    state.landfill.sites = d.sites || [];
+    state.landfill.legend = d.legend || null;
+    state.landfill.loaded = true;
+  }
+
+  async function loadLandfillDensity() {
+    if (!state.landfill.densityByFips.size) {
+      const d = await api('/api/landfill/density');
+      for (const c of d.counties) state.landfill.densityByFips.set(c.fips, c);
+      state.landfill._densityMax = (d.stats && d.stats.max) || 1;
+    }
+  }
+
+  function landfillVisible(s) { return state.landfill.filters[s.category] !== false; }
+  function landfillSize(s) { return s.category === 'hazardous' ? 30 : 26; }
+
+  function renderLandfillMarkers() {
+    if (state.landfill.markers) { state.landfill.markers.remove(); state.landfill.markers = null; }
+    if (!state.landfill.showSites) { updateLandfillStats(); renderMarkerKeys(); return; }
+    const pane = landfillPane();
+    const grp = newLandfillClusterLayer();
+    for (const s of state.landfill.sites) {
+      if (s.lat == null || s.lng == null || !landfillVisible(s)) continue;
+      const size = landfillSize(s);
+      // Closed / post-closure facilities (if EGLE ever publishes them) render
+      // desaturated with a dashed ring so they read as distinct from active ones.
+      const closed = (s.status_class && s.status_class !== 'active') ? ' closed' : '';
+      const m = L.marker([s.lat, s.lng], {
+        pane,
+        icon: L.divIcon({
+          className: 'landfill-divicon',
+          html: `<div class="landfill-marker${closed}" style="width:${size}px;height:${size}px;background:${s.color}"><span>${s.glyph}</span></div>`,
+          iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+        }),
+      });
+      m.bindPopup(landfillPopupHtml(s), { maxWidth: 340, className: 'landfill-popup-wrap' });
+      grp.addLayer(m);
+    }
+    grp.addTo(state.map);
+    state.landfill.markers = grp;
+    updateLandfillStats();
+    renderMarkerKeys();
+  }
+
+  function landfillPopupHtml(s) {
+    const addr = [s.address, s.city].filter(Boolean).join(', ');
+    const loc = addr ? `${addr}${s.county ? ', ' + s.county + ' Co.' : ''}`
+                     : (s.county ? s.county + ' County' : '');
+    const types = (s.facility_types || []).length > 1
+      ? `<ul class="lf-types">${s.facility_types.map((t) => `<li>${t}</li>`).join('')}</ul>` : '';
+    const fed = s.federal_regulated ? ' · federally regulated' : '';
+    const comm = s.commercial ? ' · accepts offsite waste' : '';
+    const lic = s.license_id ? ` <span class="muted small">License ${s.license_id}</span>` : '';
+
+    // Cross-links to the app's own TRI / Superfund records (matched at load time).
+    let xlinks = '';
+    if (s.tri_total_lbs != null) {
+      xlinks += `<button type="button" class="lf-xlink tri" data-lf-focus="tri" data-id="${s.tri_facility_id || ''}" data-lat="${s.lat}" data-lng="${s.lng}">🏭 Also reports to TRI — <b>${fmtLbs(s.tri_total_lbs)}</b> released${s.tri_year ? ` (${s.tri_year})` : ''} · show on map →</button>`;
+    }
+    if (s.contam_site_key) {
+      xlinks += `<button type="button" class="lf-xlink contam" data-lf-focus="contam" data-lat="${s.lat}" data-lng="${s.lng}">☣ Also a contaminated / Superfund site${s.contam_status ? ` — ${s.contam_status}` : ''} · show on map →</button>`;
+    }
+    const egle = s.egle_url
+      ? `<a href="${s.egle_url}" target="_blank" rel="noopener">EGLE facility record →</a>` : '';
+
+    return `<div class="landfill-popup">
+      <div class="lf-type" style="background:${s.color}">${s.glyph} ${s.category_label}</div>
+      ${s.operator && s.operator !== s.name ? `<div class="lf-operator">${s.operator}</div>` : ''}
+      <h4>${s.name}</h4>
+      ${s.type_label ? `<div class="lf-meta">${s.type_label}</div>` : ''}
+      ${loc ? `<div class="lf-meta">${loc}</div>` : ''}
+      <div class="lf-status"><span class="lf-badge" style="background:${s.status_color}">${s.status_display}</span>${lic}${fed}${comm}</div>
+      ${types}
+      ${xlinks ? `<div class="lf-xlinks">${xlinks}</div>` : ''}
+      <div class="lf-monitor"><span class="k">Monitoring required:</span> ${s.monitoring}</div>
+      <p class="lf-foia">Monitoring <em>results</em> (groundwater, air, leachate) aren't published online — request them from <a href="${s.foia_url}" target="_blank" rel="noopener">EGLE via FOIA →</a></p>
+      ${egle ? `<div class="lf-links">${egle}</div>` : ''}
+      <div class="lf-note">Facility data: Michigan EGLE Materials Management (Part 115 / Part 111). Capacity &amp; monitoring results are not in the public feed.</div>
+    </div>`;
+  }
+
+  function updateLandfillStats() {
+    const el = $('landfill-stats');
+    if (!el) return;
+    if (!state.landfill.loaded) { el.textContent = '—'; return; }
+    const vis = state.landfill.sites.filter(landfillVisible);
+    const haz = vis.filter((s) => s.category === 'hazardous').length;
+    el.textContent = `${vis.length} active facilities · ${haz} hazardous-waste · click a marker for detail`;
+  }
+
+  function renderCountyLandfills(c) {
+    const el = $('county-landfill-list');
+    const count = $('county-landfill-count');
+    if (!el) return;
+    if (!c || !c.total) {
+      if (count) count.textContent = '· none active';
+      el.innerHTML = '<p class="muted small">No active licensed landfills or disposal facilities mapped in this county. Closed / pre-regulation sites may appear under <em>Industrial contamination</em> above.</p>';
+      return;
+    }
+    if (count) count.textContent = `· ${c.total} facilit${c.total > 1 ? 'ies' : 'y'}${c.hazardous ? `, ${c.hazardous} hazardous` : ''}`;
+    el.innerHTML = c.sites.map((s) => {
+      const g = LANDFILL_GLYPH[s.category] || '\u{1F5D1}';
+      const tri = s.tri_total_lbs != null ? ` · TRI ${fmtLbs(s.tri_total_lbs)}` : '';
+      return `<div class="landfill-li ${s.category}"><span class="g">${g}</span>
+        <span class="n">${s.name}${s.operator && s.operator !== s.name ? `<span class="muted small"> — ${s.operator}</span>` : ''}</span>
+        <span class="s">${s.type_label || s.category}${tri}</span></div>`;
+    }).join('');
+  }
+
+  // Cross-link buttons inside landfill popups: enable the related overlay and
+  // fly to the facility. Delegated so it works for dynamically-built popups.
+  document.addEventListener('click', async (e) => {
+    const el = e.target.closest && e.target.closest('[data-lf-focus]');
+    if (!el) return;
+    e.preventDefault();
+    const kind = el.getAttribute('data-lf-focus');
+    const lat = parseFloat(el.getAttribute('data-lat'));
+    const lng = parseFloat(el.getAttribute('data-lng'));
+    const zoom = Math.max(state.map.getZoom(), 10);
+    if (kind === 'tri') {
+      const id = el.getAttribute('data-id');
+      const cb = $('tri-sites');
+      if (cb && !cb.checked) { cb.checked = true; state.tri.showSites = true; await refreshTriSites(); }
+      const m = state.tri.markerById && state.tri.markerById.get(id);
+      if (m) { state.map.setView(m.getLatLng(), zoom); m.openPopup(); }
+      else if (!Number.isNaN(lat)) state.map.setView([lat, lng], zoom);
+    } else if (kind === 'contam') {
+      const cb = $('contam-sites');
+      if (cb && !cb.checked) {
+        cb.checked = true; state.contam.showSites = true;
+        await loadContamination(); renderContamMarkers(); renderMarkerKeys();
+      }
+      if (!Number.isNaN(lat)) state.map.setView([lat, lng], zoom);
+    }
+  });
 
   // ---------- Spraying Programs directory overlay ----------
   // A curated directory of Michigan's organized spraying programs (spongy moth,
@@ -2520,6 +2733,23 @@
     $('tri-sites').addEventListener('change', async (e) => {
       state.tri.showSites = e.target.checked;
       await refreshTriSites();
+    });
+
+    // Landfills & waste facilities (independent overlay) + type filters.
+    const lfToggle = $('landfill-sites');
+    if (lfToggle) {
+      lfToggle.addEventListener('change', async (e) => {
+        state.landfill.showSites = e.target.checked;
+        if (e.target.checked) await loadLandfills();
+        renderLandfillMarkers();
+      });
+    }
+    ['msw', 'industrial', 'coal_ash', 'hazardous'].forEach((k) => {
+      const cb = $(`landfill-f-${k}`);
+      if (cb) cb.addEventListener('change', (e) => {
+        state.landfill.filters[k] = e.target.checked;
+        renderLandfillMarkers();
+      });
     });
     // TRI choropleth pathway sub-option.
     $('tri-metric').addEventListener('change', async (e) => {

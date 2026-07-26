@@ -1540,6 +1540,7 @@ a:hover { text-decoration: underline; }
 
 /* ---------- EPA Toxics Release Inventory (TRI) ---------- */
 .lr-dot.tri { background: #2f8783; }
+.lr-dot.landfill { background: #b5762e; }
 
 .tri-suboptions { margin: 4px 0 6px 22px; }
 .tri-suboptions label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
@@ -1595,6 +1596,79 @@ a:hover { text-decoration: underline; }
   margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
   font-size: 10.5px; font-style: italic; color: var(--muted);
 }
+
+/* ---------- Landfills & waste facilities ---------- */
+.landfill-subtoggles {
+  display: flex; flex-wrap: wrap; gap: 3px 12px;
+  margin: 4px 0 8px 22px;
+}
+.landfill-subtoggles label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+
+.landfill-divicon { background: transparent; border: 0; }
+.landfill-marker {
+  border-radius: 6px;                 /* rounded square — distinct from round contam / square TRI */
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 7px rgba(0,0,0,.65);
+  font-size: 13px; line-height: 1;
+}
+.landfill-marker span { filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+/* closed / post-closure (if EGLE ever publishes them): desaturated + dashed ring */
+.landfill-marker.closed {
+  border-style: dashed; border-color: #c9d1d9;
+  filter: grayscale(0.7) opacity(0.8);
+}
+
+.landfill-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.landfill-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.landfill-popup { max-width: 340px; font-size: 12.5px; }
+.landfill-popup .lf-type {
+  display: inline-block; color: #0d1117; font-weight: 700; font-size: 10.5px;
+  padding: 1px 8px; border-radius: 10px; margin-bottom: 6px;
+}
+.landfill-popup .lf-operator { font-weight: 700; color: var(--accent-2); font-size: 11.5px; }
+.landfill-popup h4 { margin: 2px 0 4px; font-size: 14px; color: var(--text); }
+.landfill-popup .lf-meta { color: var(--muted); font-size: 11.5px; }
+.landfill-popup .lf-status { margin: 6px 0; font-size: 11.5px; color: var(--muted); }
+.landfill-popup .lf-badge {
+  display: inline-block; color: #0d1117; font-weight: 700; font-size: 10px;
+  padding: 1px 7px; border-radius: 9px; margin-right: 4px;
+}
+.landfill-popup .lf-types { margin: 4px 0 6px; padding-left: 18px; color: var(--muted); font-size: 11.5px; }
+.landfill-popup .lf-types li { margin: 1px 0; }
+.landfill-popup .lf-xlinks { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; }
+.landfill-popup .lf-xlink {
+  text-align: left; width: 100%; cursor: pointer; font: inherit; font-size: 11.5px;
+  padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line);
+  background: rgba(217,107,53,.10); color: var(--text);
+}
+.landfill-popup .lf-xlink:hover { background: rgba(217,107,53,.20); }
+.landfill-popup .lf-xlink.contam { background: rgba(248,81,73,.10); }
+.landfill-popup .lf-xlink.contam:hover { background: rgba(248,81,73,.20); }
+.landfill-popup .lf-monitor { margin: 7px 0; line-height: 1.45; font-size: 11.5px; }
+.landfill-popup .lf-monitor .k { color: var(--muted); font-weight: 600; }
+.landfill-popup .lf-foia {
+  margin: 6px 0; padding: 6px 8px; border-radius: 7px;
+  background: rgba(240,180,41,.10); border: 1px solid rgba(240,180,41,.28);
+  font-size: 11.5px; line-height: 1.45;
+}
+.landfill-popup .lf-links { margin: 4px 0; font-size: 12px; }
+.landfill-popup .lf-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+
+/* county-panel landfill list */
+.landfill-county-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+.landfill-li {
+  display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: center;
+  font-size: 12px; padding: 2px 0;
+}
+.landfill-li .g { font-size: 13px; }
+.landfill-li .s { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.landfill-li.hazardous .s { color: #f85149; }
 
 /* county-panel TRI detail block */
 .tri-county-detail { font-size: 12.5px; }
@@ -1897,6 +1971,7 @@ a:hover { text-decoration: underline; }
 
   /* --- comfortable touch targets throughout the sheets --- */
   .layer-radio, .overlay-toggle, .contam-subtoggles label,
+  .landfill-subtoggles label,
   .tri-suboptions label, .toggle-chip { min-height: 44px; }
   .seg button { min-height: 40px; padding: 9px 12px; }
   .field select, .tri-suboptions select, #wq-compound, #resp-metric,

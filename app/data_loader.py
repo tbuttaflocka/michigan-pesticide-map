@@ -65,12 +65,16 @@ from .respiratory_data import (
 )
 from . import cancer_data
 from . import contamination_data
+from . import landfill_data
 from .config import (
     CANCER_DATA_DIR,
     EPA_NPL_QUERY,
     NCI_INCIDENCE_URL,
     NCI_MORTALITY_URL,
     NCI_SCP_BASE,
+    EGLE_LANDFILL_QUERY,
+    EGLE_TSDF_QUERY,
+    EGLE_FOIA_URL,
 )
 
 
@@ -2070,6 +2074,288 @@ def _epa_ms_to_iso(ms) -> str | None:
         return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).date().isoformat()
     except (ValueError, TypeError, OverflowError, OSError):
         return None
+
+
+# ---------- Landfills & waste facilities (Michigan EGLE Materials Mgmt) ----------
+
+def _to_float(v) -> float | None:
+    try:
+        f = float(str(v).strip())
+        return f if f == f else None      # reject NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _title_case_county(name: str | None) -> str | None:
+    return name.title() if name else None
+
+
+def _build_crosslink_index(conn: sqlite3.Connection):
+    """Group the app's existing TRI facilities and contamination sites by
+    county_fips so each landfill only compares against local candidates."""
+    tri_by_fips: dict[str, list] = {}
+    for r in conn.execute(
+        "SELECT facility_id, facility_name, latitude, longitude, county_fips "
+        "FROM tri_facility WHERE county_fips IS NOT NULL"):
+        tri_by_fips.setdefault(r["county_fips"], []).append(dict(r))
+
+    contam_by_fips: dict[str, list] = {}
+    for r in conn.execute(
+        "SELECT site_key, site_name, company, status, latitude, longitude, "
+        "county_fips FROM contamination_sites WHERE county_fips IS NOT NULL"):
+        contam_by_fips.setdefault(r["county_fips"], []).append(dict(r))
+    return tri_by_fips, contam_by_fips
+
+
+def _best_crosslink(lf: dict, candidates: list, *name_fields: str):
+    """Return the best-matching candidate for a landfill, or None. Matches on
+    genuine shared name tokens (against the landfill's name AND operator); a
+    coordinate check only rejects implausibly distant pairs — it never creates a
+    match (see landfill_data for the precision-first rationale)."""
+    lf_names = [lf.get("name"), lf.get("operator")]
+    best, best_score, best_dist = None, 0.0, None
+    for c in candidates:
+        cand_names = [c.get(f) for f in name_fields]
+        score = max(landfill_data.match_names(ln, cn)
+                    for ln in lf_names for cn in cand_names)
+        if score <= 0:
+            continue
+        dist = None
+        if c.get("latitude") is not None and c.get("longitude") is not None:
+            dist = landfill_data.haversine_km(
+                lf["latitude"], lf["longitude"], c["latitude"], c["longitude"])
+            if dist > landfill_data.CROSSLINK_MAX_KM:
+                continue
+        # Prefer the stronger name match, then the closer facility.
+        better = (best is None or score > best_score
+                  or (score == best_score and dist is not None
+                      and (best_dist is None or dist < best_dist)))
+        if better:
+            best, best_score, best_dist = c, score, dist
+    return best
+
+
+def _tri_latest_total(conn: sqlite3.Connection, facility_id: str):
+    row = conn.execute(
+        "SELECT year, SUM(total_lbs) AS total FROM tri_release "
+        "WHERE facility_id = ? GROUP BY year ORDER BY year DESC LIMIT 1",
+        (facility_id,)).fetchone()
+    if not row:
+        return None, None
+    return row["total"], row["year"]
+
+
+def load_landfills(conn: sqlite3.Connection) -> int:
+    """Load Michigan landfills & disposal-capable hazardous-waste facilities from
+    EGLE's Materials Management Open Data ArcGIS service, and cross-link each to
+    the app's existing TRI and Superfund/contamination records."""
+    log("Loading landfills & waste facilities (Michigan EGLE Open Data)...")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM landfill_sites")
+    conn.commit()
+
+    # EGLE writes county names without the period ("St Clair"); the counties
+    # table has "St. Clair". Normalize both sides so the FIPS lookup matches.
+    def _ckey(name):
+        return (name or "").replace(".", "").strip().lower()
+    fips_by_lname = {_ckey(name): fips
+                     for fips, name in _county_fips_list(conn)}
+    tri_by_fips, contam_by_fips = _build_crosslink_index(conn)
+
+    sites: dict[str, dict] = {}      # site_key -> assembled record
+
+    # ---- Part 115 solid-waste landfills (layer 6), grouped by facility ----
+    p115_ok = False
+    p115_rows = 0
+    try:
+        payload = json.loads(http_get(EGLE_LANDFILL_QUERY, timeout=90))
+        for f in payload.get("features", []):
+            a = f.get("attributes", {})
+            lat = _to_float(a.get("latdeccord"))
+            lng = _to_float(a.get("longdeccord"))
+            if lat is None or lng is None:
+                continue
+            wdsid = a.get("wdsid")
+            key = f"egle:{wdsid}" if wdsid else f"egle:{a.get('specificsitename')}"
+            ftype = a.get("facilitytype")
+            cat, tlabel = landfill_data.classify_type(ftype)
+            county = _title_case_county(a.get("countyname"))
+            rec = sites.get(key)
+            if rec is None:
+                st_class, st_label = landfill_data.classify_status(
+                    a.get("disposalareastatus"))
+                sites[key] = {
+                    "site_key": key,
+                    "program": "part115",
+                    "name": (a.get("specificsitename") or a.get("legalsitename")
+                             or "Solid-waste landfill").strip(),
+                    "operator": (a.get("legalsitename") or "").strip() or None,
+                    "category": cat,
+                    "type_label": tlabel,
+                    "facility_types": [ftype] if ftype else [],
+                    "status_class": st_class,
+                    "status_label": st_label,
+                    "license_id": str(wdsid) if wdsid else None,
+                    "address": (a.get("addrline1") or "").strip() or None,
+                    "city": (a.get("city") or "").strip().title() or None,
+                    "zip": (a.get("zip") or "").strip() or None,
+                    "county": county,
+                    "county_fips": fips_by_lname.get(_ckey(county)),
+                    "latitude": lat,
+                    "longitude": lng,
+                    "egle_url": (a.get("landfilllink") or "").strip() or None,
+                    "federal_regulated": 0,
+                    "commercial": 0,
+                }
+            else:
+                if ftype and ftype not in rec["facility_types"]:
+                    rec["facility_types"].append(ftype)
+            p115_rows += 1
+        p115_ok = True
+        log(f"  Part 115 landfills: {p115_rows} disposal-area rows across "
+            f"{len(sites)} facilities", level="ok")
+    except Exception as e:                       # noqa: BLE001
+        log(f"  Part 115 landfill fetch failed: {e}", level="warn")
+
+    # Multi-area sites: keep the joined list of types and refine the label.
+    for rec in sites.values():
+        if len(rec["facility_types"]) > 1:
+            rec["type_label"] = "; ".join(dict.fromkeys(rec["facility_types"]))
+
+    # ---- Part 111 hazardous-waste TSDFs (layer 7): disposal-capable only ----
+    p111_ok = False
+    p111_count = 0
+    try:
+        payload = json.loads(http_get(EGLE_TSDF_QUERY, timeout=90))
+        for f in payload.get("features", []):
+            a = f.get("attributes", {})
+            code = (a.get("FacilityType") or "").strip().upper()
+            if "D" not in code:                  # keep only land-disposal TSDFs
+                continue
+            lat = _to_float(a.get("Latitude"))
+            lng = _to_float(a.get("Longitude"))
+            if lat is None or lng is None:
+                continue
+            sid = a.get("SiteId") or a.get("WDSId")
+            key = f"tsdf:{sid}"
+            county = _title_case_county(a.get("County"))
+            commercial = 1 if "accepts" in (a.get("CommercialFacility") or "").lower() \
+                and "does not" not in (a.get("CommercialFacility") or "").lower() else 0
+            sites[key] = {
+                "site_key": key,
+                "program": "part111",
+                "name": (a.get("SiteSpecificName") or a.get("LegalName")
+                         or "Hazardous-waste facility").strip(),
+                "operator": (a.get("LegalName") or "").strip() or None,
+                "category": "hazardous",
+                "type_label": "Hazardous waste — "
+                              + landfill_data.tsdf_type_label(code).lower(),
+                "facility_types": [landfill_data.tsdf_type_label(code)],
+                "status_class": "active",
+                "status_label": "Active (Part 111 licensed)",
+                "license_id": str(sid) if sid else None,
+                "address": (a.get("Address") or "").strip() or None,
+                "city": (a.get("City") or "").strip().title() or None,
+                "zip": None,
+                "county": county,
+                "county_fips": fips_by_lname.get(_ckey(county)),
+                "latitude": lat,
+                "longitude": lng,
+                "egle_url": (a.get("Hyperlink") or "").strip() or None,
+                "federal_regulated": 1 if a.get("FederallyRegulatedTSD") in (-1, 1) else 0,
+                "commercial": commercial,
+            }
+            p111_count += 1
+        p111_ok = True
+        log(f"  Part 111 TSDFs (disposal-capable): {p111_count}", level="ok")
+    except Exception as e:                       # noqa: BLE001
+        log(f"  Part 111 TSDF fetch failed: {e}", level="warn")
+
+    # ---- cross-link to TRI + contamination, then insert ----
+    tri_links = contam_links = 0
+    for rec in sites.values():
+        fips = rec["county_fips"]
+        tri = _best_crosslink(rec, tri_by_fips.get(fips, []), "facility_name") if fips else None
+        if tri:
+            total, year = _tri_latest_total(conn, tri["facility_id"])
+            rec["tri_facility_id"] = tri["facility_id"]
+            rec["tri_total_lbs"] = total
+            rec["tri_year"] = year
+            tri_links += 1
+        cs = _best_crosslink(rec, contam_by_fips.get(fips, []),
+                             "site_name", "company") if fips else None
+        if cs:
+            rec["contam_site_key"] = cs["site_key"]
+            rec["contam_status"] = cs.get("status")
+            contam_links += 1
+
+    for rec in sites.values():
+        cur.execute(
+            """INSERT OR REPLACE INTO landfill_sites(
+                 site_key, program, name, operator, category, type_label,
+                 facility_types, status_class, status_label, license_id, address,
+                 city, zip, county, county_fips, latitude, longitude, egle_url,
+                 federal_regulated, commercial, tri_facility_id, tri_total_lbs,
+                 tri_year, contam_site_key, contam_status, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (rec["site_key"], rec["program"], rec["name"], rec.get("operator"),
+             rec["category"], rec["type_label"],
+             json.dumps(rec["facility_types"]), rec["status_class"],
+             rec["status_label"], rec.get("license_id"), rec.get("address"),
+             rec.get("city"), rec.get("zip"), rec.get("county"),
+             rec.get("county_fips"), rec["latitude"], rec["longitude"],
+             rec.get("egle_url"), rec.get("federal_regulated", 0),
+             rec.get("commercial", 0), rec.get("tri_facility_id"),
+             rec.get("tri_total_lbs"), rec.get("tri_year"),
+             rec.get("contam_site_key"), rec.get("contam_status"), "EGLE_MMD"),
+        )
+    conn.commit()
+
+    total = len(sites)
+    status = "ok" if (p115_ok and total) else ("partial" if total else "unavailable")
+    log(f"  landfills: {total} facilities "
+        f"({tri_links} TRI cross-links, {contam_links} contamination cross-links)",
+        level="ok" if total else "warn")
+    record_source(
+        conn, "egle_landfills",
+        "Michigan EGLE — Part 115 landfills & Part 111 hazardous-waste facilities",
+        "https://www.michigan.gov/egle/about/organization/materials-management/"
+        "solid-waste/solid-waste-disposal-areas",
+        status, total,
+        f"{total} facilities from EGLE Materials Management Open Data (live "
+        f"ArcGIS): active/accepting Part 115 solid-waste landfills + "
+        f"disposal-capable Part 111 hazardous-waste TSDFs. Active-only — closed / "
+        f"pre-regulation landfills are not in this feed. Monitoring results are "
+        f"FOIA-only.",
+    )
+    # Secondary sources referenced in the overlay (context; not per-facility joined).
+    record_source(
+        conn, "egle_materials_mgmt",
+        "Michigan EGLE — Materials Management Division (solid-waste disposal areas)",
+        "https://www.michigan.gov/egle/about/organization/materials-management/"
+        "solid-waste/solid-waste-disposal-areas",
+        "reference", 0,
+        "Searchable list + interactive map of Type II / Type III disposal areas; "
+        "annual solid-waste reports. Source of the Part 115 facility layer.",
+    )
+    record_source(
+        conn, "epa_lmop",
+        "EPA Landfill Methane Outreach Program (LMOP) — landfill gas database",
+        "https://www.epa.gov/lmop/landfill-technical-data",
+        "reference", 0,
+        "National landfill methane generation / gas-collection & energy-project "
+        "data. Published as a bulk database (not a per-facility API); referenced "
+        "for landfill-gas context, not joined per facility.",
+    )
+    record_source(
+        conn, "epa_rcrainfo",
+        "EPA RCRAInfo / Envirofacts — hazardous-waste handlers (RCRA Subtitle C)",
+        "https://enviro.epa.gov/envirofacts/rcrainfo/search",
+        "reference", 0,
+        "Federal hazardous-waste facility system behind the Part 111 TSDFs. "
+        "The mapped disposal facilities come from EGLE's state layer.",
+    )
+    return total
 
 
 # ---------- EPA Toxics Release Inventory (TRI) ----------

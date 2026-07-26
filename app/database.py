@@ -289,6 +289,49 @@ CREATE INDEX IF NOT EXISTS ix_contam_county   ON contamination_sites(county_fips
 CREATE INDEX IF NOT EXISTS ix_contam_category ON contamination_sites(category);
 CREATE INDEX IF NOT EXISTS ix_contam_status   ON contamination_sites(status_class);
 
+-- ===== Landfills & waste facilities overlay (Michigan EGLE) =====
+-- Live from EGLE Materials Management Open Data (ArcGIS): Part 115 solid-waste
+-- landfills (Type II municipal, Type III industrial / C&D / coal-ash) + the
+-- disposal-capable Part 111 hazardous-waste TSDFs. The Part 115 open-data layer
+-- is ACTIVE-only; closed / post-closure / pre-regulation landfills are not in it
+-- (many surface instead in contamination_sites). tri_* / contam_site_key carry
+-- cross-links to the TRI and Superfund overlays, matched at load time so a
+-- landfill that also self-reports toxic releases or is a contaminated site links
+-- straight to those records. Monitoring RESULTS are never stored here — they are
+-- FOIA-only (see app/landfill_data.py).
+CREATE TABLE IF NOT EXISTS landfill_sites (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_key          TEXT UNIQUE NOT NULL,   -- egle:<wdsid> or tsdf:<siteid>
+    program           TEXT,                   -- part115 | part111
+    name              TEXT NOT NULL,          -- specific facility name
+    operator          TEXT,                   -- legal / operating entity
+    category          TEXT,                   -- msw|industrial|cnd|coal_ash|hazardous
+    type_label        TEXT,                   -- plain-language type
+    facility_types    TEXT,                   -- JSON array of raw EGLE disposal-area types
+    status_class      TEXT,                   -- active|closed|post_closure|unknown
+    status_label      TEXT,                   -- raw disposalareastatus text
+    license_id        TEXT,                   -- EGLE wdsid / site id
+    address           TEXT,
+    city              TEXT,
+    zip               TEXT,
+    county            TEXT,
+    county_fips       TEXT,
+    latitude          REAL NOT NULL,
+    longitude         REAL NOT NULL,
+    egle_url          TEXT,                   -- EGLE facility record link
+    federal_regulated INTEGER DEFAULT 0,      -- Part 111 FederallyRegulatedTSD
+    commercial        INTEGER DEFAULT 0,      -- accepts offsite hazardous waste
+    -- cross-links (matched at load time) to the app's other overlays --
+    tri_facility_id   TEXT,                   -- tri_facility.facility_id
+    tri_total_lbs     REAL,                   -- matched facility latest-year total
+    tri_year          INTEGER,
+    contam_site_key   TEXT,                   -- contamination_sites.site_key
+    contam_status     TEXT,                   -- matched contamination status label
+    source            TEXT DEFAULT 'EGLE_MMD'
+);
+CREATE INDEX IF NOT EXISTS ix_landfill_county ON landfill_sites(county_fips);
+CREATE INDEX IF NOT EXISTS ix_landfill_cat    ON landfill_sites(category);
+
 -- ===== Wind / pesticide-drift modeling =====
 
 CREATE TABLE IF NOT EXISTS wind_data (

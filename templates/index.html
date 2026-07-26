@@ -167,6 +167,12 @@
               Source: EPA Toxics Release Inventory via Envirofacts.</p>
           </details>
         </div>
+
+        <label class="layer-radio" data-tip="Shade counties by how many active licensed landfills &amp; hazardous-waste disposal facilities they contain. Source: Michigan EGLE Part 115 &amp; Part 111."><input type="radio" name="choropleth" value="landfill_density" /> <span class="lr-dot landfill"></span> <span>Landfill density</span></label>
+        <div class="layer-inline" data-layer-filters="landfill_density">
+          <p class="muted small">County color = number of active licensed landfills &amp; disposal-capable hazardous-waste facilities. Facility markers are in the <em>Overlays</em> section below.</p>
+          <p class="muted small" id="landfill-stats">—</p>
+        </div>
       </div>
     </section>
 
@@ -187,6 +193,17 @@
         </div>
         <label class="overlay-toggle" data-tip="Estimated impact radius drawn around each major contamination site."><input type="checkbox" id="contam-zones" /> <span>Contamination impact zones</span></label>
         <label class="overlay-toggle" data-tip="Factory markers for facilities that self-report toxic chemical releases each year (EPA Toxics Release Inventory). Bigger, redder markers release more. Click one for the pathway breakdown and top chemicals."><input type="checkbox" id="tri-sites" /> <span>TRI industrial facilities</span></label>
+        <label class="overlay-toggle" data-tip="Michigan landfills &amp; hazardous-waste disposal facilities, colored by type: Type II = municipal solid waste, Type III = industrial / construction / coal ash, red = Part 111 hazardous-waste disposal (e.g. Wayne Disposal). Click one for regulatory status, what monitoring is required, and any TRI / Superfund links. Source: Michigan EGLE."><input type="checkbox" id="landfill-sites" /> <span>Landfills &amp; waste facilities</span></label>
+        <div class="landfill-subtoggles" id="landfill-subtoggles">
+          <label class="small"><input type="checkbox" id="landfill-f-msw" checked /> <span class="cdot" style="background:#d96b35"></span> Municipal (II)</label>
+          <label class="small"><input type="checkbox" id="landfill-f-industrial" checked /> <span class="cdot" style="background:#b5762e"></span> Industrial/C&amp;D (III)</label>
+          <label class="small"><input type="checkbox" id="landfill-f-coal_ash" checked /> <span class="cdot" style="background:#6f7785"></span> Coal ash</label>
+          <label class="small"><input type="checkbox" id="landfill-f-hazardous" checked /> <span class="cdot" style="background:#f85149"></span> Hazardous</label>
+        </div>
+        <details class="collapsible landfill-caveat">
+          <summary><span class="info-icon">ℹ️</span>&nbsp;About landfills &amp; monitoring</summary>
+          <p class="disclaimer-text small">Landfill monitoring (groundwater, air, <span data-gloss="leachate">leachate</span>) is legally required but the <strong>results are generally not published online</strong> — they're available from EGLE by <span data-gloss="FOIA">FOIA</span> request. This layer shows facility <strong>locations, types, and regulatory status</strong>. Where a facility also reports toxic releases (<span data-gloss="TRI">TRI</span>) or is a contaminated site (<span data-gloss="Superfund">Superfund</span>), that data is linked in its popup.<br><br><strong>Coverage:</strong> EGLE's open data lists <strong>active / accepting</strong> licensed facilities. <span data-gloss="post-closure care">Closed, post-closure</span>, and pre-regulation (unlined) landfills — often the bigger contamination risk — are <strong>not</strong> comprehensively mapped here; many appear in the <em>Contamination sites</em> overlay instead. Capacity/volume and monitoring results are not in the feed and are never guessed. Sources: Michigan EGLE Part 115 landfills &amp; Part 111 <span data-gloss="RCRA">hazardous-waste</span> disposal facilities (Materials Management Open Data).</p>
+        </details>
         <label class="overlay-toggle" data-tip="A directory of Michigan's known organized spraying programs (county spongy-moth suppression, mosquito abatement, and the state's EEE/West Nile aerial response). Each links to its official page for current schedules — not a live spray-date feed."><input type="checkbox" id="spraying-programs" /> <span>Spraying programs (directory)</span></label>
         <details class="collapsible spraying-caveat">
           <summary><span class="info-icon">ℹ️</span>&nbsp;About the spraying-programs directory</summary>
@@ -327,6 +344,9 @@
 
       <h3>Industrial contamination <span class="muted small" id="county-contam-count"></span></h3>
       <div id="county-contam-list" class="contam-county-list"></div>
+
+      <h3>Landfills &amp; waste facilities <span class="muted small" id="county-landfill-count"></span></h3>
+      <div id="county-landfill-list" class="landfill-county-list"></div>
 
       <h3>Industrial toxic releases (TRI) <span class="muted small" id="county-tri-count"></span>
         <span class="info-i" data-gloss="TRI">?</span>

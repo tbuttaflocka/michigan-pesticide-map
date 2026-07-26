@@ -249,6 +249,20 @@ SOURCES: list[Source] = [
         coverage=year_range("tri_release", "year"),
     ),
     Source(
+        id="landfills",
+        label="Michigan EGLE — landfills & hazardous-waste facilities",
+        loaders=[dl.load_landfills],
+        targets=["landfill_sites"],
+        primary_target="landfill_sites", primary_source_id="egle_landfills",
+        # EGLE refreshes the open-data layers periodically; a quarterly check
+        # keeps facility status/licensing current without heavy downloads.
+        interval_months=3, min_abs=50, floor_frac=0.5,
+        coverage=lambda conn: (None, None),
+        # Seed staging with the TRI + contamination tables so the loader can
+        # match each landfill to its TRI-release and Superfund records.
+        seed_extra=("tri_facility", "tri_release", "contamination_sites"),
+    ),
+    Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
         loaders=[chem_ref.load_chemical_reference],
         targets=["chemical_reference"],

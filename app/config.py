@@ -146,6 +146,30 @@ TRI_START_YEAR = 2013          # pull >= 10 years so trends have depth
 TRI_END_YEAR = 2025            # probe downward from here; skip empty years
 TRI_CACHE_DIR = DATA_DIR / "tri"
 
+# ---- Michigan EGLE Materials Management Open Data (ArcGIS MapServer) ----
+# Solid-waste + hazardous-waste facility layers published by EGLE. We use two:
+#   * Layer 6 — Part 115 Solid Waste Landfills (Type II municipal + Type III
+#     industrial / C&D / coal-ash). NOTE: this open-data layer only carries
+#     currently ACTIVE / accepting licensed facilities — closed / post-closure /
+#     pre-regulation landfills are NOT in it (see app/landfill_data.py).
+#   * Layer 7 — Part 111 Treatment, Storage & Disposal Facilities (hazardous
+#     waste, e.g. Wayne Disposal). We keep only disposal-capable TSDFs (a
+#     FacilityType containing "D") — the actual hazardous-waste land-disposal
+#     sites — not the many storage/treatment-only generator locations.
+# Coordinates come back as WGS84 (latdeccord/longdeccord strings on L6,
+# Latitude/Longitude doubles on L7).
+EGLE_MMD_BASE = ("https://gisagoegle.state.mi.us/arcgis/rest/services/"
+                 "EGLE/MmdOpenData/MapServer")
+EGLE_LANDFILL_QUERY = (
+    EGLE_MMD_BASE + "/6/query?where=1%3D1&outFields=*&returnGeometry=false&f=json"
+)
+EGLE_TSDF_QUERY = (
+    EGLE_MMD_BASE + "/7/query?where=1%3D1&outFields=*&returnGeometry=false&f=json"
+)
+# EGLE FOIA landing — monitoring RESULTS (groundwater/air/leachate) are not
+# published as open data and must be requested here.
+EGLE_FOIA_URL = "https://www.michigan.gov/egle/about/foia"
+
 # ---- USGS Watershed Boundary Dataset (HUC-8 polygons) ----
 WBD_HUC8_QUERY = (
     "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/4/query"

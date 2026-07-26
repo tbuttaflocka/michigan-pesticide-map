@@ -102,6 +102,39 @@
     'dioxin':
       'A group of highly toxic industrial by-products that persist in the environment ' +
       'and accumulate up the food chain.',
+    'Type II landfill':
+      'A municipal solid waste (MSW) landfill — the kind that takes everyday household ' +
+      'and commercial trash. Under federal law (40 CFR Part 258) it must have liners, ' +
+      'leachate collection, and groundwater monitoring throughout its life and for ' +
+      'decades after it closes.',
+    'Type III landfill':
+      'A landfill for specific, lower-hazard waste streams rather than household ' +
+      'trash — industrial process waste, construction-and-demolition debris, or coal ' +
+      'ash. Regulated by Michigan under Part 115 with monitoring scaled to the waste.',
+    'leachate':
+      'The liquid that forms when rain and moisture percolate down through buried ' +
+      'waste, picking up dissolved contaminants along the way. Landfills are required ' +
+      'to collect and treat it so it does not reach groundwater.',
+    'post-closure care':
+      'The long period (typically 30 years) AFTER a landfill stops accepting waste ' +
+      'during which the operator must maintain the cap, run the gas and leachate ' +
+      'systems, and keep monitoring groundwater.',
+    'RCRA':
+      'The Resource Conservation and Recovery Act — the 1976 federal law that governs ' +
+      'how solid and especially HAZARDOUS waste is handled from creation to disposal. ' +
+      'Its "Subtitle C" sets the strict rules for hazardous-waste facilities.',
+    'TSDF':
+      'A Treatment, Storage, and Disposal Facility — a site permitted under RCRA to ' +
+      'treat, store, or bury HAZARDOUS waste. A hazardous-waste landfill such as Wayne ' +
+      'Disposal is the "disposal" kind.',
+    'landfill gas':
+      'The mix of methane and carbon dioxide produced as organic waste rots without ' +
+      'oxygen inside a landfill. Methane is flammable and a potent greenhouse gas, so ' +
+      'larger landfills must collect it — sometimes burning it for energy.',
+    'FOIA':
+      'The Freedom of Information Act — the law letting the public request government ' +
+      'records. Landfill monitoring results that agencies hold but do not publish ' +
+      'online can usually be obtained this way (in Michigan, from EGLE).',
     'correlation coefficient':
       'A number from −1 to +1 measuring how tightly two things move together. ' +
       '+1 = perfectly rise together, −1 = one rises as the other falls, 0 = no link.',

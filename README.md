@@ -3,8 +3,9 @@
 Interactive single-page web app that brings together county-level pollution,
 contamination, and community-health data for Michigan's 83 counties on one map so
 you can explore it and ask questions. It combines agricultural **pesticide use** (USGS NAWQA EPest), **water-quality**
-sampling, **industrial contamination** (EPA Superfund) and active **industrial toxic
-releases** (EPA Toxics Release Inventory), **respiratory** and **cancer** health measures,
+sampling, **industrial contamination** (EPA Superfund), active **industrial toxic
+releases** (EPA Toxics Release Inventory), **landfills & waste facilities** (Michigan
+EGLE), **respiratory** and **cancer** health measures,
 crop acreage, and growing-season **wind/drift**. Built with Flask + SQLite + Leaflet +
 Chart.js.
 
@@ -198,6 +199,32 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
   Wikipedia auto-fetch; `--only`, `--force`, `--no-web`, `--list` flags). Sites
   with no available narrative say "No detailed public narrative found" rather
   than inventing one.
+- **Landfills & waste-facilities overlay** — Michigan's licensed waste-disposal
+  sites on top of the map: ~115 facilities pulled live from EGLE's Materials
+  Management Open Data ArcGIS service — all active/accepting Part 115 solid-waste
+  landfills (Type II municipal, Type III industrial / C&D / coal-ash) plus the
+  disposal-capable Part 111 hazardous-waste facilities (e.g. Wayne Disposal).
+  Toggleable in the left sidebar with type sub-filters (municipal / industrial /
+  coal-ash / hazardous), a rounded-square marker colored by type on a dedicated
+  pane, marker clustering, a "by type" legend key, and an earthy county-density
+  choropleth ("Landfill density"). Each popup shows the operator, facility type,
+  license status + ID, address, **what environmental monitoring is legally
+  required at that facility type** (40 CFR Part 258 for Type II, the CCR rule for
+  coal-ash, RCRA Subtitle C for hazardous), and — honestly — a note that
+  monitoring *results* (groundwater/air/leachate) are not published online and
+  must be requested from **EGLE by FOIA**, with a link. Where a landfill also
+  appears in the app's own data it is **cross-linked**: a facility that reports to
+  TRI shows its latest-year release total with a "show on map" button (Wayne
+  Disposal → ~15.4M lbs), and one that is a contaminated/Superfund site links to
+  that record — matched at load time by name-token overlap + coordinate proximity
+  (precision-first, so a wrong link never fabricates releases). The county detail
+  panel lists each county's landfills. **Coverage is honest about its limits:**
+  the EGLE open-data layer is active-only — closed, post-closure, and
+  pre-regulation (unlined) landfills, often the bigger contamination risk, are
+  not comprehensively mapped here and many surface in the contamination overlay
+  instead; capacity/volume and monitoring results are absent from the feed and
+  are never guessed. Glossary adds Type II/III landfill, leachate, post-closure
+  care, RCRA, TSDF, landfill gas, and FOIA.
 - **Wind & pesticide-drift overlay** — three stackable overlays under Map
   layers → Overlays, built from real growing-season (Apr–Sep) hourly wind at 14
   Michigan ASOS airport stations (Iowa Environmental Mesonet). *Wind roses* plot
@@ -234,6 +261,10 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 | **EPA Superfund (SEMS) NPL sites** | ✅ live download | ~90 Michigan NPL sites (66 active, 22 deleted, 2 proposed) with coordinates, HRS score, status, county, listing date. ArcGIS Feature Service (org `cJ9YHowT8TU7DUyn`, `State='Michigan'`); merged/deduped with the compiled dataset. |
 | **Compiled industrial polluters + PFAS sites** | ✅ embedded reference | 31 hand-compiled major sites (Dow, Velsicol/PBB, Wolverine/Hush Puppies PFAS, Torch Lake, McLouth Steel, GM, Kalamazoo River PCBs, Wurtsmith AFB, Gelman 1,4-dioxane, etc.) with company attribution, contaminant lists, narratives, impact radii, and affected waterways in `app/contamination_data.py`. Many are non-NPL and don't appear in the EPA feed. |
 | Michigan EGLE Remediation & Redevelopment (Part 201), MPART (PFAS), EPA Region 5, MDHHS PBB Registry, ATSDR | 🔗 reference link | State/PFAS programs and toxicological references; portal-only or embedded, not bulk feeds. |
+| **Michigan EGLE — Part 115 landfills & Part 111 hazardous-waste facilities** | ✅ live download | ~115 facilities from EGLE's Materials Management Open Data ArcGIS service (`gisagoegle.state.mi.us`, layers 6 + 7): all active/accepting Part 115 solid-waste landfills (Type II municipal, Type III industrial / C&D / coal-ash) plus disposal-capable Part 111 hazardous-waste TSDFs (a FacilityType containing "D", e.g. Wayne Disposal). Each carries operator, type, license status/ID, address, county, lat/lng, and the EGLE facility link. Cross-linked at load time to the app's TRI and Superfund records by name-token + coordinate matching (precision-first). Active-only — closed/pre-regulation landfills are not in the feed; capacity/volume and monitoring results are absent and never guessed. Powers the "Landfills & waste facilities" overlay, the "Landfill density" choropleth, and the per-county rollup. |
+| Michigan EGLE Materials Management Division (solid-waste disposal areas) | 🔗 reference link | Searchable list + interactive map of Type II / Type III disposal areas and annual solid-waste reports; source of the Part 115 layer. |
+| EPA Landfill Methane Outreach Program (LMOP) | 🔗 reference link | National landfill methane generation / gas-collection & energy-project database, published as a bulk file (no per-facility API); referenced for landfill-gas context, not joined per facility. |
+| EPA RCRAInfo / Envirofacts (RCRA Subtitle C) | 🔗 reference link | Federal hazardous-waste facility system behind the Part 111 TSDFs; the mapped disposal facilities come from EGLE's state layer. |
 | **EPA Toxics Release Inventory (TRI)** — active industrial releases, 2013–2024 | ✅ live download | ~1,090 Michigan facilities and ~37k facility-chemical-year release records from the Envirofacts `mv_tri_basic_download` view (filtered `st=MI`, one CSV per year). Each record carries county, lat/lng, NAICS + plain-language industry sector, PFAS/carcinogen flags, and pounds released per pathway (air = fugitive + stack, water, underground, land). Complements the legacy Superfund layer by showing what facilities are *actively* releasing now. Self-reported annually under EPCRA. Powers factory markers, the "TRI toxic releases" choropleth (with air/water/land/PFAS sub-options), correlation X-variables, and a year-over-year trend. No API key required. |
 | **PubChem (NCBI)** chemical descriptions & properties | ✅ live download (cached) | Real plain-language descriptions, molecular formula/weight, CAS, common synonyms and PubChem CID for every chemical/compound in the data (pesticides, TRI chemicals, water detections). Pre-fetched once via the re-runnable `enrich_chemicals.py` (PUG REST, no API key, rate-limited) into the `chemical_reference` table, so the chemical-info popups read locally with no live call on click. Complements — does not replace — the EPA/IARC hazard classifications. |
 | **CDC EPHT Tracking Network** asthma + COPD rates | ✅ live download | 2,822 county-year-condition rows pulled from `getCoreHolder` measures 437/103/652/649 with exponential-backoff retry. |
@@ -317,6 +348,7 @@ run `--full` occasionally (e.g. yearly) to re-pull everything and backfill.
 | `tri` (EPA Toxics Release Inventory) | **Annual** (quarterly-safe) | TRI is published yearly (a year's data finalizes ~Oct of the following year). A quarterly run simply reuses the cached finalized years and picks up the newly-finalized year when it lands. |
 | `water_quality` (WQP samples) | **Quarterly** | New samples posted continuously |
 | `superfund` (EPA NPL) | **Quarterly** | Site statuses change through the year |
+| `landfills` (EGLE Part 115 / Part 111) | **Quarterly** | Facility licensing/status changes through the year; EGLE refreshes the open-data layers periodically. |
 
 ### Scheduling on Windows (Task Scheduler)
 
@@ -365,6 +397,7 @@ Known limitations, by source:
 | **NCI/CDC State Cancer Profiles** | Cancer has **10–30 year latency**, so current rates reflect past exposure. Counts under a threshold (≈16 cases) are **suppressed**, leaving gaps. Ecological comparison only. |
 | **CDC Environmental Tracking** (respiratory) | Annual, county-level, age-adjusted; some measures fall back to a Michigan statewide baseline where county breakdowns aren't published. Urban asthma is driven mostly by air quality/industry, not farming. |
 | **EPA Superfund / compiled sites** | Point locations and status change over time; the compiled set is a curated subset, not an exhaustive inventory of every contaminated site. |
+| **Michigan EGLE landfills** | The Part 115 open-data layer is **active/accepting only** — closed, post-closure, and pre-regulation (unlined) landfills, often the bigger contamination risk, are not comprehensively mapped (many appear in the contamination layer instead). Capacity/volume is not in the feed. **Monitoring results** (groundwater/air/leachate) are legally required but not published online — request them from EGLE by FOIA. Part 111 markers cover disposal-capable hazardous-waste facilities, not storage/treatment-only sites. |
 | **USGS/EPA Water Quality Portal** | Sampling is uneven in space and time; absence of detections can reflect a lack of sampling, not clean water. |
 | **IEM ASOS wind** | Prevailing growing-season wind at a handful of airport stations; drift arrows are a coarse approximation, not a dispersion model. |
 
@@ -430,6 +463,9 @@ michigan-pesticide-map/
 | `GET /api/contamination/county/<fips>` | Contamination sites in one county |
 | `GET /api/contamination/density` | Per-county site counts (total / NPL / PFAS) for the density choropleth |
 | `GET /api/correlation/contamination?cancer=&metric=count\|npl` | Cancer incidence vs contamination-site count per county |
+| `GET /api/landfill/sites?category=` | All landfills & waste facilities with coordinates, type glyph/color, status, monitoring context, FOIA link, and TRI/Superfund cross-links; includes the type/status legend |
+| `GET /api/landfill/county/<fips>` | Landfills & waste facilities in one county |
+| `GET /api/landfill/density` | Per-county landfill counts (total / hazardous / municipal) for the density choropleth |
 
 ## Notes on data limitations
 
