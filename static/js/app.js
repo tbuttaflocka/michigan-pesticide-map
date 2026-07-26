@@ -3208,15 +3208,19 @@
   const _rEsc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+  function openAddressModal() {
+    hide($('report-modal'));
+    hide($('report-reopen'));
+    show($('address-modal'));
+    const inp = $('address-input');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 30); }
+    hide($('address-error'));
+  }
+
   function setupAddressReport() {
-    const open = () => {
-      hide($('report-modal'));
-      show($('address-modal'));
-      const inp = $('address-input');
-      if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 30); }
-      hide($('address-error'));
-    };
-    $('open-address').addEventListener('click', open);
+    $('open-address').addEventListener('click', openAddressModal);
+    const countyBtn = $('county-check-address');
+    if (countyBtn) countyBtn.addEventListener('click', openAddressModal);
     $('address-close').addEventListener('click', () => hide($('address-modal')));
     $('address-modal').addEventListener('click', (e) => {
       if (e.target.id === 'address-modal') hide($('address-modal'));

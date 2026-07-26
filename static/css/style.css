@@ -1744,6 +1744,10 @@ a:hover { text-decoration: underline; }
 
 /* ================= "Check an address" homebuyer report ================= */
 .address-btn { font-weight: 700; }
+.county-address-btn {
+  display: block; width: 100%; margin: 4px 0 12px; font-weight: 700;
+  min-height: 40px;
+}
 .address-card { max-width: 500px; width: min(500px, 96vw); text-align: left; }
 #address-form { display: flex; gap: 8px; margin: 12px 0 8px; flex-wrap: wrap; }
 #address-input {
