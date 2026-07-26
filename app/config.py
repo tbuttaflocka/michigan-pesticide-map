@@ -166,9 +166,12 @@ EGLE_LANDFILL_QUERY = (
 EGLE_TSDF_QUERY = (
     EGLE_MMD_BASE + "/7/query?where=1%3D1&outFields=*&returnGeometry=false&f=json"
 )
-# EGLE FOIA landing — monitoring RESULTS (groundwater/air/leachate) are not
-# published as open data and must be requested here.
-EGLE_FOIA_URL = "https://www.michigan.gov/egle/about/foia"
+# EGLE FOIA — monitoring RESULTS (groundwater/air/leachate) are not published as
+# open data and must be requested here. FOIA_URL is EGLE's procedures/summary
+# page; SUBMIT_URL is the EGLE FOIA Request Center portal (GovQA) where a request
+# is actually filed. Both verified live from michigan.gov/egle/contact/foia.
+EGLE_FOIA_URL = "https://www.michigan.gov/egle/contact/foia/summary"
+EGLE_FOIA_SUBMIT_URL = "https://michiganegle.govqa.us/WEBAPP/_rs/SupportHome.aspx"
 
 # ---- USGS Watershed Boundary Dataset (HUC-8 polygons) ----
 WBD_HUC8_QUERY = (

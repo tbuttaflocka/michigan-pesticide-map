@@ -1670,6 +1670,69 @@ a:hover { text-decoration: underline; }
 .landfill-li .s { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
 .landfill-li.hazardous .s { color: #f85149; }
 
+/* FOIA request builder — popup CTA + reusable modal (see static/js/foia.js) */
+.landfill-popup .lf-foia { margin: 6px 0; }
+.landfill-popup .lf-foia-note { margin: 0 0 5px; font-size: 11.5px; line-height: 1.4; }
+.landfill-popup .lf-foia-btn {
+  width: 100%; cursor: pointer; font: inherit; font-weight: 600; font-size: 12px;
+  padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(240,180,41,.45);
+  background: rgba(240,180,41,.14); color: var(--text);
+}
+.landfill-popup .lf-foia-btn:hover { background: rgba(240,180,41,.26); }
+
+.foia-card {
+  max-width: 640px; width: min(640px, 96vw); text-align: left;
+  max-height: 92dvh; overflow-y: auto;
+}
+.foia-card h2 { margin: 0 0 2px; font-size: 18px; }
+.foia-subject { font-weight: 700; color: var(--accent-2); margin: 0 0 8px; font-size: 13.5px; }
+.foia-explainer { margin: 0 0 12px; line-height: 1.5; font-size: 12.5px; }
+.foia-req-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 5px; flex-wrap: wrap;
+}
+.foia-req-label { font-size: 12px; color: var(--muted); }
+.foia-copy {
+  cursor: pointer; font: inherit; font-weight: 600; font-size: 12.5px;
+  padding: 8px 14px; border-radius: 8px; border: none;
+  background: var(--accent); color: #0b1f10; min-height: 40px;
+}
+.foia-copy:hover { filter: brightness(1.08); }
+.foia-copy.copied { background: #2ea043; }
+.foia-text {
+  width: 100%; min-height: 220px; resize: vertical; box-sizing: border-box;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; line-height: 1.5;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px; white-space: pre-wrap;
+}
+.foia-text:focus { border-color: var(--accent); outline: none; }
+.foia-hint { margin: 6px 0 12px; line-height: 1.4; }
+.foia-guide {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.foia-guide h3 { margin: 0 0 8px; font-size: 13.5px; }
+.foia-gb { margin: 7px 0; font-size: 12.5px; line-height: 1.5; }
+.foia-gb .k { color: var(--muted); font-weight: 700; }
+.foia-gb ul { margin: 4px 0 0; padding-left: 20px; }
+.foia-gb li { margin: 3px 0; }
+.foia-verify { margin: 8px 0 0; font-style: italic; }
+.foia-submit {
+  display: block; text-align: center; text-decoration: none;
+  background: var(--accent-2); color: #241a00; font-weight: 700; font-size: 14px;
+  padding: 12px 18px; border-radius: 8px; margin-bottom: 10px;
+}
+.foia-submit:hover { filter: brightness(1.06); }
+.foia-official { display: inline-block; color: var(--accent-2); }
+
+@media (max-width: 640px) {
+  .foia-card { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .foia-text { min-height: 260px; font-size: 13px; }   /* larger tap/edit target on phones */
+  .foia-copy { width: 100%; }
+  .foia-req-head { align-items: stretch; }
+}
+
 /* county-panel TRI detail block */
 .tri-county-detail { font-size: 12.5px; }
 .tri-county-detail .tri-paths-block { margin-bottom: 6px; }

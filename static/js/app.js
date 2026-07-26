@@ -1772,6 +1772,7 @@
     const d = await api('/api/landfill/sites');
     state.landfill.sites = d.sites || [];
     state.landfill.legend = d.legend || null;
+    state.landfill.foiaAgency = (d.legend && d.legend.foia_agency) || null;
     state.landfill.loaded = true;
   }
 
@@ -1845,7 +1846,10 @@
       ${types}
       ${xlinks ? `<div class="lf-xlinks">${xlinks}</div>` : ''}
       <div class="lf-monitor"><span class="k">Monitoring required:</span> ${s.monitoring}</div>
-      <p class="lf-foia">Monitoring <em>results</em> (groundwater, air, leachate) aren't published online — request them from <a href="${s.foia_url}" target="_blank" rel="noopener">EGLE via FOIA →</a></p>
+      <div class="lf-foia">
+        <p class="lf-foia-note">Monitoring <em>results</em> (groundwater, air, leachate) aren't published online — but you can request them.</p>
+        <button type="button" class="lf-foia-btn" data-lf-foia="${s.site_key}">📄 Request monitoring records (FOIA)</button>
+      </div>
       ${egle ? `<div class="lf-links">${egle}</div>` : ''}
       <div class="lf-note">Facility data: Michigan EGLE Materials Management (Part 115 / Part 111). Capacity &amp; monitoring results are not in the public feed.</div>
     </div>`;
@@ -1878,6 +1882,27 @@
         <span class="s">${s.type_label || s.category}${tri}</span></div>`;
     }).join('');
   }
+
+  // "Request monitoring records (FOIA)" button inside a landfill popup: build a
+  // facility-specific, type-adapted request and open the reusable FOIA modal.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('[data-lf-foia]');
+    if (!btn || typeof window.PMFoia === 'undefined') return;
+    e.preventDefault();
+    const s = state.landfill.sites.find((x) => x.site_key === btn.getAttribute('data-lf-foia'));
+    if (!s) return;
+    window.PMFoia.open({
+      subject: s.name + (s.county ? ` · ${s.county} County` : ''),
+      explainer: state.landfill.foiaAgency && state.landfill.foiaAgency.explainer,
+      facility: {
+        name: s.name, operator: s.operator, license_id: s.license_id,
+        address: s.address, city: s.city, county: s.county, type_label: s.type_label,
+      },
+      records: (s.foia && s.foia.records) || [],
+      authority: s.foia && s.foia.authority,
+      agency: state.landfill.foiaAgency,
+    });
+  });
 
   // Cross-link buttons inside landfill popups: enable the related overlay and
   // fly to the facility. Delegated so it works for dynamically-built popups.

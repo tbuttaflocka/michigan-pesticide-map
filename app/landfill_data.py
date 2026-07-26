@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from .config import EGLE_FOIA_URL  # re-exported for the routes/popup
+from .config import EGLE_FOIA_URL, EGLE_FOIA_SUBMIT_URL  # for routes/popup/FOIA modal
 
 # category -> (glyph, color, legend label). Plain unicode glyphs (no icon font).
 CATEGORY_META = {
@@ -139,6 +139,101 @@ def monitoring_note(category: str) -> str:
     )
 
 
+# ---- FOIA request builder (facility-specific, type-adapted) ----
+#
+# Verified live from EGLE's FOIA pages (michigan.gov/egle/contact/foia). Only
+# facts actually stated there are included — the "$20 waiver" / indigency
+# specifics were NOT on the page, so they are omitted and the modal points to the
+# official page/Procedures & Guidelines instead. Do not add unverified details.
+EGLE_FOIA_PROFILE = {
+    "agency": "Michigan EGLE",
+    "agency_full": ("Michigan Department of Environment, Great Lakes, and Energy "
+                    "(EGLE)"),
+    "statute": "Michigan Freedom of Information Act (MCL 15.231 et seq.)",
+    "source_url": EGLE_FOIA_URL,
+    "submit_url": EGLE_FOIA_SUBMIT_URL,
+    "submit_label": "EGLE FOIA Request Center",
+    # How to submit (verified). Each item is shown as a line in the modal.
+    "methods": [
+        "Online — the EGLE FOIA Request Center (create an account to submit, "
+        "track, communicate, pay, and receive records).",
+        "Fax — 517-241-0858.",
+        "Mail — Michigan Department of Environment, Great Lakes, and Energy, "
+        "ATTN: FOIA Coordinator, P.O. Box 30473, Lansing, MI 48909-7973.",
+    ],
+    # Response timeline (verified wording from the summary page).
+    "timeline": ("EGLE will grant the request, deny it, grant it in part and deny "
+                 "it in part, or take one 10-business-day extension before "
+                 "responding."),
+    # Fees (verified). No unverified figures.
+    "fees": ("A fee may apply per EGLE's FOIA Procedures & Guidelines; there is "
+             "no fee for requests whose cost is below EGLE's threshold. You will "
+             "receive an itemized fee, EGLE may require a good-faith deposit, and "
+             "you may appeal to have a fee reduced. See the official page for "
+             "current fee and fee-reduction details."),
+    "contact_email": "EGLE-FOIA@Michigan.gov",
+    # Shown above the request text so users understand what they're doing.
+    "explainer": ("Monitoring data for this facility is collected and submitted "
+                  "to EGLE but isn't published online. Michigan's Freedom of "
+                  "Information Act lets any member of the public request it. "
+                  "Here's a request ready to send — edit anything before you "
+                  "file it."),
+}
+
+
+def foia_record_categories(category: str, program: str) -> list[str]:
+    """Type-adapted list of monitoring/record categories to request via FOIA.
+
+    Cites only the rules that actually apply to this facility type — a Part 111
+    hazardous-waste facility, a Type II municipal landfill, a coal-ash unit, and
+    a Type III industrial/C&D landfill are governed by different programs.
+    """
+    common_tail = [
+        "Inspection reports, violation notices, and any corrective-action or "
+        "enforcement records",
+        "The current operating license/permit and its monitoring conditions",
+    ]
+    if category == "hazardous":  # Part 111 / RCRA Subtitle C
+        return [
+            "Groundwater detection- and compliance-monitoring reports "
+            "(RCRA Subtitle C / Michigan Part 111; 40 CFR Part 264/265 "
+            "Subpart F constituents)",
+            "Leachate collection and management records",
+            "Corrective-action / remediation records for any release",
+            "Air-monitoring records where applicable to the disposal units",
+        ] + common_tail
+    if category == "msw":  # Part 115 Type II / 40 CFR Part 258
+        return [
+            "Groundwater monitoring reports, including the 40 CFR Part 258 "
+            "Appendix I detection-monitoring constituents (and Appendix II "
+            "assessment-monitoring results where triggered)",
+            "Leachate collection and monitoring records",
+            "Landfill-gas monitoring records",
+        ] + common_tail
+    if category == "coal_ash":  # Part 115 Type III + federal CCR rule
+        return [
+            "Groundwater monitoring reports under the federal Coal Combustion "
+            "Residuals (CCR) rule (40 CFR Part 257) and Michigan Part 115",
+            "Leachate / surface-impoundment monitoring records",
+        ] + common_tail
+    # Type III industrial / C&D — Michigan Part 115 (no 40 CFR Part 258)
+    return [
+        "Groundwater and leachate monitoring reports required under the "
+        "facility's Michigan Part 115 operating license",
+    ] + common_tail
+
+
+def foia_authority(category: str) -> str:
+    """Short label of the regulatory program governing this facility's records."""
+    if category == "hazardous":
+        return "Michigan Part 111 / RCRA Subtitle C (hazardous waste)"
+    if category == "msw":
+        return "Michigan Part 115 / 40 CFR Part 258 (municipal solid waste)"
+    if category == "coal_ash":
+        return "Michigan Part 115 / 40 CFR Part 257 CCR rule (coal ash)"
+    return "Michigan Part 115 (Type III industrial / C&D)"
+
+
 # ---- name matching (for TRI / Superfund cross-links) ----
 #
 # Precision matters far more than recall here: a WRONG cross-link would falsely
@@ -214,6 +309,11 @@ def augment_row(row: dict) -> dict:
     row["status_display"] = row.get("status_label") or st_label
     row["monitoring"] = monitoring_note(cat)
     row["foia_url"] = EGLE_FOIA_URL
+    # Facility-specific FOIA request payload (record categories adapt to type).
+    row["foia"] = {
+        "records": foia_record_categories(cat, row.get("program") or ""),
+        "authority": foia_authority(cat),
+    }
     return row
 
 
@@ -230,4 +330,5 @@ def legend_payload() -> dict:
             if k != "unknown"
         ],
         "foia_url": EGLE_FOIA_URL,
+        "foia_agency": EGLE_FOIA_PROFILE,
     }
