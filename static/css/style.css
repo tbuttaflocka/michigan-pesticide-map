@@ -1742,6 +1742,184 @@ a:hover { text-decoration: underline; }
   color: var(--muted); font-size: 10px; margin-top: 2px; line-height: 1.35;
 }
 
+/* ================= "Check an address" homebuyer report ================= */
+.address-btn { font-weight: 700; }
+.address-card { max-width: 500px; width: min(500px, 96vw); text-align: left; }
+#address-form { display: flex; gap: 8px; margin: 12px 0 8px; flex-wrap: wrap; }
+#address-input {
+  flex: 1 1 240px; min-width: 0; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px;
+  font: inherit; font-size: 14px; min-height: 44px;
+}
+#address-input:focus { border-color: var(--accent); outline: none; }
+#address-go { min-height: 44px; white-space: nowrap; }
+.address-error {
+  margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 12.5px;
+  background: rgba(248,81,73,.14); border: 1px solid rgba(248,81,73,.4); color: #ffb4ae;
+}
+.address-privacy {
+  margin: 10px 0 6px; padding: 8px 10px; border-radius: 8px; line-height: 1.45;
+  background: rgba(63,185,80,.10); border: 1px solid rgba(63,185,80,.3);
+}
+.address-disclaim { margin: 4px 0 0; line-height: 1.4; }
+
+.report-card {
+  max-width: 920px; width: min(920px, 96vw); text-align: left;
+  max-height: 92dvh; overflow-y: auto; padding-top: 8px;
+}
+.report-toolbar {
+  position: sticky; top: -8px; z-index: 2; display: flex; align-items: center;
+  justify-content: space-between; gap: 8px; padding: 8px 0 8px;
+  background: var(--bg-2); border-bottom: 1px solid var(--line); margin-bottom: 8px;
+}
+.report-toolbar .close { position: static; }
+.report-reopen {
+  position: fixed; right: 14px; bottom: 14px; z-index: 4500; cursor: pointer;
+  font: inherit; font-weight: 700; font-size: 13px; padding: 11px 15px;
+  border-radius: 24px; border: 1px solid var(--accent); background: var(--accent);
+  color: #0b1f10; box-shadow: 0 3px 12px rgba(0,0,0,.5); min-height: 44px;
+}
+
+.rpt { font-size: 13px; line-height: 1.5; }
+.rpt-head h2 { margin: 0 0 2px; font-size: 19px; }
+.rpt-addr { font-weight: 700; color: var(--accent-2); font-size: 14px; }
+.rpt-sub { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
+
+/* rating (always above findings) + adjacent statement */
+.rpt-rating {
+  border: 1px solid var(--line); border-left-width: 5px; border-radius: 8px;
+  padding: 10px 12px; margin: 10px 0 8px; background: var(--bg);
+}
+.rpt-rating-top { font-size: 15px; }
+.rpt-rating-adj { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+.band-few { border-left-color: #3fb950; }
+.band-some { border-left-color: #e3b341; }
+.band-multiple { border-left-color: #f85149; }
+.band-insufficient { border-left-color: #8b98a5; }
+.rpt-catgrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px; margin-bottom: 12px;
+}
+.rpt-cat {
+  border: 1px solid var(--line); border-left-width: 4px; border-radius: 7px;
+  padding: 6px 8px; background: var(--bg);
+}
+.rpt-cat-lbl { display: block; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .03em; color: var(--muted); font-weight: 700; }
+.rpt-cat-band { font-size: 12px; font-weight: 600; }
+
+/* monitoring coverage (prominent) */
+.rpt-cov {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin: 8px 0 14px;
+}
+.rpt-warn {
+  background: rgba(227,179,65,.14); border: 1px solid rgba(227,179,65,.5);
+  color: #f0d98a; border-radius: 7px; padding: 8px 10px; margin-bottom: 8px;
+  font-weight: 600; line-height: 1.45;
+}
+.rpt-cov-title { font-weight: 700; margin-bottom: 4px; }
+.rpt-cov-list, .rpt-cov-notes { margin: 4px 0 0; padding-left: 18px; }
+.rpt-cov-list li, .rpt-cov-notes li { margin: 2px 0; }
+.rpt-cov-notes { color: var(--muted); font-size: 11.5px; border-top: 1px dashed var(--line);
+  margin-top: 7px; padding-top: 7px; }
+
+.rpt-section { margin: 14px 0; }
+.rpt-section h3 {
+  margin: 0 0 6px; font-size: 14.5px; border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+.rpt-h-note { font-weight: 400; color: var(--muted); font-size: 11px; }
+.rpt-county h3 { color: var(--accent-2); }
+
+.rpt-layer { margin: 8px 0; }
+.rpt-layer-h {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  flex-wrap: wrap; font-weight: 700; font-size: 13px; margin-bottom: 3px;
+}
+.rpt-rings { display: flex; gap: 8px; flex-wrap: wrap; }
+.rpt-ring { font-weight: 400; font-size: 11px; color: var(--muted); }
+.rpt-ring b { color: var(--text); }
+.rpt-list { list-style: none; margin: 4px 0; padding: 0; }
+.rpt-list li {
+  padding: 6px 8px; margin: 4px 0; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--bg);
+}
+.rpt-item-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rpt-item-name { font-weight: 600; }
+.rpt-dist { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.rpt-item-fig { font-size: 11.8px; color: var(--text); margin-top: 2px; line-height: 1.4; }
+.rpt-comps { margin-top: 2px; font-size: 11.5px; }
+.rpt-none { color: var(--muted); font-size: 12px; margin: 4px 0; line-height: 1.45; }
+.rpt-note { color: var(--muted); font-size: 11.5px; margin: 2px 0 4px; }
+.rpt-focus {
+  display: inline-block; margin-top: 5px; cursor: pointer; font: inherit;
+  font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 6px;
+  border: 1px solid var(--accent-2); background: rgba(240,180,41,.12); color: var(--text);
+}
+.rpt-focus:hover { background: rgba(240,180,41,.24); }
+.rpt-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border-radius: 8px; }
+.rpt-tag.npl { background: #f85149; color: #fff; }
+.rpt-sev { font-weight: 600; }
+.sev-exceeds_mcl { color: #f85149; }
+.sev-exceeds_benchmark { color: #c77dff; }
+.sev-detected { color: #e3b341; }
+.sev-tested_no_detect, .sev-no_data { color: var(--muted); }
+
+.rpt-cc { margin: 6px 0; padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
+.rpt-cc .k { display: block; font-weight: 700; font-size: 12px; }
+.rpt-cc .v { font-size: 12.5px; }
+.rpt-cc-note { margin-top: 2px; }
+.rpt-vs { font-weight: 700; font-size: 11.5px; }
+.rpt-vs.hi { color: #f0a35a; }
+.rpt-vs.lo { color: #6cc06c; }
+
+.rpt-disc { margin: 14px 0 8px; background: rgba(248,81,73,.07);
+  border: 1px solid rgba(248,81,73,.28); border-radius: 8px; padding: 10px 12px; }
+.rpt-disc h3 { margin: 0 0 5px; font-size: 13.5px; border: 0; }
+.rpt-disc ul, .rpt-src ul { margin: 4px 0 0; padding-left: 18px; }
+.rpt-disc li { margin: 4px 0; line-height: 1.45; font-size: 12px; }
+.rpt-src { color: var(--muted); }
+.rpt-src h4 { margin: 8px 0 4px; font-size: 12px; }
+.rpt-src li { font-size: 11px; margin: 2px 0; }
+
+.report-pin-icon { background: transparent; border: 0; }
+.report-pin { font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+
+@media (max-width: 640px) {
+  .report-card { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .address-card { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .rpt-catgrid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Print / Save-as-PDF: show only the report, in a light theme with full text. */
+@media print {
+  body * { visibility: hidden !important; }
+  #report-modal, #report-modal * { visibility: visible !important; }
+  #report-modal {
+    position: absolute; inset: 0; display: block !important; background: #fff;
+    overflow: visible;
+  }
+  #report-modal .report-card {
+    position: static; width: 100%; max-width: 100%; max-height: none;
+    overflow: visible; border: 0; box-shadow: none; background: #fff; padding: 0;
+  }
+  .report-toolbar, .rpt-focus, #report-close, #report-print, .report-reopen { display: none !important; }
+  .rpt, .rpt * { color: #000 !important; }
+  .rpt a { color: #000 !important; text-decoration: underline; }
+  .rpt-rating, .rpt-cat, .rpt-cov, .rpt-warn, .rpt-list li, .rpt-cc, .rpt-disc {
+    background: #fff !important; break-inside: avoid;
+  }
+  .rpt-rating, .rpt-cat { border: 1px solid #999 !important; }
+  .band-few { border-left: 5px solid #2a8a3e !important; }
+  .band-some { border-left: 5px solid #b8860b !important; }
+  .band-multiple { border-left: 5px solid #c0392b !important; }
+  .band-insufficient { border-left: 5px solid #777 !important; }
+  .rpt-warn { border: 2px solid #b8860b !important; }
+  .rpt-section h3 { border-bottom: 1px solid #999 !important; }
+}
+
 .foia-card {
   max-width: 640px; width: min(640px, 96vw); text-align: left;
   max-height: 92dvh; overflow-y: auto;

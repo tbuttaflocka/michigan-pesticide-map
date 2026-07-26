@@ -153,6 +153,18 @@
     return r.json();
   }
 
+  // POST a JSON body. Used for the address report so the address travels in the
+  // request body (never a URL/query string) and leaves no shareable link.
+  async function apiPost(path, body) {
+    const r = await fetch(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* non-JSON error */ }
+    return { ok: r.ok, status: r.status, data };
+  }
+
   function loading(on) {
     on ? show($('loading')) : hide($('loading'));
   }
@@ -3048,6 +3060,8 @@
       if (e.target.id === 'sources-modal') hide($('sources-modal'));
     });
 
+    setupAddressReport();
+
     // TRI chemical info modal — close via ×, backdrop click, or Escape.
     $('tri-info-close').addEventListener('click', () => hide($('tri-info-modal')));
     $('tri-info-modal').addEventListener('click', (e) => {
@@ -3179,6 +3193,394 @@
     document.addEventListener('click', (e) => {
       if (!out.contains(e.target) && e.target !== input) hide(out);
     });
+  }
+
+  // ========================================================================
+  // "Check an address" — homebuyer environmental report (see /api/address-report)
+  // ========================================================================
+  // Privacy: the address is POSTed in the request body (never a URL), used to
+  // fetch the report, and never persisted client-side either — we keep only the
+  // returned report (coordinates + findings), not the typed address beyond the
+  // input box. Clearing the input on close removes it.
+  let _report = null;          // last report payload (for the reopen button)
+  let _reportLayer = null;     // L.layerGroup holding the pin + 1/3/5-mile rings
+
+  const _rEsc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  function setupAddressReport() {
+    const open = () => {
+      hide($('report-modal'));
+      show($('address-modal'));
+      const inp = $('address-input');
+      if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 30); }
+      hide($('address-error'));
+    };
+    $('open-address').addEventListener('click', open);
+    $('address-close').addEventListener('click', () => hide($('address-modal')));
+    $('address-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'address-modal') hide($('address-modal'));
+    });
+    $('address-form').addEventListener('submit', submitAddress);
+    $('report-close').addEventListener('click', () => hide($('report-modal')));
+    $('report-print').addEventListener('click', () => window.print());
+    $('report-reopen').addEventListener('click', () => {
+      if (_report) { show($('report-modal')); hide($('report-reopen')); }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!$('address-modal').classList.contains('hidden')) hide($('address-modal'));
+      else if (!$('report-modal').classList.contains('hidden')) hide($('report-modal'));
+    });
+    // Delegated "Show on map →" buttons inside the report.
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.rpt-focus');
+      if (!b) return;
+      e.preventDefault();
+      focusFinding(b.getAttribute('data-layer'), b.getAttribute('data-id'),
+        parseFloat(b.getAttribute('data-lat')), parseFloat(b.getAttribute('data-lng')));
+    });
+  }
+
+  async function submitAddress(e) {
+    e.preventDefault();
+    const inp = $('address-input');
+    const address = (inp.value || '').trim();
+    const errEl = $('address-error');
+    hide(errEl);
+    if (address.length < 3) {
+      errEl.textContent = 'Please enter a street address, city, and ZIP.';
+      show(errEl); return;
+    }
+    const go = $('address-go');
+    go.disabled = true; go.textContent = 'Generating…';
+    loading(true);
+    try {
+      const res = await apiPost('/api/address-report', { address });
+      if (!res.ok) {
+        const msg = (res.data && res.data.message)
+          || (res.status === 429 ? 'Too many lookups — please wait a few minutes.'
+              : "Couldn't generate a report. Please try again.");
+        errEl.textContent = msg; show(errEl);
+        return;
+      }
+      const d = res.data;
+      if (d.in_michigan === false) {
+        errEl.textContent = d.message || 'That address is outside Michigan.';
+        show(errEl);
+        return;
+      }
+      _report = d;
+      hide($('address-modal'));
+      renderReport(d);
+    } catch (err) {
+      errEl.textContent = 'Network error — please try again.'; show(errEl);
+    } finally {
+      loading(false);
+      go.disabled = false; go.textContent = 'Generate report';
+    }
+  }
+
+  // ---- map: pin + 1/3/5-mile rings -------------------------------------------
+  function drawReportMap(loc) {
+    if (_reportLayer) { _reportLayer.remove(); _reportLayer = null; }
+    const g = L.layerGroup();
+    const ringColors = ['#f85149', '#e8873c', '#d9b458'];
+    [5, 3, 1].forEach((mi) => {
+      L.circle([loc.lat, loc.lng], {
+        radius: mi * 1609.34, color: ringColors[[5, 3, 1].indexOf(mi)],
+        weight: 1.4, opacity: 0.8, fill: false, dashArray: '5 5',
+      }).bindTooltip(`${mi} mi`, { permanent: false }).addTo(g);
+    });
+    L.marker([loc.lat, loc.lng], {
+      icon: L.divIcon({ className: 'report-pin-icon',
+        html: '<div class="report-pin">📍</div>', iconSize: [30, 30], iconAnchor: [15, 30] }),
+      zIndexOffset: 1000,
+    }).addTo(g);
+    g.addTo(state.map);
+    _reportLayer = g;
+    const bounds = L.latLng(loc.lat, loc.lng).toBounds(11000);   // ~5 mi + margin
+    state.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+  }
+
+  // ---- focus a finding: enable its layer, fly, open its popup ----------------
+  const _FOCUS = {
+    contamination: { cb: 'contam-sites', grp: () => state.contam.markers },
+    tri: { cb: 'tri-sites', grp: () => state.tri.markers,
+           byId: (id) => state.tri.markerById && state.tri.markerById.get(id) },
+    landfill: { cb: 'landfill-sites', grp: () => state.landfill.markers },
+    water: { cb: 'wq-sites', grp: () => state.water.sitesLayer },
+    golf: { cb: 'golf-sites', grp: () => state.golf.markers },
+    spraying: { cb: 'spraying-programs', grp: () => state.spraying.markers },
+  };
+
+  function _openInGroup(group, lat, lng) {
+    if (!group || !group.eachLayer) return false;
+    let best = null, bd = Infinity;
+    group.eachLayer((m) => {
+      const ll = m.getLatLng ? m.getLatLng()
+        : (m.getBounds ? m.getBounds().getCenter() : null);
+      if (!ll) return;
+      const d = state.map.distance(ll, [lat, lng]);
+      if (d < bd) { bd = d; best = m; }
+    });
+    if (best && bd < 150) {
+      if (group.zoomToShowLayer) group.zoomToShowLayer(best, () => best.openPopup());
+      else best.openPopup();
+      return true;
+    }
+    return false;
+  }
+
+  async function focusFinding(layer, id, lat, lng) {
+    const cfg = _FOCUS[layer];
+    hide($('report-modal'));
+    if (_report) show($('report-reopen'));
+    if (!cfg || Number.isNaN(lat)) return;
+    const cb = $(cfg.cb);
+    if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+    // give the layer a moment to fetch + render its markers
+    await new Promise((r) => setTimeout(r, 650));
+    state.map.setView([lat, lng], Math.max(state.map.getZoom(), 13));
+    const direct = cfg.byId && id ? cfg.byId(id) : null;
+    if (direct) {
+      const grp = cfg.grp && cfg.grp();
+      if (grp && grp.zoomToShowLayer) grp.zoomToShowLayer(direct, () => direct.openPopup());
+      else direct.openPopup();
+      return;
+    }
+    if (!_openInGroup(cfg.grp && cfg.grp(), lat, lng)) {
+      // couldn't match a specific marker; leave the map centered on the pin
+      setTimeout(() => _openInGroup(cfg.grp && cfg.grp(), lat, lng), 500);
+    }
+  }
+
+  // ---- report rendering ------------------------------------------------------
+  const _SEV_LABEL = {
+    exceeds_mcl: 'exceeds drinking-water MCL (human health)',
+    exceeds_benchmark: 'exceeds aquatic-life benchmark (ecological)',
+    detected: 'pesticides detected, within limits',
+    tested_no_detect: 'tested, none detected',
+    no_data: 'no results on record',
+  };
+  const _TREND = { up: '▲ rising', down: '▼ falling', flat: '▬ stable' };
+
+  function _mi(d) { return (d == null) ? '—' : `${d} mi`; }
+
+  function _ringChips(rings) {
+    return `<span class="rpt-rings">`
+      + [1, 3, 5].map((r) => `<span class="rpt-ring"><b>${rings[String(r)] || 0}</b> within ${r} mi</span>`).join('')
+      + `</span>`;
+  }
+
+  function _focusBtn(it) {
+    if (it.lat == null || it.lng == null) return '';
+    return `<button type="button" class="rpt-focus" data-layer="${it.layer}"`
+      + ` data-id="${_rEsc(it.id)}" data-lat="${it.lat}" data-lng="${it.lng}">Show on map →</button>`;
+  }
+
+  function _itemFigures(layer, it) {
+    if (layer === 'contamination') {
+      return `${it.npl ? '<span class="rpt-tag npl">NPL Superfund</span> ' : ''}`
+        + `${_rEsc(it.status || '')}${it.hrs_score ? ` · HRS ${it.hrs_score}` : ''}`;
+    }
+    if (layer === 'tri') {
+      return `${it.latest_release_lbs != null ? `<b>${fmtLbs(it.latest_release_lbs)}</b> released`
+        + `${it.latest_year ? ` (${it.latest_year})` : ''} · ${_TREND[it.trend] || ''}` : ''}`
+        + `${it.sector ? ` · ${_rEsc(it.sector)}` : ''}`;
+    }
+    if (layer === 'landfill') {
+      return `${_rEsc(it.type_label || it.category || '')}${it.status ? ` · ${_rEsc(it.status)}` : ''}`;
+    }
+    if (layer === 'water') {
+      const comps = (it.top_compounds || []).map((c) => chemLink(c)).join(', ');
+      return `<span class="rpt-sev sev-${it.severity}">${_SEV_LABEL[it.severity] || it.severity}</span>`
+        + `${it.mcl_exceedances ? ` · ${it.mcl_exceedances} MCL exceedance(s)` : ''}`
+        + `${it.benchmark_exceedances ? ` · ${it.benchmark_exceedances} benchmark exceedance(s)` : ''}`
+        + `${comps ? `<div class="rpt-comps">detected: ${comps}</div>` : ''}`;
+    }
+    if (layer === 'golf') {
+      return `${_rEsc(it.ownership_class === 'municipal' ? 'public/municipal'
+        : it.ownership_class || '')}${it.acres ? ` · ~${Math.round(it.acres)} acres` : ''}`
+        + ` · <span class="muted">turf-pesticide land use</span>`;
+    }
+    return '';
+  }
+
+  function _nearBlock(key, label, icon, block, emptyNote) {
+    if (!block) return '';
+    const items = block.within || [];
+    let body;
+    if (items.length) {
+      body = `<ul class="rpt-list">` + items.map((it) =>
+        `<li><div class="rpt-item-h"><span class="rpt-item-name">${_rEsc(it.name)}</span>`
+        + `<span class="rpt-dist">${it.distance_mi} mi ${it.direction || ''}</span></div>`
+        + `<div class="rpt-item-fig">${_itemFigures(key, it)}</div>${_focusBtn(it)}</li>`).join('') + `</ul>`;
+    } else if (block.nearest) {
+      const n = block.nearest;
+      body = `<p class="rpt-none">${emptyNote} Nearest is <b>${_rEsc(n.name)}</b>, `
+        + `${n.distance_mi} mi ${n.direction || ''} away. `
+        + `<span class="rpt-figinline">${_itemFigures(key, n)}</span> ${_focusBtn(n)}</p>`;
+    } else {
+      body = `<p class="rpt-none">None mapped in Michigan for this layer.</p>`;
+    }
+    return `<div class="rpt-layer"><div class="rpt-layer-h"><span>${icon} ${label}</span>`
+      + `${_ringChips(block.rings)}</div>${body}</div>`;
+  }
+
+  function _sprayingBlock(list) {
+    if (!list || !list.length) {
+      return `<div class="rpt-layer"><div class="rpt-layer-h"><span>🚁 Spraying programs</span></div>`
+        + `<p class="rpt-none">No organized spraying programs are documented covering this area. `
+        + `(Private agricultural spraying is not in any public directory.)</p></div>`;
+    }
+    const body = `<ul class="rpt-list">` + list.map((p) =>
+      `<li><div class="rpt-item-h"><span class="rpt-item-name">${_rEsc(p.name)}</span>`
+      + `<span class="rpt-dist">${p.scope === 'statewide' ? 'statewide'
+        : (p.distance_mi != null ? `${p.distance_mi} mi ${p.direction || ''}` : _rEsc(p.area || ''))}</span></div>`
+      + `<div class="rpt-item-fig">${_rEsc(p.area || '')}${p.url
+        ? ` · <a href="${_rEsc(p.url)}" target="_blank" rel="noopener">details →</a>` : ''}</div></li>`).join('') + `</ul>`;
+    return `<div class="rpt-layer"><div class="rpt-layer-h"><span>🚁 Spraying programs</span></div>`
+      + `<p class="rpt-note">A directory of organized programs whose coverage includes this area — `
+      + `not a live spray-date feed, and not a complete record of all spraying.</p>${body}</div>`;
+  }
+
+  function _pctSpan(pct) {
+    if (pct == null) return '';
+    const dir = pct > 0 ? 'above' : pct < 0 ? 'below' : 'at';
+    const cls = pct > 0 ? 'hi' : pct < 0 ? 'lo' : '';
+    return `<span class="rpt-vs ${cls}">${Math.abs(pct)}% ${dir} state avg</span>`;
+  }
+
+  function _countyContextHtml(ctx, county) {
+    const p = ctx.pesticide || {};
+    const rows = [];
+    rows.push(`<div class="rpt-cc"><span class="k">Agricultural pesticide use (${ctx.pesticide_year || 'latest'})</span>`
+      + `<span class="v">${p.total_lbs != null ? `${p.total_lbs.toLocaleString()} lbs` : 'n/a'}`
+      + `${p.per_acre_lbs != null ? ` · ${p.per_acre_lbs} lbs/cropland acre` : ''}`
+      + `${p.statewide_rank ? ` · rank #${p.statewide_rank} of ${p.counties_ranked}` : ''}</span>`
+      + `<div class="rpt-cc-note muted small">${_rEsc(p.note || '')}</div></div>`);
+    if (ctx.cancer_nhl) {
+      const c = ctx.cancer_nhl;
+      rows.push(`<div class="rpt-cc"><span class="k">${_rEsc(c.label)}</span>`
+        + `<span class="v">${c.suppressed ? 'suppressed (too few cases to report)'
+          : `${c.county_rate}/100k vs ${c.state_rate}/100k state`} ${_pctSpan(c.pct_vs_state)}</span></div>`);
+    }
+    if (ctx.respiratory_asthma) {
+      const r = ctx.respiratory_asthma;
+      rows.push(`<div class="rpt-cc"><span class="k">${_rEsc(r.label)} (${r.year})</span>`
+        + `<span class="v">${r.county_rate} vs ${r.state_rate} state ${_pctSpan(r.pct_vs_state)}</span></div>`);
+    }
+    const dn = ctx.density || {};
+    rows.push(`<div class="rpt-cc"><span class="k">Documented sites in county</span>`
+      + `<span class="v">${dn.contamination_sites || 0} contamination (${dn.npl_sites || 0} Superfund NPL) · `
+      + `${dn.landfills || 0} landfills (${dn.hazardous_landfills || 0} hazardous) · `
+      + `${dn.tri_facilities || 0} TRI facilities${dn.tri_total_lbs != null
+        ? `, ${fmtLbs(dn.tri_total_lbs)} released ${dn.tri_year || ''}` : ''}</span></div>`);
+    return `<div class="rpt-section rpt-county"><h3>County-wide context `
+      + `<span class="rpt-h-note">describes all of ${_rEsc(county)} County — NOT this specific address</span></h3>`
+      + rows.join('') + `</div>`;
+  }
+
+  function _monitoringHtml(m) {
+    let html = `<div class="rpt-cov">`;
+    if (m.warning) html += `<div class="rpt-warn">⚠ ${_rEsc(m.warning)}</div>`;
+    html += `<div class="rpt-cov-title">Monitoring coverage <span class="muted small">— how well-documented this area is</span></div>`;
+    html += `<ul class="rpt-cov-list">`
+      + `<li>Nearest water-monitoring site: <b>${_mi(m.nearest_water_site_mi)}</b>`
+      + `${m.nearest_water_site_name ? ` (${_rEsc(m.nearest_water_site_name)})` : ''} · ${m.county_water_sites} in county</li>`
+      + `<li>Nearest mapped contamination site: <b>${_mi(m.nearest_contamination_mi)}</b> · `
+      + `nearest landfill: <b>${_mi(m.nearest_landfill_mi)}</b></li>`
+      + `<li>County has TRI-reporting industrial facilities: <b>${m.county_has_tri ? 'yes' : 'no'}</b></li>`
+      + `</ul>`;
+    if (m.notes && m.notes.length) {
+      html += `<ul class="rpt-cov-notes">` + m.notes.map((n) => `<li>${_rEsc(n)}</li>`).join('') + `</ul>`;
+    }
+    return html + `</div>`;
+  }
+
+  function _downwindHtml(dw) {
+    if (!dw) return '';
+    let body;
+    if (dw.upwind && dw.upwind.length) {
+      body = `<p>Prevailing growing-season (Apr–Sep) winds are from the <b>${dw.prevailing_from}</b>, `
+        + `placing this address <b>downwind</b> of:</p><ul class="rpt-list">`
+        + dw.upwind.map((u) => `<li><div class="rpt-item-h"><span class="rpt-item-name">${_rEsc(u.name)}</span>`
+          + `<span class="rpt-dist">${u.distance_mi} mi</span></div>${_focusBtn(u)}</li>`).join('') + `</ul>`;
+    } else {
+      body = `<p>Prevailing growing-season winds are from the <b>${dw.prevailing_from}</b>. `
+        + `No mapped TRI facilities or landfills within 5 miles sit directly upwind.</p>`;
+    }
+    return `<div class="rpt-section rpt-downwind"><h3>Downwind check</h3>${body}`
+      + `<p class="rpt-note muted small">${_rEsc(dw.note)} Nearest wind station: `
+      + `${_rEsc(dw.station || '')}${dw.station_mi != null ? ` (${dw.station_mi} mi)` : ''}.</p></div>`;
+  }
+
+  function renderReport(d) {
+    const loc = d.location;
+    const r = d.rating;
+    const catOrder = [['contamination', 'Contamination'], ['industrial', 'Industrial (TRI)'],
+      ['waste', 'Waste / landfills'], ['water', 'Water'], ['pesticides', 'Agric. pesticides']];
+    const cats = catOrder.map(([k, lbl]) => {
+      const c = r.categories[k];
+      return `<div class="rpt-cat band-${c.band}"><span class="rpt-cat-lbl">${lbl}</span>`
+        + `<span class="rpt-cat-band">${c.label}</span></div>`;
+    }).join('');
+
+    const near = d.near;
+    const nearHtml =
+      _nearBlock('contamination', 'Contamination / Superfund sites', '☣', near.contamination,
+        'No contamination sites within 5 miles.')
+      + _nearBlock('tri', 'TRI industrial facilities', '🏭', near.tri,
+        'No TRI facilities within 5 miles.')
+      + _nearBlock('landfill', 'Landfills & waste facilities', '🗑', near.landfill,
+        'No active landfills within 5 miles.')
+      + _nearBlock('water', 'Water monitoring sites', '💧', near.water,
+        'No water-monitoring sites within 5 miles.')
+      + _nearBlock('golf', 'Golf courses (turf pesticide use)', '⛳', near.golf,
+        'No golf courses within 5 miles.')
+      + _sprayingBlock(near.spraying);
+
+    const html =
+      `<div class="rpt">
+        <div class="rpt-head">
+          <h2 id="report-title">Environmental report</h2>
+          <div class="rpt-addr">${_rEsc(loc.matched_address || '')}</div>
+          <div class="rpt-sub">${_rEsc(loc.county || '')} County · geocoded via ${_rEsc(loc.geocoder || '')} · ${_rEsc(d.generated || '')}</div>
+        </div>
+
+        <div class="rpt-rating band-${r.overall}">
+          <div class="rpt-rating-top">Overall: <b>${_rEsc(r.overall_label)}</b></div>
+          <div class="rpt-rating-adj">${_rEsc(r.adjacent_note)}</div>
+        </div>
+        <div class="rpt-catgrid">${cats}</div>
+
+        ${_monitoringHtml(d.monitoring)}
+
+        <div class="rpt-section">
+          <h3>Near this address <span class="rpt-h-note">measured straight-line distances from the geocoded point</span></h3>
+          ${nearHtml}
+        </div>
+
+        ${_downwindHtml(d.downwind)}
+
+        ${_countyContextHtml(d.county_context, loc.county)}
+
+        <div class="rpt-disc">
+          <h3>Important limitations</h3>
+          <ul>${(d.disclaimers || []).map((x) => `<li>${_rEsc(x)}</li>`).join('')}</ul>
+        </div>
+        <div class="rpt-src">
+          <h4>Data sources</h4>
+          <ul>${(d.sources || []).map((x) => `<li>${_rEsc(x)}</li>`).join('')}</ul>
+        </div>
+      </div>`;
+
+    $('report-body').innerHTML = html;
+    $('report-body').scrollTop = 0;
+    hide($('report-reopen'));
+    show($('report-modal'));
+    drawReportMap(loc);
   }
 
   // ---------- sources modal ----------

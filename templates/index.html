@@ -26,6 +26,7 @@
     </div>
     <input id="search" type="search" placeholder="Search county or compound…" autocomplete="off" />
     <div id="search-results" class="search-dropdown hidden"></div>
+    <button id="open-address" class="btn-primary address-btn" title="Check environmental hazards near an address">🏠 Check an address</button>
     <button id="open-intro" class="btn-ghost help-btn" title="What is this? (intro & how to use)" aria-label="Open the intro and help">?</button>
     <button id="open-sources" class="btn-ghost" title="Data sources">Data&nbsp;sources</button>
   </div>
@@ -782,6 +783,42 @@
     <div id="tri-info-body"></div>
   </div>
 </div>
+
+<!-- ===================== Check-an-address: input modal ===================== -->
+<div id="address-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="address-title">
+  <div class="modal-card address-card">
+    <button class="close" id="address-close" aria-label="Close">×</button>
+    <h2 id="address-title">🏠 Check an address</h2>
+    <p class="muted small">See what environmental hazards are documented near an address, plus
+      county-wide context. Enter a street address, city, and ZIP for the most accurate result.</p>
+    <form id="address-form" autocomplete="off">
+      <input id="address-input" type="text" inputmode="text" autocomplete="off"
+        placeholder="123 Main St, Ann Arbor, MI 48104" aria-label="Address to check" />
+      <button type="submit" id="address-go" class="btn-primary">Generate report</button>
+    </form>
+    <p id="address-error" class="address-error hidden"></p>
+    <p class="address-privacy small"><span aria-hidden="true">🔒</span> Addresses are used only to
+      generate your report and are <strong>not stored or logged</strong>. Your address is never put in
+      a link and never saved.</p>
+    <p class="muted small address-disclaim">This is <strong>not</strong> a substitute for a Phase&nbsp;I
+      Environmental Site Assessment. For educational purposes only — not legal, real-estate, medical,
+      or environmental advice.</p>
+  </div>
+</div>
+
+<!-- ===================== Check-an-address: report modal ===================== -->
+<div id="report-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="report-title">
+  <div class="modal-card report-card">
+    <div class="report-toolbar">
+      <button class="btn-ghost" id="report-print" type="button" title="Print or save the report as a PDF">🖨️ Print / Save as PDF</button>
+      <button class="close" id="report-close" aria-label="Close">×</button>
+    </div>
+    <div id="report-body"></div>
+  </div>
+</div>
+
+<!-- floating button to reopen the last report after clicking a finding on the map -->
+<button id="report-reopen" class="report-reopen hidden" type="button">📄 View report</button>
 
 <div id="loading" class="loading hidden"><div class="spinner"></div></div>
 <div id="tooltip" class="hover-tooltip hidden"></div>

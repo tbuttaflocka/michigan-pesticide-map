@@ -7,7 +7,12 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
+import threading
+import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -3337,6 +3342,528 @@ def api_golf_sites():
         "legend": golf_data.legend_payload(),
         "sites": sites,
     })
+
+
+# ==========================================================================
+# "Check an address" — homebuyer environmental report
+# ==========================================================================
+#
+# PRIVACY (built in, not bolted on): the entered address is used ONLY to geocode
+# and build the report, then discarded. It is NEVER stored, NEVER written to any
+# database, NEVER logged, and NEVER placed in a URL or query string — the browser
+# sends it in a POST body, and the server's access log records only method+path.
+# Geocoding is server-side because the US Census geocoder sends no CORS headers
+# and the app CSP is connect-src 'self', so the browser cannot call it directly.
+#
+# HONESTY: two clearly separated sections (point-based "near this address" with
+# real haversine distances, vs "county-wide context"), a monitoring-coverage
+# safeguard so "no data" is never read as "clean", and qualitative rating bands
+# only (never a numeric score, never the words safe/clean/healthy).
+
+_GEOCODE_UA = "MichiganPollutionMap/1.0 (environmental due-diligence research tool; contact via app)"
+_ADDR_LOCATOR = None
+
+
+def _address_locator():
+    """Cached point-in-polygon county locator (built once from the counties
+    GeoJSON). Reuses the same ray-casting locator the data loader uses."""
+    global _ADDR_LOCATOR
+    if _ADDR_LOCATOR is None:
+        from app.data_loader import _build_county_locator
+        _ADDR_LOCATOR = _build_county_locator()
+    return _ADDR_LOCATOR
+
+
+# --- per-IP rate limiter (fixed window). Stores IPs + timestamps only, never the
+# address. In-memory; fine for a single-process deployment. ---
+_RL_LOCK = threading.Lock()
+_RL_HITS: dict = {}
+_RL_WINDOW_S = 300
+_RL_MAX = 20
+
+
+def _rate_ok(ip: str) -> bool:
+    now = time.time()
+    with _RL_LOCK:
+        hits = [t for t in _RL_HITS.get(ip, ()) if now - t < _RL_WINDOW_S]
+        if len(hits) >= _RL_MAX:
+            _RL_HITS[ip] = hits
+            return False
+        hits.append(now)
+        _RL_HITS[ip] = hits
+        if len(_RL_HITS) > 4096:            # bound memory
+            for k in [k for k, v in list(_RL_HITS.items())
+                      if all(now - t > _RL_WINDOW_S for t in v)]:
+                _RL_HITS.pop(k, None)
+    return True
+
+
+def _geocode(address: str):
+    """US Census geocoder (primary) with OSM Nominatim fallback. Returns
+    {lat, lng, matched, source} or None. The address is used only for the
+    outbound geocoder request — never stored, never logged here."""
+    addr = " ".join(str(address).split()).strip()
+    if len(addr) < 3:
+        return None
+    try:
+        q = urllib.parse.urlencode({"address": addr,
+                                    "benchmark": "Public_AR_Current", "format": "json"})
+        url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?" + q
+        req = urllib.request.Request(url, headers={"User-Agent": _GEOCODE_UA})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            d = json.loads(r.read())
+        m = (d.get("result") or {}).get("addressMatches") or []
+        if m:
+            c = m[0]["coordinates"]
+            return {"lat": float(c["y"]), "lng": float(c["x"]),
+                    "matched": m[0].get("matchedAddress"),
+                    "source": "US Census Bureau Geocoder"}
+    except Exception:                        # noqa: BLE001 — fall through to Nominatim
+        pass
+    try:
+        q = urllib.parse.urlencode({"q": addr, "format": "json", "countrycodes": "us",
+                                    "limit": 1, "addressdetails": 0})
+        url = "https://nominatim.openstreetmap.org/search?" + q
+        req = urllib.request.Request(url, headers={"User-Agent": _GEOCODE_UA})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            d = json.loads(r.read())
+        if d:
+            return {"lat": float(d[0]["lat"]), "lng": float(d[0]["lon"]),
+                    "matched": d[0].get("display_name"),
+                    "source": "OpenStreetMap Nominatim"}
+    except Exception:                        # noqa: BLE001
+        pass
+    return None
+
+
+def _bearing_deg(lat1, lon1, lat2, lon2):
+    dl = math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(math.radians(lat2))
+    x = (math.cos(math.radians(lat1)) * math.sin(math.radians(lat2))
+         - math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(dl))
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+_RINGS_MI = (1, 3, 5)
+
+
+def _layer_block(sorted_pairs, alat, alng, layer, build):
+    """sorted_pairs: [(distance_mi, row), ...] ascending. build(row,dist)->dict of
+    layer-specific fields. Returns {within(<=5mi, enriched), nearest(any dist),
+    rings{1,3,5 counts}, count_5mi}."""
+    def mk(dist, row):
+        base = {"layer": layer, "distance_mi": round(dist, 1),
+                "direction": deg_to_dir16(_bearing_deg(alat, alng,
+                                                       row["latitude"], row["longitude"])),
+                "lat": row["latitude"], "lng": row["longitude"]}
+        base.update(build(row, dist))
+        return base
+    within = [mk(d, r) for d, r in sorted_pairs if d <= 5][:12]
+    nearest = mk(sorted_pairs[0][0], sorted_pairs[0][1]) if sorted_pairs else None
+    rings = {str(k): sum(1 for d, _ in sorted_pairs if d <= k) for k in _RINGS_MI}
+    return {"within": within, "nearest": nearest, "rings": rings,
+            "count_5mi": rings["5"]}
+
+
+def _sorted_by_distance(rows, alat, alng):
+    out = []
+    for r in rows:
+        la, lo = r["latitude"], r["longitude"]
+        if la is None or lo is None:
+            continue
+        out.append((haversine_mi(alat, alng, la, lo), r))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _band(n):
+    return "multiple" if n >= 3 else "some" if n >= 1 else "few"
+
+
+_BAND_LABEL = {
+    "few": "Few documented concerns nearby",
+    "some": "Some documented concerns nearby",
+    "multiple": "Multiple documented concerns nearby",
+    "insufficient": "Insufficient data to assess",
+}
+
+_REPORT_DISCLAIMERS = [
+    "This is not a substitute for a Phase I Environmental Site Assessment — the "
+    "professional environmental due-diligence product used in real-estate "
+    "transactions. Consult a qualified environmental professional before making a "
+    "purchase decision.",
+    "For educational purposes only. Not legal, real-estate, medical, or "
+    "environmental advice.",
+    "Absence of documented hazards does not mean absence of hazards. Closed and "
+    "pre-regulation landfills, private agricultural spraying, and many "
+    "contamination sources are not comprehensively mapped in public data.",
+    "This reflects only what is documented in public datasets. Many hazards are "
+    "not publicly mapped, and each underlying dataset has its own coverage limits "
+    "(see the layer caveats and Data Sources in the app).",
+]
+
+_REPORT_SOURCES = [
+    "US Census Bureau Geocoder / OpenStreetMap Nominatim (address → coordinates)",
+    "EPA Superfund (SEMS/NPL) — contamination sites",
+    "EPA Toxics Release Inventory (TRI) — industrial releases",
+    "Michigan EGLE Materials Management — landfills & hazardous-waste facilities",
+    "USGS/EPA Water Quality Portal — water monitoring & pesticide detections",
+    "OpenStreetMap — golf courses (locations only)",
+    "USGS NAWQA EPest — county agricultural pesticide use (excludes non-agricultural use)",
+    "NCI State Cancer Profiles; CDC Tracking / MDHHS — cancer & respiratory rates",
+    "Iowa Environmental Mesonet (ASOS) — growing-season prevailing wind",
+]
+
+
+def _report_near(conn, lat, lng):
+    """Point-based section: real haversine distances to every layer that supports
+    genuine per-facility distance. Returns a dict of layer blocks."""
+    # --- Contamination / Superfund ---
+    rows = conn.execute(
+        "SELECT site_key, site_name, latitude, longitude, county, city, status, "
+        "status_class, category, npl_listed, hrs_score FROM contamination_sites").fetchall()
+    contam = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "contamination",
+        lambda r, d: {"id": r["site_key"], "name": r["site_name"], "county": r["county"],
+                      "status": r["status"], "status_class": r["status_class"],
+                      "npl": bool(r["npl_listed"]), "hrs_score": r["hrs_score"]})
+
+    # --- TRI industrial facilities (with latest-year total + multi-year trend) ---
+    rows = conn.execute(
+        "SELECT facility_id, facility_name, latitude, longitude, county, city, "
+        "industry_sector FROM tri_facility").fetchall()
+
+    def _tri_build(r, d):
+        py = conn.execute("SELECT year, SUM(total_lbs) t FROM tri_release "
+                          "WHERE facility_id=? GROUP BY year ORDER BY year",
+                          (r["facility_id"],)).fetchall()
+        vals = [p["t"] or 0 for p in py]
+        trend = "flat"
+        if len(vals) >= 2 and vals[0] > 0:
+            ch = (vals[-1] - vals[0]) / vals[0]
+            trend = "up" if ch > 0.15 else "down" if ch < -0.15 else "flat"
+        return {"id": r["facility_id"], "name": r["facility_name"], "county": r["county"],
+                "sector": r["industry_sector"],
+                "latest_release_lbs": round(vals[-1]) if vals else 0,
+                "latest_year": py[-1]["year"] if py else None, "trend": trend}
+    tri = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "tri", _tri_build)
+
+    # --- Landfills & waste facilities ---
+    rows = conn.execute(
+        "SELECT site_key, name, latitude, longitude, county, category, type_label, "
+        "status_class, status_label FROM landfill_sites").fetchall()
+    landfill = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "landfill",
+        lambda r, d: {"id": r["site_key"], "name": r["name"], "county": r["county"],
+                      "category": r["category"], "type_label": r["type_label"],
+                      "status": r["status_label"]})
+
+    # --- Water monitoring sites (with detection/exceedance summary) ---
+    rows = conn.execute(
+        "SELECT site_id, site_name, latitude, longitude, county, water_body, site_type "
+        "FROM water_quality_sites WHERE latitude IS NOT NULL").fetchall()
+
+    def _water_build(r, d):
+        agg = conn.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(detected),0) det, "
+            "COALESCE(SUM(exceeds_mcl),0) mcl, COALESCE(SUM(exceeds_benchmark),0) bench, "
+            "MAX(sample_date) latest FROM water_quality_results WHERE site_id=?",
+            (r["site_id"],)).fetchone()
+        sev = _site_severity(agg["det"], agg["mcl"], agg["n"], agg["bench"])
+        comps = [c["compound"] for c in conn.execute(
+            "SELECT compound FROM water_quality_results WHERE site_id=? AND detected=1 "
+            "GROUP BY compound ORDER BY SUM(exceeds_mcl) DESC, SUM(exceeds_benchmark) DESC, "
+            "COUNT(*) DESC LIMIT 4", (r["site_id"],)).fetchall()]
+        return {"id": r["site_id"], "name": r["site_name"], "county": r["county"],
+                "water_body": r["water_body"], "severity": sev,
+                "detections": agg["det"], "mcl_exceedances": agg["mcl"],
+                "benchmark_exceedances": agg["bench"], "latest_sample": agg["latest"],
+                "top_compounds": comps}
+    water = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "water", _water_build)
+
+    # --- Golf courses ---
+    rows = conn.execute(
+        "SELECT course_key, name, latitude, longitude, county, ownership_class, "
+        "ownership_label, acres FROM golf_courses").fetchall()
+    golf = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "golf",
+        lambda r, d: {"id": r["course_key"], "name": r["name"], "county": r["county"],
+                      "ownership_class": r["ownership_class"], "acres": r["acres"]})
+
+    return {"contamination": contam, "tri": tri, "landfill": landfill,
+            "water": water, "golf": golf}
+
+
+def _report_spraying(alat, alng, fips, locate):
+    """Spraying programs whose coverage includes this address: statewide programs
+    always apply; a county program applies if its point is in this county; other
+    scopes are included when within ~25 mi (their point is a representative
+    location, not a boundary)."""
+    out = []
+    for p in spraying_programs.programs_payload().get("programs", []):
+        pl, po, scope = p.get("lat"), p.get("lon"), p.get("scope")
+        covered, dist = False, None
+        if scope == "statewide":
+            covered = True
+        elif pl is not None and po is not None:
+            dist = haversine_mi(alat, alng, pl, po)
+            pfips, _ = locate(po, pl)
+            if scope == "county" and pfips and pfips == fips:
+                covered = True
+            elif dist <= 25:
+                covered = True
+        if covered:
+            item = {"layer": "spraying", "id": p.get("id"), "name": p.get("name"),
+                    "type": p.get("type"), "scope": scope, "area": p.get("area"),
+                    "url": p.get("url"), "lat": pl, "lng": po}
+            if dist is not None:
+                item["distance_mi"] = round(dist, 1)
+                item["direction"] = deg_to_dir16(_bearing_deg(alat, alng, pl, po))
+            out.append(item)
+    out.sort(key=lambda x: (x.get("scope") != "statewide", x.get("distance_mi") or 0))
+    return out
+
+
+def _report_county_context(conn, fips):
+    """County-wide context — describes the WHOLE county, not the parcel."""
+    ctx = {}
+    # Agricultural pesticide use (latest EPest year) + per-acre + statewide rank.
+    yr = conn.execute("SELECT MAX(year) FROM pesticide_use").fetchone()[0]
+    ctx["pesticide_year"] = yr
+    if yr is not None:
+        avg = ("(COALESCE(epest_low_kg,epest_high_kg)+COALESCE(epest_high_kg,epest_low_kg))/2.0")
+        totals = conn.execute(
+            f"SELECT county_fips, SUM({avg}) kg FROM pesticide_use WHERE year=? "
+            "GROUP BY county_fips HAVING kg>0 ORDER BY kg DESC", (yr,)).fetchall()
+        rank_by = {r["county_fips"]: i + 1 for i, r in enumerate(totals)}
+        kg_by = {r["county_fips"]: r["kg"] for r in totals}
+        acres = _cropland_acres_by_fips(conn).get(fips)
+        county_lbs = kg_by[fips] * KG_TO_LB if fips in kg_by else None
+        ctx["pesticide"] = {
+            "total_lbs": round(county_lbs) if county_lbs else None,
+            "per_acre_lbs": round(county_lbs / acres, 2)
+                            if (county_lbs and acres and acres >= 10000) else None,
+            "cropland_acres": round(acres) if acres else None,
+            "statewide_rank": rank_by.get(fips), "counties_ranked": len(totals),
+            "note": ("EPest estimates AGRICULTURAL use only — golf courses, lawns, "
+                     "and other non-agricultural use are excluded from these totals."),
+        }
+    # Cancer (Non-Hodgkin lymphoma — the app's pesticide-linked headline) vs state.
+    crow = conn.execute(
+        "SELECT rate, suppressed FROM cancer_incidence WHERE county_fips=? AND "
+        "cancer_type='nhl' AND stage='all' AND data_type='incidence'", (fips,)).fetchone()
+    cref = conn.execute(
+        "SELECT mi_rate FROM cancer_reference WHERE cancer_type='nhl' AND "
+        "data_type='incidence' AND stage='all'").fetchone()
+    if crow is not None and cref is not None:
+        rate = None if crow["suppressed"] else crow["rate"]
+        ctx["cancer_nhl"] = {
+            "label": "Non-Hodgkin lymphoma incidence", "county_rate": rate,
+            "state_rate": cref["mi_rate"], "suppressed": bool(crow["suppressed"]),
+            "pct_vs_state": (round((rate - cref["mi_rate"]) / cref["mi_rate"] * 100)
+                             if (rate and cref["mi_rate"]) else None),
+        }
+    # Respiratory (adult asthma ED visits, latest year) vs statewide baseline.
+    ry = conn.execute("SELECT MAX(year) FROM respiratory_ed_visits "
+                      "WHERE condition='asthma'").fetchone()[0]
+    if ry is not None:
+        rrow = conn.execute("SELECT visit_rate, suppressed FROM respiratory_ed_visits "
+                            "WHERE county_fips=? AND condition='asthma' AND year=?",
+                            (fips, ry)).fetchone()
+        base = MI_STATEWIDE_BASELINE.get("asthma_ed_visit_rate")
+        if rrow is not None and not rrow["suppressed"] and rrow["visit_rate"] is not None:
+            ctx["respiratory_asthma"] = {
+                "label": "Adult asthma ED visits (per 10,000)",
+                "county_rate": rrow["visit_rate"], "state_rate": base, "year": ry,
+                "pct_vs_state": (round((rrow["visit_rate"] - base) / base * 100)
+                                 if base else None)}
+    # Densities: contamination, landfills, TRI totals.
+    cd = conn.execute("SELECT COUNT(*) t, COALESCE(SUM(CASE WHEN status_class='npl' "
+                      "THEN 1 ELSE 0 END),0) npl FROM contamination_sites WHERE county_fips=?",
+                      (fips,)).fetchone()
+    ld = conn.execute("SELECT COUNT(*) t, COALESCE(SUM(CASE WHEN category='hazardous' "
+                      "THEN 1 ELSE 0 END),0) haz FROM landfill_sites WHERE county_fips=?",
+                      (fips,)).fetchone()
+    triy = conn.execute("SELECT MAX(year) FROM tri_release").fetchone()[0]
+    tri_total = conn.execute(
+        "SELECT COALESCE(SUM(rl.total_lbs),0) FROM tri_release rl "
+        "JOIN tri_facility f ON f.facility_id=rl.facility_id "
+        "WHERE f.county_fips=? AND rl.year=?", (fips, triy)).fetchone()[0]
+    tri_count = conn.execute("SELECT COUNT(*) FROM tri_facility WHERE county_fips=?",
+                             (fips,)).fetchone()[0]
+    ctx["density"] = {
+        "contamination_sites": cd["t"], "npl_sites": cd["npl"],
+        "landfills": ld["t"], "hazardous_landfills": ld["haz"],
+        "tri_facilities": tri_count, "tri_total_lbs": round(tri_total),
+        "tri_year": triy}
+    return ctx
+
+
+@app.route("/api/address-report", methods=["POST"])
+def api_address_report():
+    """Homebuyer environmental report for one address. PRIVACY: the address is
+    read from the POST body, used only to geocode + build the report, and then
+    discarded — never stored, never logged, never echoed into a URL."""
+    ip = request.remote_addr or "unknown"
+    if not _rate_ok(ip):
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many lookups from your connection. Please wait "
+                        "a few minutes and try again."}), 429
+    body = request.get_json(silent=True) or {}
+    address = body.get("address")
+    if not isinstance(address, str) or not (3 <= len(address.strip()) <= 250):
+        return jsonify({"error": "bad_address",
+                        "message": "Please enter a street address, city, and ZIP."}), 400
+
+    geo = _geocode(address)
+    del address, body                      # drop the address ASAP; never persisted
+    if not geo:
+        return jsonify({"error": "geocode_failed",
+                        "message": "Couldn't find that address — try including the "
+                        "city and ZIP code."}), 422
+
+    lat, lng = geo["lat"], geo["lng"]
+    locate = _address_locator()
+    fips, county = locate(lng, lat)
+    location = {"lat": round(lat, 6), "lng": round(lng, 6),
+                "matched_address": geo.get("matched"), "geocoder": geo.get("source"),
+                "county": county, "county_fips": fips}
+    if not fips:
+        return jsonify({"location": location, "in_michigan": False,
+                        "message": "This location does not appear to be in Michigan. "
+                        "This tool only covers Michigan environmental data.",
+                        "disclaimers": _REPORT_DISCLAIMERS}), 200
+
+    conn = db()
+    try:
+        near = _report_near(conn, lat, lng)
+        near["spraying"] = _report_spraying(lat, lng, fips, locate)
+        ctx = _report_county_context(conn, fips)
+
+        # --- Monitoring coverage (the "no data != clean" safeguard) ---
+        # "No data" must never read as "clean". We surface how well-monitored this
+        # location actually is, and warn prominently when it is not.
+        water_nearest = near["water"]["nearest"]
+        water_nearest_mi = water_nearest["distance_mi"] if water_nearest else None
+        contam_nearest = near["contamination"]["nearest"]
+        landfill_nearest = near["landfill"]["nearest"]
+        contam_mi = contam_nearest["distance_mi"] if contam_nearest else None
+        landfill_mi = landfill_nearest["distance_mi"] if landfill_nearest else None
+        county_water_sites = conn.execute(
+            "SELECT COUNT(*) FROM water_quality_sites WHERE county_fips=?", (fips,)).fetchone()[0]
+        county_has_tri = ctx["density"]["tri_facilities"] > 0
+
+        # Water is the primary local-monitoring signal; >10 mi (or a county with
+        # ≤1 site) means genuinely limited local water data.
+        water_sparse = (water_nearest_mi is None) or (water_nearest_mi > 10) \
+            or (county_water_sites <= 1)
+        notes = []
+        if water_nearest_mi is None:
+            notes.append("No water-quality monitoring sites are mapped near this address.")
+        elif water_nearest_mi > 10:
+            notes.append(f"The nearest water-sampling site is {round(water_nearest_mi)} "
+                         "miles away, so local water-quality data is limited.")
+        if county_water_sites <= 1:
+            notes.append(f"This county has {'no' if county_water_sites == 0 else 'only one'} "
+                         "mapped water-monitoring site.")
+        if not county_has_tri:
+            notes.append("No TRI-reporting industrial facilities are registered in this "
+                         "county; facilities below federal reporting thresholds are never "
+                         "listed anywhere.")
+        if contam_mi is not None and contam_mi > 15:
+            notes.append(f"The nearest mapped contamination/Superfund site is "
+                         f"{round(contam_mi)} miles away — note that closed and "
+                         "pre-regulation sites are not comprehensively mapped.")
+        # Overall coverage is sparse when water data is limited, or when the whole
+        # neighbourhood is far from any mapped facility of every kind.
+        sparse = water_sparse or (
+            (contam_mi is None or contam_mi > 25)
+            and (landfill_mi is None or landfill_mi > 25)
+            and (water_nearest_mi is None or water_nearest_mi > 10))
+        coverage = {
+            "nearest_water_site_mi": water_nearest_mi,
+            "nearest_water_site_name": water_nearest["name"] if water_nearest else None,
+            "nearest_contamination_mi": contam_mi,
+            "nearest_landfill_mi": landfill_mi,
+            "county_water_sites": county_water_sites,
+            "county_has_tri": county_has_tri,
+            "sparse": sparse, "water_sparse": water_sparse,
+            "notes": notes, "warning": None,
+        }
+        if water_nearest_mi is not None and water_nearest_mi > 10:
+            coverage["warning"] = (
+                f"Limited local monitoring data — the nearest water-sampling site is "
+                f"{round(water_nearest_mi)} miles away. Absence of detections here does "
+                f"not mean absence of contamination.")
+        elif water_sparse:
+            coverage["warning"] = (
+                "Limited local monitoring data — few or no water-sampling sites cover "
+                "this area. Absence of detections does not mean absence of contamination.")
+
+        # --- Downwind check (prevailing growing-season wind only) ---
+        stations = _wind_stations(conn)
+        ns = _nearest_station(lat, lng, stations)
+        downwind = None
+        if ns and ns.get("direction_deg") is not None:
+            from_deg = float(ns["direction_deg"])
+            upwind = []
+            for it in (near["tri"]["within"] + near["landfill"]["within"]):
+                b = _bearing_deg(lat, lng, it["lat"], it["lng"])
+                diff = abs((b - from_deg + 180) % 360 - 180)
+                if diff <= 45:
+                    upwind.append({"name": it["name"], "layer": it["layer"],
+                                   "distance_mi": it["distance_mi"], "id": it["id"],
+                                   "lat": it["lat"], "lng": it["lng"]})
+            upwind.sort(key=lambda x: x["distance_mi"])
+            downwind = {
+                "prevailing_from": deg_to_dir16(from_deg), "from_deg": round(from_deg),
+                "station": ns.get("station_name"), "station_mi": ns.get("distance_mi"),
+                "upwind": upwind[:6],
+                "note": ("Prevailing growing-season (Apr–Sep) wind direction only — "
+                         "this is directional context, not a dispersion or plume model."),
+            }
+
+        # --- Qualitative rating (bands only; never a number, never safe/clean) ---
+        water_near_conc = sum(1 for it in near["water"]["within"]
+                              if it.get("severity") in ("exceeds_mcl", "exceeds_benchmark"))
+        rank = (ctx.get("pesticide") or {}).get("statewide_rank")
+        n_co = (ctx.get("pesticide") or {}).get("counties_ranked") or 83
+        cats = {
+            "contamination": _band(near["contamination"]["count_5mi"]),
+            "industrial": _band(near["tri"]["count_5mi"]),
+            "waste": _band(near["landfill"]["count_5mi"]),
+            # Water is graded on documented exceedances, but only when there is
+            # enough local sampling to say anything — otherwise "insufficient".
+            "water": "insufficient" if water_sparse else _band(water_near_conc),
+            "pesticides": ("multiple" if (rank and rank <= max(1, n_co // 4))
+                           else "some" if (rank and rank <= n_co // 2) else "few"),
+        }
+        near_total = (near["contamination"]["count_5mi"] + near["tri"]["count_5mi"]
+                      + near["landfill"]["count_5mi"] + water_near_conc)
+        contam_far = (contam_mi is None or contam_mi > 20)
+        # Overall is "insufficient" only when coverage is sparse AND nothing was
+        # documented nearby — i.e. we genuinely cannot say either way.
+        if sparse and near_total == 0 and contam_far:
+            overall = "insufficient"
+        else:
+            order = {"few": 0, "some": 1, "multiple": 2}
+            concrete = [v for v in cats.values() if v != "insufficient"]
+            overall = max(concrete, key=lambda v: order[v]) if concrete else "insufficient"
+        rating = {
+            "overall": overall, "overall_label": _BAND_LABEL[overall],
+            "categories": {k: {"band": v, "label": _BAND_LABEL[v]} for k, v in cats.items()},
+            "adjacent_note": ("This reflects only what is documented in public "
+                              "datasets. Many hazards are not publicly mapped."),
+        }
+
+        report = {
+            "location": location, "in_michigan": True,
+            "near": near, "county_context": ctx, "monitoring": coverage,
+            "downwind": downwind, "rating": rating,
+            "rings_mi": list(_RINGS_MI),
+            "disclaimers": _REPORT_DISCLAIMERS, "sources": _REPORT_SOURCES,
+            "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        }
+    finally:
+        conn.close()
+    return jsonify(report)
 
 
 @app.route("/api/correlation/contamination")
