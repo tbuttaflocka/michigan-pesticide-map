@@ -1,6 +1,50 @@
 // Main app — Michigan Pesticide Heat Map.
 (function () {
   const $ = (id) => document.getElementById(id);
+
+  // Charts are a PROGRESSIVE ENHANCEMENT. If charts.js or the Chart.js CDN fails
+  // to load (a flaky network, an ad-blocker, an offline reload), the map,
+  // overlays, legends, popups, and the address report must ALL still work — a
+  // single failed <script> must never blank the whole app. So we never hard-
+  // depend on window.PMCharts: we supply local number formatters (identical to
+  // charts.js) plus no-op chart stubs, fill any gaps on the global, and neutralise
+  // the chart-drawing functions if the Chart library itself is missing — so every
+  // existing PMCharts.* call degrades to a no-op instead of throwing.
+  (function ensureCharts() {
+    const _fmtLbs = (v) => {
+      if (v == null) return '—';
+      const n = Number(v);
+      if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B lbs';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + ' M lbs';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + ' k lbs';
+      return n.toFixed(1) + ' lbs';
+    };
+    const _fmtCount = (v) => (v == null ? '—' : Number(v).toLocaleString());
+    const _fmtNum = (v) => {
+      if (v == null) return '—';
+      const n = Number(v);
+      return (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
+    };
+    const _noop = () => null;
+    const fallback = {
+      fmtKg: _fmtLbs, fmtLbs: _fmtLbs, fmtCount: _fmtCount, fmtNum: _fmtNum,
+      horizontalBar: _noop, doughnut: _noop, lineChart: _noop, scatter: _noop,
+      verticalBar: _noop, destroyIfExists: _noop,
+      CATEGORY_COLORS: { herbicide: '#3fb950', insecticide: '#f85149',
+        fungicide: '#58a6ff', growth_regulator: '#bc8cff', other: '#f0b429' },
+    };
+    const pc = window.PMCharts || {};
+    for (const k of Object.keys(fallback)) {
+      if (typeof pc[k] === 'undefined') pc[k] = fallback[k];   // fill gaps
+    }
+    if (typeof window.Chart === 'undefined') {                 // Chart.js missing
+      for (const k of ['horizontalBar', 'doughnut', 'lineChart', 'scatter', 'verticalBar']) {
+        pc[k] = _noop;
+      }
+    }
+    window.PMCharts = pc;
+  })();
+
   const fmtLbs = window.PMCharts.fmtLbs;
   // Phone / portrait-tablet layout (matches the CSS mobile breakpoint).
   const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
@@ -1382,6 +1426,9 @@
     function render() {
       const ctx = document.getElementById(canvasId);
       if (!ctx || !data) return;
+      // Charts are a progressive enhancement — if the Chart.js library failed to
+      // load, skip drawing rather than throwing (the data tables still render).
+      if (typeof Chart === 'undefined') return;
       const spec = buildSpec();
       const totals = data.total;
       PMCharts.destroyIfExists(state.charts[chartKey]);
