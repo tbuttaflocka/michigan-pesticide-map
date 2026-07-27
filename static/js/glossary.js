@@ -105,6 +105,19 @@
       'EGLE\'s Remediation Information Data Exchange — the state\'s public mapping ' +
       'system for contaminated sites, including leaking-tank releases, with per-site ' +
       'status, classification, and corrective-action detail.',
+    'heating oil tank':
+      'A tank that stored fuel oil to heat a home — buried in the yard or aboveground ' +
+      'in a basement. Common in Michigan houses built before natural-gas service ' +
+      'expanded (especially pre-1970s). These residential tanks generally were never ' +
+      'required to be registered, so they do NOT appear in EGLE\'s storage-tank data — ' +
+      'and buried ones were often abandoned in place rather than removed when a home ' +
+      'switched to gas. An old tank can corrode and leak, and cleanup is usually not ' +
+      'covered by homeowner\'s insurance.',
+    'tank sweep':
+      'A survey of a property to find a buried fuel tank, using metal detection or ' +
+      'ground-penetrating radar. Environmental contractors — and some home inspectors — ' +
+      'offer it as a standard service, so a buyer can check for an unregistered heating-' +
+      'oil tank before purchasing a home.',
     'municipal course':
       'A golf course owned by a local government (city, county, or township) or another ' +
       'public body such as a public university. Because it is a "public body," its grounds ' +

@@ -1965,6 +1965,37 @@ a:hover { text-decoration: underline; }
 .rpt-comps { margin-top: 2px; font-size: 11.5px; }
 .rpt-none { color: var(--muted); font-size: 12px; margin: 4px 0; line-height: 1.45; }
 .rpt-note { color: var(--muted); font-size: 11.5px; margin: 2px 0 4px; }
+
+/* Heating-oil-tank blind-spot caveat — informational (not alarmist) treatment,
+   distinct from the amber/red severity bands used for actual findings. Sits
+   directly under the UST section; collapsible with the headline always shown. */
+.rpt-oiltank {
+  margin: 8px 0 14px; border: 1px solid rgba(88,166,255,.5);
+  border-left: 4px solid #58a6ff; border-radius: 8px;
+  background: rgba(88,166,255,.09);
+}
+.rpt-oiltank > summary {
+  cursor: pointer; list-style: none; padding: 9px 12px;
+  font-weight: 600; font-size: 13px; line-height: 1.45; color: var(--text);
+}
+.rpt-oiltank > summary::-webkit-details-marker { display: none; }
+.rpt-oiltank > summary::after {
+  content: ' ▾'; color: #58a6ff; font-size: 11px; font-weight: 700;
+}
+.rpt-oiltank[open] > summary::after { content: ' ▴'; }
+.rpt-oiltank > summary:hover { color: #fff; }
+.rpt-oiltank-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px;
+  background: #58a6ff; color: #0d1117; font-size: 10px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px;
+}
+.rpt-oiltank-body { padding: 0 13px 11px; font-size: 12.3px; line-height: 1.5; }
+.rpt-oiltank-body p { margin: 6px 0; }
+.rpt-oiltank-actions { margin: 4px 0 6px; padding-left: 18px; }
+.rpt-oiltank-actions li { margin: 4px 0; }
+.rpt-oiltank-src { color: var(--muted); font-size: 11.5px; }
+.rpt-oiltank-src a { color: var(--link); }
+
 .rpt-focus {
   display: inline-block; margin-top: 5px; cursor: pointer; font: inherit;
   font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 6px;
@@ -2031,6 +2062,17 @@ a:hover { text-decoration: underline; }
   .band-insufficient { border-left: 5px solid #777 !important; }
   .rpt-warn { border: 2px solid #b8860b !important; }
   .rpt-section h3 { border-bottom: 1px solid #999 !important; }
+  /* Heating-oil-tank caveat: forced open via beforeprint; render it legibly. */
+  .rpt-oiltank {
+    background: #fff !important; border: 1px solid #999 !important;
+    border-left: 4px solid #333 !important; break-inside: avoid;
+  }
+  .rpt-oiltank > summary { list-style: none; }
+  .rpt-oiltank > summary::after { content: '' !important; }
+  .rpt-oiltank-tag {
+    background: #fff !important; color: #000 !important;
+    border: 1px solid #000; padding: 0 5px;
+  }
 }
 
 .foia-card {

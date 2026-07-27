@@ -3757,6 +3757,22 @@
       if (e.target.id === 'report-modal') closeReport();
     });
     $('report-print').addEventListener('click', () => window.print());
+    // Collapsible caveats (e.g. the heating-oil-tank blind-spot note) default to
+    // collapsed on screen but must appear in the printed / saved PDF. Force any
+    // <details> in the report open for printing, then restore screen state.
+    const _printOpened = [];
+    window.addEventListener('beforeprint', () => {
+      _printOpened.length = 0;
+      const body = $('report-body');
+      if (!body) return;
+      body.querySelectorAll('details:not([open])').forEach((d) => {
+        d.open = true; _printOpened.push(d);
+      });
+    });
+    window.addEventListener('afterprint', () => {
+      _printOpened.forEach((d) => { d.open = false; });
+      _printOpened.length = 0;
+    });
     $('report-reopen').addEventListener('click', () => {
       if (_report) { show($('report-modal')); hide($('report-reopen')); }
     });
@@ -4031,6 +4047,49 @@
       + `${_ringChips(block.rings)}</div>${body}</div>`;
   }
 
+  // Prominent blind-spot caveat for the UST section: EGLE's tank data covers
+  // REGULATED commercial tanks only. Unregistered residential heating-oil tanks
+  // (buried in the yard or aboveground in a basement) were never required to be
+  // registered, so a clean UST result above does NOT mean there is no tank on
+  // this parcel. Always shown, precisely because empty UST findings are when the
+  // wrong conclusion is easiest to draw. Collapsible on screen; forced open for
+  // print/PDF via the beforeprint handler.
+  function _heatingOilTankNote() {
+    return `<details class="rpt-oiltank">
+      <summary><span class="rpt-oiltank-tag">Data blind spot</span> `
+      + `Residential heating-oil tanks are <b>not</b> in this data — a clean result above doesn't rule one out</summary>
+      <div class="rpt-oiltank-body">
+        <p><b>What the data can't see.</b> The storage-tank findings above come from EGLE's dataset of `
+      + `<em>regulated commercial</em> tanks. Residential home-heating-oil tanks — whether buried in the yard `
+      + `or sitting aboveground in a basement — generally were never required to be registered or regulated, `
+      + `so they don't appear in that dataset or anywhere else in this app. <b>Seeing no tanks nearby does not `
+      + `mean there is no tank on this property</b> — the most likely buried tank on a given parcel is exactly `
+      + `the kind this data can't show.</p>
+        <p><b>Why it matters.</b> Heating oil was common in Michigan homes built before natural-gas service `
+      + `expanded, especially pre-1970s construction. When homes converted to gas, buried tanks were often `
+      + `<b>abandoned in place</b> rather than removed — and over the decades they can corrode and leak. `
+      + `Cleaning up a leaking residential tank can be expensive, and it is typically <b>not covered by a `
+      + `standard homeowner's insurance policy</b>.</p>
+        <p><b>What you can actually do:</b></p>
+        <ul class="rpt-oiltank-actions">
+          <li><b>Ask the seller directly</b> whether the property ever had — or still has — a heating-oil tank, `
+      + `and whether one was removed or abandoned in place (ask for documentation if so).</li>
+          <li><b>Look for physical signs:</b> a fill pipe or vent pipe poking out of the ground or an exterior `
+      + `wall; capped or unexplained copper/steel lines in the basement; an unexplained patched or sunken area `
+      + `in the yard; or an old furnace that was converted from oil.</li>
+          <li><b>Consider a tank sweep.</b> Surveying a property for buried tanks with metal detection or `
+      + `ground-penetrating radar is a standard service — environmental contractors, and some home inspectors, `
+      + `offer it, and it can find a tank before you buy.</li>
+          <li><b>Check the age of the home.</b> Risk tracks with pre-natural-gas-era construction, so older `
+      + `houses warrant a closer look.</li>
+        </ul>
+        <p class="rpt-oiltank-src">Michigan guidance: `
+      + `<a href="https://www.michigan.gov/egle/faqs/land-and-property/storage-tanks" target="_blank" rel="noopener">EGLE — FAQ: Home Heating Oil Tanks</a> `
+      + `(see also EGLE's <a href="https://www.michigan.gov/egle/-/media/Project/Websites/egle/Documents/Programs/RRD/LUST/home-heating-oil-tank-brochure.pdf" target="_blank" rel="noopener">Home Heating Oil Tanks regulatory guide</a>).</p>
+      </div>
+    </details>`;
+  }
+
   function _sprayingBlock(list) {
     if (!list || !list.length) {
       return `<div class="rpt-layer"><div class="rpt-layer-h"><span>🚁 Spraying programs</span></div>`
@@ -4144,6 +4203,7 @@
         'No open leaking underground storage-tank releases within 5 miles.')
       + _nearBlock('ust_other', 'Other storage tanks (closed releases & licensed)', '⛽', near.ust_other,
         'No closed-release or licensed storage tanks within 5 miles.')
+      + _heatingOilTankNote()
       + _nearBlock('pfas', 'PFAS sites & Areas of Interest', '⚠', near.pfas,
         'No PFAS sites or Areas of Interest within 5 miles — but investigation is ongoing, so this does not mean absence of PFAS.')
       + _nearBlock('pfas_water', 'PFAS surface-water sampling', '💧', near.pfas_water,
