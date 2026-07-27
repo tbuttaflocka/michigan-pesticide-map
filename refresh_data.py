@@ -293,6 +293,18 @@ SOURCES: list[Source] = [
                     "landfill_sites"),
     ),
     Source(
+        id="ust",
+        label="Michigan EGLE — Underground Storage Tanks (Part 211 / Part 213)",
+        loaders=[dl.load_ust],
+        targets=["ust_sites"],
+        primary_target="ust_sites", primary_source_id="egle_ust",
+        # EGLE's RRD open data is regularly updated as releases open/close.
+        interval_months=3, min_abs=5000, floor_frac=0.7,
+        coverage=lambda conn: (None, None),
+        # Seed contamination sites so open releases can be cross-linked to Superfund.
+        seed_extra=("contamination_sites",),
+    ),
+    Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
         loaders=[chem_ref.load_chemical_reference],
         targets=["chemical_reference"],

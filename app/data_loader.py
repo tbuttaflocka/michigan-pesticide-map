@@ -68,6 +68,7 @@ from . import contamination_data
 from . import landfill_data
 from . import golf_data
 from . import pfas_data
+from . import ust_data
 from .config import (
     CANCER_DATA_DIR,
     EPA_NPL_QUERY,
@@ -90,6 +91,9 @@ from .config import (
     MPART_HOME_URL,
     MPART_HUB_URL,
     MDHHS_EAT_SAFE_FISH_URL,
+    UST_URL,
+    EGLE_RIDE_URL,
+    EGLE_UST_HOME_URL,
 )
 
 
@@ -3037,6 +3041,142 @@ def load_pfas(conn: sqlite3.Connection) -> int:
         "EGLE PFAS Open Data Hub (ArcGIS)", MPART_HUB_URL, "reference", 0,
         "Live EGLE ArcGIS feeds behind the PFAS layer (sites/AOIs, surface water, "
         "public water supply, fish, treatment plants).")
+    return total
+
+
+# ---------- Underground Storage Tanks (EGLE RRD) ----------
+#
+# The most common near-home contamination source (~6,400 open leaking releases).
+# Part 211 licensed tanks and Part 213 leaking tanks are kept strictly distinct
+# so a working gas station never looks like a contaminated site. No fabrication.
+
+def load_ust(conn: sqlite3.Connection) -> int:
+    """Load all Michigan Underground Storage Tank sites from EGLE's RRD open-data
+    layer, classify each (open leaking / closed leaking / licensed), and cross-
+    link OPEN releases to the app's contamination/Superfund records."""
+    log("Loading Underground Storage Tanks (EGLE RRD, live)...")
+    cur = conn.cursor()
+
+    def _ckey(name):
+        return (name or "").replace(".", "").strip().lower()
+    fips_by_lname = {_ckey(name): fips for fips, name in _county_fips_list(conn)}
+    locate = _build_county_locator()
+    _, contam_by_fips = _build_crosslink_index(conn)
+
+    try:
+        feats = _arcgis_all(UST_URL)
+    except Exception as e:                       # noqa: BLE001
+        log(f"  UST fetch failed: {e}", level="warn")
+        record_source(conn, "egle_ust", "Michigan EGLE — Underground Storage Tanks",
+                      EGLE_UST_HOME_URL, "unavailable", 0,
+                      "EGLE RRD UST fetch failed this run; keeping prior data.")
+        return 0
+
+    rows = []
+    for f in feats:
+        a = f.get("attributes", {})
+        lat, lng = _to_float(a.get("Latitude")), _to_float(a.get("Longitude"))
+        if lat is None or lng is None:
+            continue
+        prog = a.get("RegulatoryProgram")
+        try:
+            prog = int(prog) if prog is not None else None
+        except (TypeError, ValueError):
+            prog = None
+        cat = ust_data.classify(a.get("Open_Release"), a.get("Total_Release"), prog)
+        method = (a.get("HorizontalCollectionMethod") or "").strip()
+        ml = method.lower()
+        addr_matched = 1 if "address match" in ml else 0
+        method_short = ("Address-matched (approximate)" if addr_matched
+                        else "GPS" if "gps" in ml
+                        else "Interpolation/other" if method else None)
+        cname = a.get("County")
+        fips = fips_by_lname.get(_ckey(cname))
+        cty = (cname or "").title() or None
+        if not fips:
+            fips, nm = locate(lng, lat)
+            cty = cty or nm
+        fid = a.get("FacilityID")
+        rows.append({
+            "site_key": f"ust:{fid or a.get('OBJECTID')}", "facility_id": fid,
+            "facility_name": (a.get("FacilityName") or "Storage-tank facility").strip(),
+            "category": cat, "regulatory_program": prog,
+            "address": (a.get("Address") or "").strip() or None,
+            "city": (a.get("City") or "").strip().title() or None,
+            "zip": (a.get("ZipCode") or "").strip() or None,
+            "county": cty, "county_fips": fips, "latitude": lat, "longitude": lng,
+            "project_manager": (a.get("ProjectManager") or "").strip() or None,
+            "work_unit": (a.get("WorkUnit") or "").strip() or None,
+            "total_tanks": a.get("Total_Tank"), "active_tanks": a.get("Active_Tank"),
+            "total_release": a.get("Total_Release"), "open_release": a.get("Open_Release"),
+            "closed_release": a.get("Closed_Release"),
+            "release_status": (a.get("ReleaseStatus") or "").strip() or None,
+            "current_classification": (a.get("CurrentClassification") or "").strip() or None,
+            "highest_classification": (a.get("HighestClassification") or "").strip() or None,
+            "risk_condition": (a.get("RiskCondition") or "").strip() or None,
+            "has_bea": (a.get("HasBEA") or "").strip() or None,
+            "horizontal_accuracy": _to_float(a.get("HorizontalAccuracy")),
+            "collection_method": method_short, "address_matched": addr_matched,
+            "reference_point": (a.get("ReferencePoint") or "").strip() or None,
+            "facility_url": None,
+            "last_updated": pfas_data.epoch_to_iso(a.get("LastUpdated")),
+            "name": (a.get("FacilityName") or "").strip(),   # for _best_crosslink
+        })
+
+    # Cross-link OPEN leaking releases to the app's contamination/Superfund records
+    # (precision-first: shared name tokens + proximity, never coordinates alone).
+    xlinks = 0
+    for rec in rows:
+        if rec["category"] != "leaking_open" or not rec["county_fips"]:
+            continue
+        c = _best_crosslink(rec, contam_by_fips.get(rec["county_fips"], []),
+                            "site_name", "company")
+        if c:
+            rec["contam_site_key"] = c["site_key"]; xlinks += 1
+
+    cur.execute("DELETE FROM ust_sites")
+    cur.executemany(
+        """INSERT OR REPLACE INTO ust_sites(
+             site_key, facility_id, facility_name, category, regulatory_program,
+             address, city, zip, county, county_fips, latitude, longitude,
+             project_manager, work_unit, total_tanks, active_tanks, total_release,
+             open_release, closed_release, release_status, current_classification,
+             highest_classification, risk_condition, has_bea, horizontal_accuracy,
+             collection_method, address_matched, reference_point, facility_url,
+             last_updated, contam_site_key, source)
+           VALUES (:site_key,:facility_id,:facility_name,:category,:regulatory_program,
+             :address,:city,:zip,:county,:county_fips,:latitude,:longitude,
+             :project_manager,:work_unit,:total_tanks,:active_tanks,:total_release,
+             :open_release,:closed_release,:release_status,:current_classification,
+             :highest_classification,:risk_condition,:has_bea,:horizontal_accuracy,
+             :collection_method,:address_matched,:reference_point,:facility_url,
+             :last_updated,:contam_site_key,'EGLE_RRD')""",
+        [{**r, "contam_site_key": r.get("contam_site_key")} for r in rows])
+    conn.commit()
+
+    total = len(rows)
+    n_open = sum(1 for r in rows if r["category"] == "leaking_open")
+    n_closed = sum(1 for r in rows if r["category"] == "leaking_closed")
+    n_lic = sum(1 for r in rows if r["category"] == "licensed")
+    log(f"  USTs: {total} ({n_open} open leaking, {n_closed} closed/remediated, "
+        f"{n_lic} licensed; {xlinks} contamination cross-links)",
+        level="ok" if total else "warn")
+    record_source(
+        conn, "egle_ust",
+        "Michigan EGLE — Underground Storage Tanks (Part 211 / Part 213)",
+        EGLE_UST_HOME_URL, "ok" if total else "unavailable", total,
+        f"{total} registered UST facilities from EGLE's Remediation & "
+        f"Redevelopment open data (live): {n_open} with an open leaking release "
+        f"(Part 213 corrective action), {n_closed} with closed/remediated "
+        f"releases, {n_lic} licensed-only (Part 211). Unregistered / abandoned "
+        f"tanks (incl. most residential heating-oil tanks) are not included. "
+        f"Point locations vary in accuracy. No site or status is fabricated.")
+    record_source(
+        conn, "egle_ride",
+        "EGLE RIDE — Remediation Information Data Exchange (per-site mapper)",
+        EGLE_RIDE_URL, "reference", 0,
+        "EGLE's interactive viewer for per-site release status, classification, "
+        "and corrective-action detail behind the UST layer.")
     return total
 
 

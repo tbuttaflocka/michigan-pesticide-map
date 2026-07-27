@@ -180,6 +180,12 @@
           <p class="muted small">County color = number of confirmed PFAS <span data-gloss="MPART">MPART</span> sites &amp; <span data-gloss="Area of Interest">Areas of Interest</span>. Individual sites, sampling, and hexbins are in the <em>PFAS</em> overlay below. Investigation is ongoing — absence does not mean absence of <span data-gloss="PFAS">PFAS</span>.</p>
           <p class="muted small" id="pfas-density-stats">—</p>
         </div>
+
+        <label class="layer-radio" data-tip="Shade counties by the number of OPEN leaking underground storage-tank releases (Part 213 corrective action). Wayne County has the most. Source: Michigan EGLE Remediation &amp; Redevelopment Division."><input type="radio" name="choropleth" value="ust_density" /> <span class="lr-dot ust"></span> <span>Leaking tank releases</span></label>
+        <div class="layer-inline" data-layer-filters="ust_density">
+          <p class="muted small">County color = number of <strong>open leaking</strong> <span data-gloss="LUST">underground storage-tank</span> releases (<span data-gloss="Part 213">Part 213</span>, under <span data-gloss="corrective action">corrective action</span>). Individual tanks — including licensed non-leaking ones — are in the <em>Storage tanks</em> overlay below.</p>
+          <p class="muted small" id="ust-density-stats">—</p>
+        </div>
       </div>
     </section>
 
@@ -235,6 +241,18 @@
         <details class="collapsible pfas-caveat">
           <summary><span class="info-icon">ℹ️</span>&nbsp;About PFAS data</summary>
           <p class="disclaimer-text small">PFAS investigation in Michigan is <strong>ongoing</strong> — the site list grows as new contamination is found, so <strong>absence of a PFAS site does not mean absence of <span data-gloss="PFAS">PFAS</span></strong>. An <span data-gloss="Area of Interest">Area of Interest</span> is an area under investigation where the source hasn't been determined; residential wells there may be affected. Public water supply results are shown as general <strong>hexbin areas</strong> rather than precise locations — <span data-gloss="MPART">EGLE</span> withholds exact system locations by design to protect critical infrastructure. Concentrations are in <span data-gloss="parts per trillion">parts per trillion (ppt)</span>; EPA's 2024 drinking-water limit for <span data-gloss="PFOA">PFOA</span> and <span data-gloss="PFOS">PFOS</span> is 4&nbsp;ppt. Fish sampling links to MDHHS Eat Safe Fish guidance rather than inventing consumption advice. Nothing here is fabricated. Source: <span data-gloss="MPART">Michigan PFAS Action Response Team (MPART)</span> / EGLE, live.</p>
+        </details>
+        <div class="overlay-subhead">Storage tanks <span class="lg-hint">EGLE RRD · ~32k sites</span></div>
+        <label class="overlay-toggle" data-tip="Michigan underground storage tanks (EGLE). The most common near-home contamination source. Open LEAKING releases (Part 213, red) are confirmed contamination under corrective action; closed/remediated releases are amber; grey are merely LICENSED tanks (Part 211 — a working gas station, not a contaminated site). Loads on demand; open leaking shown first."><input type="checkbox" id="ust-sites" /> <span>Underground storage tanks</span></label>
+        <div class="landfill-subtoggles" id="ust-subtoggles">
+          <label class="small"><input type="checkbox" id="ust-f-leaking_open" checked /> <span class="cdot" style="background:#e5484d"></span> Leaking — open release</label>
+          <label class="small"><input type="checkbox" id="ust-f-leaking_closed" /> <span class="cdot" style="background:#c9973b"></span> Leaking — closed / remediated</label>
+          <label class="small"><input type="checkbox" id="ust-f-licensed" /> <span class="cdot" style="background:#7f8b99"></span> Licensed only (no release)</label>
+        </div>
+        <p class="muted small overlay-substat" id="ust-stats" style="margin:2px 0 4px 22px"></p>
+        <details class="collapsible pfas-caveat">
+          <summary><span class="info-icon">ℹ️</span>&nbsp;About storage tanks</summary>
+          <p class="disclaimer-text small">Michigan regulates <span data-gloss="UST">underground storage tanks</span> under two different laws, kept distinct here: <span data-gloss="Part 211">Part 211</span> (LARA) covers tanks that are merely <strong>licensed</strong> — a working gas station is not, by itself, a contaminated site — while <span data-gloss="Part 213">Part 213</span> (EGLE) covers <span data-gloss="LUST">leaking</span> tanks with a confirmed release needing <span data-gloss="corrective action">corrective action</span>. Red = open release, amber = <span data-gloss="release closure">closed/remediated</span>, grey = licensed only. This covers <strong>known, registered</strong> tanks — unregistered or long-abandoned tanks, including most residential heating-oil tanks, are generally <strong>not</strong> included, so absence here doesn't mean none was ever present. Point locations vary in accuracy; some were placed by address matching, not GPS. Source: Michigan EGLE Remediation &amp; Redevelopment Division; per-site detail in <span data-gloss="RIDE">RIDE</span> Mapper.</p>
         </details>
         <label class="overlay-toggle" data-tip="A directory of Michigan's known organized spraying programs (county spongy-moth suppression, mosquito abatement, and the state's EEE/West Nile aerial response). Each links to its official page for current schedules — not a live spray-date feed."><input type="checkbox" id="spraying-programs" /> <span>Spraying programs (directory)</span></label>
         <details class="collapsible spraying-caveat">

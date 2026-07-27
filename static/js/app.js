@@ -92,6 +92,18 @@
       densityByFips: new Map(),    // county Site+AOI counts (choropleth)
       _densityMax: 1,
     },
+    ust: {
+      legend: null,
+      showSites: false,
+      // Open leaking releases on by default; closed & licensed are lazy (loaded
+      // only when their sub-toggle is switched on — the payload is large).
+      filters: { leaking_open: true, leaking_closed: false, licensed: false },
+      byCat: {},                   // category -> features[] (lazy-loaded)
+      loaded: {},                  // category -> true once fetched
+      markers: null,               // L.markerClusterGroup
+      densityByFips: new Map(),    // county open-release counts (choropleth)
+      _densityMax: 1,
+    },
     spraying: {
       loaded: false,
       programs: [],                // from /api/spraying/programs
@@ -318,6 +330,15 @@
           Math.floor(Math.sqrt(v / max) * PFAS_PALETTE.length));
         return PFAS_PALETTE[idx];
       }
+      case 'ust_density': {
+        const c = state.ust.densityByFips.get(fips);
+        const v = c ? c.value : 0;
+        if (!v) return NO_DATA;
+        const max = state.ust._densityMax || 1;
+        const idx = Math.min(UST_PALETTE.length - 1,
+          Math.floor(Math.sqrt(v / max) * UST_PALETTE.length));
+        return UST_PALETTE[idx];
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         return colorFor(c ? c.value : 0, state.breaks, state.palette);
@@ -517,6 +538,12 @@
         const aoi = c.aois ? ` <span class="muted">(${c.aois} area${c.aois > 1 ? 's' : ''} of interest)</span>` : '';
         return `<div><span class="muted">PFAS sites &amp; AOIs:</span> <span class="v">${c.value}</span>${aoi}</div>`;
       }
+      case 'ust_density': {
+        const c = state.ust.densityByFips.get(fips);
+        if (!c || !c.value) return '<div class="muted">No open leaking releases</div>';
+        const s = c.open_sites ? ` <span class="muted">(${c.open_sites} site${c.open_sites > 1 ? 's' : ''})</span>` : '';
+        return `<div><span class="muted">Open leaking UST releases:</span> <span class="v">${c.value}</span>${s}</div>`;
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         if (!c) return '<div class="muted">No pesticide data</div>';
@@ -559,6 +586,7 @@
       case 'tri':    return `TRI toxic releases — ${triMetricLabel(state.tri.metric).toLowerCase()}`;
       case 'landfill_density': return 'Landfill density';
       case 'pfas_density': return 'PFAS site density';
+      case 'ust_density': return 'Open leaking storage-tank releases';
       default:       return `Pesticide — ${pestFilterLabel()}`;
     }
   }
@@ -657,6 +685,10 @@
         paletteStrip(el, PFAS_PALETTE);
         note.textContent = 'PFAS sites & areas of interest per county (lower → higher)';
         break;
+      case 'ust_density':
+        paletteStrip(el, UST_PALETTE);
+        note.textContent = 'open leaking storage-tank releases per county (lower → higher)';
+        break;
     }
     renderMarkerKeys();
   }
@@ -720,6 +752,14 @@
         ).join('') +
         '<div class="mk mk-sub">AOI = area under investigation · public water shown as hexbin areas</div>';
     }
+    // UST key — open leaking (prominent) vs closed vs licensed (muted).
+    if (state.ust.showSites && state.ust.legend) {
+      html += '<div class="mk-title" style="margin-top:8px">Storage tanks · EGLE</div>' +
+        state.ust.legend.categories.filter((c) => state.ust.filters[c.key] !== false).map((c) =>
+          `<div class="mk"><span class="mk-dot" style="background:${c.color}"></span>${c.glyph} ${c.short}</div>`
+        ).join('') +
+        '<div class="mk mk-sub">Part 213 leaking ≠ Part 211 licensed · locations vary in accuracy</div>';
+    }
     // Spraying-programs type key — the markers are colored by program type.
     if (state.spraying.showMarkers && state.spraying.types.length) {
       html += '<div class="mk-title" style="margin-top:8px">Spraying programs · by type</div>' +
@@ -765,6 +805,7 @@
       case 'tri':            return 'toxic-release amounts';
       case 'landfill_density': return 'landfill counts';
       case 'pfas_density':   return 'PFAS site counts';
+      case 'ust_density':    return 'open leaking-tank counts';
       default:               return 'pesticide amounts';
     }
   }
@@ -814,6 +855,7 @@
       if (which === 'tri') await loadTriDensity(state.tri.metric);
       if (which === 'landfill_density') await loadLandfillDensity();
       if (which === 'pfas_density') await loadPfasDensity();
+      if (which === 'ust_density') await loadUstDensity();
     } catch (e) {
       console.error(e);
     } finally {
@@ -1540,6 +1582,15 @@
         showCard2(true);
         break;
       }
+      case 'ust_density': {
+        const c = state.ust.densityByFips.get(fips);
+        v1.textContent = (c && c.value) ? String(c.value) : '0';
+        l1.textContent = 'Open leaking UST releases';
+        v2.textContent = (c && c.open_sites) ? String(c.open_sites) : '0';
+        l2.textContent = 'Sites with an open release';
+        showCard2(true);
+        break;
+      }
       case 'tri': {
         const c = state.tri.densityByFips.get(fips);
         v1.textContent = (c && c.value) ? fmtLbs(c.value) + '/yr' : '—';
@@ -1883,6 +1934,20 @@
       if (el && d.stats) {
         el.textContent = `${d.stats.total_sites} PFAS sites & areas of interest across `
           + `${d.stats.counties_with_sites} of 83 counties.`;
+      }
+    }
+  }
+
+  // Per-county open leaking-release count for the UST choropleth (Wayne leads).
+  async function loadUstDensity() {
+    if (!state.ust.densityByFips.size) {
+      const d = await api('/api/ust/density');
+      for (const c of d.counties) state.ust.densityByFips.set(c.fips, c);
+      state.ust._densityMax = (d.stats && d.stats.max) || 1;
+      const el = $('ust-density-stats');
+      if (el && d.stats) {
+        el.textContent = `${d.stats.total_sites.toLocaleString()} open leaking releases across `
+          + `${d.stats.counties_with_sites} counties (Wayne alone has the most).`;
       }
     }
   }
@@ -2341,6 +2406,128 @@
       ${f.site_lead ? `<div class="pfas-lead"><span class="k">EGLE contact:</span> ${esc(f.site_lead)}${f.site_lead_email ? ` · <a href="mailto:${esc(f.site_lead_email)}">${esc(f.site_lead_email)}</a>` : ''}</div>` : ''}
       ${f.hyperlink ? `<a class="pfas-cta" href="${esc(f.hyperlink)}" target="_blank" rel="noopener">MiEnviro permit record →</a>` : ''}
       <div class="pfas-src">Source: EGLE — Publicly Owned Treatment Works with PFAS data.</div>
+    </div>`;
+  }
+
+  // ---------- Underground Storage Tanks overlay (EGLE RRD) ----------
+  // ~32k points, so we lazy-load per category (open leaking / closed / licensed)
+  // and cluster. A licensed Part 211 tank must never look like a Part 213 release:
+  // open leaking = prominent red, closed = amber, licensed = small muted grey.
+  const UST_PALETTE = ['#241a15', '#3a2416', '#542c17', '#71341a', '#8f3d1d',
+                       '#ae4a23', '#c85f2c', '#dc7c40', '#ec9f63', '#f7c795'];
+  function ustPane() {
+    if (!state.map.getPane('ust')) state.map.createPane('ust').style.zIndex = 643;
+    return 'ust';
+  }
+  function newUstClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      return L.markerClusterGroup({
+        clusterPane: 'ust', maxClusterRadius: 50, chunkedLoading: true,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: true,
+      });
+    }
+    return L.layerGroup();
+  }
+  function _ustCat(cat) {
+    const list = (state.ust.legend && state.ust.legend.categories) || [];
+    return list.find((c) => c.key === cat) || { glyph: '⛽', color: '#7f8b99', label: cat };
+  }
+  async function loadUstCategory(cat) {
+    if (state.ust.loaded[cat]) return;
+    const d = await api('/api/ust/sites', { category: cat });
+    state.ust.legend = d.legend || state.ust.legend;
+    state.ust.byCat[cat] = d.sites || [];
+    state.ust.loaded[cat] = true;
+  }
+  async function ensureUstLoaded() {
+    for (const cat of Object.keys(state.ust.filters)) {
+      if (state.ust.filters[cat] && !state.ust.loaded[cat]) await loadUstCategory(cat);
+    }
+  }
+  function ustSize(cat) {
+    return cat === 'leaking_open' ? 26 : cat === 'leaking_closed' ? 22 : 17;
+  }
+  function renderUst() {
+    if (state.ust.markers) { state.ust.markers.remove(); state.ust.markers = null; }
+    if (!state.ust.showSites) { updateUstStats(); renderMarkerKeys(); return; }
+    const pane = ustPane();
+    const grp = newUstClusterLayer();
+    for (const cat of Object.keys(state.ust.filters)) {
+      if (!state.ust.filters[cat] || !state.ust.loaded[cat]) continue;
+      const meta = _ustCat(cat);
+      const size = ustSize(cat);
+      const muted = cat === 'licensed' ? ' muted' : '';
+      for (const f of state.ust.byCat[cat] || []) {
+        if (f.lat == null || f.lng == null) continue;
+        const m = L.marker([f.lat, f.lng], {
+          pane,
+          icon: L.divIcon({ className: 'ust-divicon',
+            html: `<div class="ust-marker ${cat}${muted}" style="width:${size}px;height:${size}px;background:${meta.color}"><span>${meta.glyph}</span></div>`,
+            iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+        });
+        m.bindPopup(ustPopupHtml(f), { maxWidth: 340, className: 'ust-popup-wrap' });
+        grp.addLayer(m);
+      }
+    }
+    grp.addTo(state.map);
+    state.ust.markers = grp;
+    updateUstStats(); renderMarkerKeys();
+  }
+  function updateUstStats() {
+    const el = $('ust-stats');
+    if (!el) return;
+    if (!state.ust.showSites) { el.textContent = '—'; return; }
+    const open = (state.ust.byCat.leaking_open || []).length;
+    el.textContent = state.ust.loaded.leaking_open
+      ? `${open.toLocaleString()} open leaking releases mapped · toggle closed & licensed tanks above`
+      : 'loading…';
+  }
+  function _ustProgramLabel(pg) {
+    return pg === 213 ? 'Part 213 — leaking UST (EGLE corrective action)'
+      : pg === 211 ? 'Part 211 — licensed UST (LARA)' : '';
+  }
+  function _ustAccuracyNote(f) {
+    if (f.am) return 'This point was located by address matching, not GPS — its position is approximate (may be off by a parcel or block).';
+    if (f.ha && f.ha >= 50) return `Location accuracy about ${Math.round(f.ha)} m — treat the point as approximate.`;
+    return '';
+  }
+  function ustPopupHtml(f) {
+    const meta = _ustCat(f.c);
+    const loc = [f.a, f.ci].filter(Boolean).join(', ');
+    const isLeaking = f.c === 'leaking_open' || f.c === 'leaking_closed';
+    const isOpen = f.c === 'leaking_open';
+    const prog = _ustProgramLabel(f.pg);
+    const acc = _ustAccuracyNote(f);
+    let body = '';
+    if (isLeaking) {
+      const bits = [];
+      if (f.rs) bits.push(`<div><span class="k">Release status:</span> <b>${esc(f.rs)}</b>`
+        + `${isOpen && f.orl ? ` · ${f.orl} open` : ''}${f.cr ? ` · ${f.cr} closed` : ''}</div>`);
+      if (f.cc) bits.push(`<div><span class="k">EGLE classification:</span> ${esc(f.cc)}`
+        + `${f.rk ? ` · ${esc(f.rk)}` : ''}</div>`);
+      body = bits.join('');
+    } else {
+      body = '<div class="ust-note">A <b>licensed</b> tank with <b>no reported release</b> — this is a registered storage tank, <b>not</b> a documented contaminated site.</div>';
+    }
+    const tanks = (f.tt != null || f.at != null)
+      ? `<div><span class="k">Tanks:</span> ${f.tt != null ? f.tt + ' total' : ''}${f.at != null ? ` · ${f.at} active` : ''}</div>` : '';
+    const pm = f.pm ? `<div><span class="k">EGLE project manager:</span> ${esc(f.pm)}</div>` : '';
+    const dist = f.wu ? `<div><span class="k">EGLE district:</span> ${esc(f.wu)}</div>` : '';
+    const xlink = f.xc
+      ? `<button type="button" class="ust-xlink" data-lf-focus="contam" data-lat="${f.lat}" data-lng="${f.lng}">☣ Also a contamination / Superfund site · show on map →</button>` : '';
+    const ride = (state.ust.legend && state.ust.legend.ride_url)
+      ? `<a class="ust-cta" href="${esc(state.ust.legend.ride_url)}" target="_blank" rel="noopener">EGLE RIDE Mapper${f.id ? ` (facility ${esc(f.id)})` : ''} →</a>` : '';
+    return `<div class="ust-popup">
+      <div class="ust-type ${f.c}" style="background:${meta.color}">${meta.glyph} ${esc(meta.short || meta.label)}</div>
+      <h4>${esc(f.n)}</h4>
+      ${prog ? `<div class="ust-meta">${esc(prog)}</div>` : ''}
+      ${loc ? `<div class="ust-meta">${esc(loc)}${f.co ? ' · ' + esc(f.co) + ' Co.' : ''}</div>` : (f.co ? `<div class="ust-meta">${esc(f.co)} County</div>` : '')}
+      <div class="ust-body">${body}${tanks}${pm}${dist}</div>
+      ${xlink ? `<div class="ust-xlinks">${xlink}</div>` : ''}
+      ${acc ? `<div class="ust-accuracy">📍 ${esc(acc)}</div>` : ''}
+      ${ride}
+      <div class="ust-src">Source: Michigan EGLE Remediation &amp; Redevelopment (RRD)${f.lu ? ` · updated ${esc(f.lu)}` : ''}. Registered tanks only — unregistered / abandoned tanks (incl. most home heating-oil tanks) are not included.</div>
     </div>`;
   }
 
@@ -3233,6 +3420,27 @@
         renderPfas();
       });
     });
+
+    // Underground storage tanks (lazy per-category load) + sub-toggles.
+    const ustToggle = $('ust-sites');
+    if (ustToggle) {
+      ustToggle.addEventListener('change', async (e) => {
+        state.ust.showSites = e.target.checked;
+        if (e.target.checked) { loading(true); await ensureUstLoaded(); loading(false); }
+        renderUst();
+      });
+    }
+    ['leaking_open', 'leaking_closed', 'licensed'].forEach((k) => {
+      const cb = $(`ust-f-${k}`);
+      if (cb) cb.addEventListener('change', async (e) => {
+        state.ust.filters[k] = e.target.checked;
+        if (e.target.checked && state.ust.showSites && !state.ust.loaded[k]) {
+          loading(true); await loadUstCategory(k); loading(false);
+        }
+        renderUst();
+      });
+    });
+
     $('contam-zones').addEventListener('change', async (e) => {
       state.contam.showZones = e.target.checked;
       if (e.target.checked) await loadContamination();
@@ -3622,6 +3830,11 @@
     spraying: { cb: 'spraying-programs', grp: () => state.spraying.markers },
     pfas: { cb: 'pfas-sites', grp: () => state.pfas.markers },
     pfas_water: { cb: 'pfas-sites', grp: () => state.pfas.markers },
+    // UST: enabling the layer loads open-leaking; ust_other needs the closed &
+    // licensed categories toggled on so their (lazy) markers exist to open.
+    ust_open: { cb: 'ust-sites', grp: () => state.ust.markers },
+    ust_other: { cb: 'ust-sites', grp: () => state.ust.markers,
+                 subCbs: ['ust-f-leaking_closed', 'ust-f-licensed'] },
   };
 
   function _openInGroup(group, lat, lng) {
@@ -3649,8 +3862,12 @@
     if (!cfg || Number.isNaN(lat)) return;
     const cb = $(cfg.cb);
     if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
-    // give the layer a moment to fetch + render its markers
-    await new Promise((r) => setTimeout(r, 650));
+    for (const subId of (cfg.subCbs || [])) {
+      const sub = $(subId);
+      if (sub && !sub.checked) { sub.checked = true; sub.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    // give the layer a moment to fetch + render its markers (lazy categories too)
+    await new Promise((r) => setTimeout(r, cfg.subCbs ? 1100 : 650));
     state.map.setView([lat, lng], Math.max(state.map.getZoom(), 13));
     const direct = cfg.byId && id ? cfg.byId(id) : null;
     if (direct) {
@@ -3727,6 +3944,21 @@
       const key = det.PFOS != null ? `PFOS ${det.PFOS} ppt` : (it.max_ppt != null ? `max ${it.max_ppt} ppt` : '');
       return `${_rEsc(it.waterbody || 'surface water')}${key ? ` · <b>${key}</b>` : ''}`
         + `${it.sample_date ? ` <span class="muted">(${_rEsc(it.sample_date)})</span>` : ''}`;
+    }
+    if (layer === 'ust_open') {
+      const cls = it.classification ? ` · ${_rEsc(it.classification)}` : '';
+      const rel = it.open_release ? ` · ${it.open_release} open release${it.open_release > 1 ? 's' : ''}` : '';
+      const approx = it.address_matched ? ' <span class="muted">(approx. location)</span>' : '';
+      return `<span class="rpt-tag" style="background:#e5484d;color:#fff">Open leaking release</span>`
+        + `${_rEsc(it.address || '')}${rel}${cls}${approx}`;
+    }
+    if (layer === 'ust_other') {
+      const isClosed = it.category === 'leaking_closed';
+      const tag = isClosed
+        ? '<span class="rpt-tag" style="background:#c9973b;color:#0d1117">Closed / remediated release</span>'
+        : '<span class="rpt-tag" style="background:#7f8b99;color:#0d1117">Licensed tank (no release)</span>';
+      const approx = it.address_matched ? ' <span class="muted">(approx. location)</span>' : '';
+      return `${tag}${_rEsc(it.address || '')}${approx}`;
     }
     return '';
   }
@@ -3861,6 +4093,10 @@
         'No active landfills within 5 miles.')
       + _nearBlock('water', 'Water monitoring sites', '💧', near.water,
         'No water-monitoring sites within 5 miles.')
+      + _nearBlock('ust_open', 'Leaking storage tanks — OPEN releases', '⚠', near.ust_open,
+        'No open leaking underground storage-tank releases within 5 miles.')
+      + _nearBlock('ust_other', 'Other storage tanks (closed releases & licensed)', '⛽', near.ust_other,
+        'No closed-release or licensed storage tanks within 5 miles.')
       + _nearBlock('pfas', 'PFAS sites & Areas of Interest', '⚠', near.pfas,
         'No PFAS sites or Areas of Interest within 5 miles — but investigation is ongoing, so this does not mean absence of PFAS.')
       + _nearBlock('pfas_water', 'PFAS surface-water sampling', '💧', near.pfas_water,

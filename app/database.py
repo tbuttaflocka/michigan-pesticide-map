@@ -415,6 +415,53 @@ CREATE TABLE IF NOT EXISTS pfas_features (
 CREATE INDEX IF NOT EXISTS ix_pfas_kind   ON pfas_features(kind);
 CREATE INDEX IF NOT EXISTS ix_pfas_county ON pfas_features(county_fips);
 
+-- ===== Underground Storage Tanks (EGLE RRD, regularly updated) =====
+-- The most common near-home contamination source. CRITICAL distinction, carried
+-- in `category`: a licensed Part 211 tank (a working gas station, not
+-- necessarily a problem) must NEVER look like a confirmed Part 213 release.
+--   leaking_open   — Open_Release > 0: a confirmed leak still under corrective action
+--   leaking_closed — Part 213 with releases, all closed/remediated
+--   licensed       — Part 211, no reported release
+-- Point locations vary in accuracy (some geocoded by address, not GPS) — the
+-- horizontal_accuracy / collection_method fields are surfaced honestly.
+CREATE TABLE IF NOT EXISTS ust_sites (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_key               TEXT UNIQUE NOT NULL,   -- ust:<FacilityID or OBJECTID>
+    facility_id            TEXT,
+    facility_name          TEXT,
+    category               TEXT NOT NULL,          -- leaking_open|leaking_closed|licensed
+    regulatory_program     INTEGER,                -- 211 (LARA licensed) | 213 (EGLE leaking)
+    address                TEXT,
+    city                   TEXT,
+    zip                    TEXT,
+    county                 TEXT,
+    county_fips            TEXT,
+    latitude               REAL NOT NULL,
+    longitude              REAL NOT NULL,
+    project_manager        TEXT,
+    work_unit              TEXT,                   -- EGLE district / work unit
+    total_tanks            INTEGER,
+    active_tanks           INTEGER,
+    total_release          INTEGER,
+    open_release           INTEGER,
+    closed_release         INTEGER,
+    release_status         TEXT,
+    current_classification TEXT,                   -- EGLE risk classification (Class 1..4, etc.)
+    highest_classification TEXT,
+    risk_condition         TEXT,
+    has_bea                TEXT,
+    horizontal_accuracy    REAL,                   -- metres (larger = less precise)
+    collection_method      TEXT,                   -- short label (GPS vs address-matched)
+    address_matched        INTEGER DEFAULT 0,      -- 1 if located by address match, not GPS
+    reference_point        TEXT,
+    facility_url           TEXT,                   -- RIDE / EGLE record link if any
+    last_updated           TEXT,
+    contam_site_key        TEXT,                   -- cross-link: contamination_sites.site_key
+    source                 TEXT DEFAULT 'EGLE_RRD'
+);
+CREATE INDEX IF NOT EXISTS ix_ust_category ON ust_sites(category);
+CREATE INDEX IF NOT EXISTS ix_ust_county   ON ust_sites(county_fips);
+
 -- ===== Wind / pesticide-drift modeling =====
 
 CREATE TABLE IF NOT EXISTS wind_data (

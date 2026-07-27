@@ -25,6 +25,7 @@ from app import contamination_data
 from app import landfill_data
 from app import golf_data
 from app import pfas_data
+from app import ust_data
 from app import spraying_programs
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
@@ -3407,6 +3408,74 @@ def api_pfas_density():
                               "total_sites": sum(vals)}})
 
 
+# ---------- Underground Storage Tanks overlay (EGLE RRD) ----------
+
+def _ust_row(r) -> dict:
+    # Lean payload: there can be ~32k of these, so we omit per-row label strings
+    # (glyph/color/category label/program label/accuracy note) and let the client
+    # derive them from the legend + a couple of fields. Null fields are dropped.
+    row = {
+        "k": r["site_key"], "id": r["facility_id"], "n": r["facility_name"],
+        "c": r["category"], "pg": r["regulatory_program"],
+        "a": r["address"], "ci": r["city"], "co": r["county"],
+        "lat": r["latitude"], "lng": r["longitude"],
+        "pm": r["project_manager"], "wu": r["work_unit"],
+        "tt": r["total_tanks"], "at": r["active_tanks"],
+        "tr": r["total_release"], "orl": r["open_release"], "cr": r["closed_release"],
+        "rs": r["release_status"], "cc": r["current_classification"],
+        "rk": r["risk_condition"], "ha": r["horizontal_accuracy"],
+        "am": 1 if r["address_matched"] else 0, "lu": r["last_updated"],
+        "xc": r["contam_site_key"],
+    }
+    return {k: v for k, v in row.items() if v is not None and v != ""}
+
+
+@app.route("/api/ust/sites")
+def api_ust_sites():
+    """Underground storage tanks (EGLE RRD). Given the volume (~32k), the frontend
+    lazy-loads by ?category= (comma-separated: leaking_open, leaking_closed,
+    licensed) so only the toggled-on categories are fetched."""
+    cats = request.args.get("category")
+    q = "SELECT * FROM ust_sites WHERE 1=1"
+    params: list = []
+    if cats and cats != "all":
+        wanted = [c.strip() for c in cats.split(",") if c.strip()]
+        if wanted:
+            q += " AND category IN (%s)" % ",".join("?" * len(wanted))
+            params += wanted
+    # Prominent (open leaking) first; within a category, higher risk first.
+    q += (" ORDER BY (category='leaking_open') DESC, open_release DESC, "
+          "facility_name")
+    conn = db()
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return jsonify({"count": len(rows), "legend": ust_data.legend_payload(),
+                    "sites": [_ust_row(r) for r in rows]})
+
+
+@app.route("/api/ust/density")
+def api_ust_density():
+    """Per-county OPEN leaking-release count for the choropleth (Wayne leads)."""
+    conn = db()
+    rows = conn.execute("""
+        SELECT c.fips, c.name,
+               COALESCE(SUM(u.open_release), 0) AS open_releases,
+               SUM(CASE WHEN u.category='leaking_open' THEN 1 ELSE 0 END) AS open_sites
+          FROM counties c
+     LEFT JOIN ust_sites u ON u.county_fips = c.fips
+      GROUP BY c.fips, c.name ORDER BY c.name
+    """).fetchall()
+    conn.close()
+    out = [{"fips": r["fips"], "name": r["name"], "value": r["open_releases"],
+            "open_releases": r["open_releases"], "open_sites": r["open_sites"] or 0}
+           for r in rows]
+    vals = [r["value"] for r in out if r["value"]]
+    return jsonify({"counties": out,
+                    "stats": {"max": max(vals) if vals else 0,
+                              "counties_with_sites": len(vals),
+                              "total_sites": sum(vals)}})
+
+
 # ==========================================================================
 # "Check an address" — homebuyer environmental report
 # ==========================================================================
@@ -3675,8 +3744,34 @@ def _report_near(conn, lat, lng):
     pfas_water = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
                               "pfas_water", _pfas_water)
 
+    # --- Underground storage tanks. Open leaking releases are called out
+    # separately and prominently from closed/licensed tanks (the whole point:
+    # an old leaking gas station nearby is real information a buyer rarely gets). ---
+    def _ust_build(r, d):
+        return {"id": r["site_key"], "name": r["facility_name"], "county": r["county"],
+                "category": r["category"], "address": r["address"], "city": r["city"],
+                "open_release": r["open_release"], "total_release": r["total_release"],
+                "classification": r["current_classification"],
+                "address_matched": bool(r["address_matched"]),
+                "program": r["regulatory_program"]}
+    rows = conn.execute(
+        "SELECT site_key, facility_name, latitude, longitude, county, category, "
+        "address, city, open_release, total_release, current_classification, "
+        "address_matched, regulatory_program FROM ust_sites "
+        "WHERE category='leaking_open'").fetchall()
+    ust_open = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
+                            "ust_open", _ust_build)
+    rows = conn.execute(
+        "SELECT site_key, facility_name, latitude, longitude, county, category, "
+        "address, city, open_release, total_release, current_classification, "
+        "address_matched, regulatory_program FROM ust_sites "
+        "WHERE category IN ('leaking_closed','licensed')").fetchall()
+    ust_other = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
+                             "ust_other", _ust_build)
+
     return {"contamination": contam, "tri": tri, "landfill": landfill,
-            "water": water, "golf": golf, "pfas": pfas, "pfas_water": pfas_water}
+            "water": water, "golf": golf, "pfas": pfas, "pfas_water": pfas_water,
+            "ust_open": ust_open, "ust_other": ust_other}
 
 
 def _report_spraying(alat, alng, fips, locate):

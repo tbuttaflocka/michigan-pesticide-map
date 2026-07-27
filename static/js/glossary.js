@@ -74,6 +74,37 @@
       'The buildup of a chemical in living tissue faster than the body can get rid of it, so ' +
       'concentrations rise up the food chain. PFOS bioaccumulates strongly in fish, which is why ' +
       'fish caught in contaminated waters can carry far higher PFAS levels than the water itself.',
+    'UST':
+      'Underground Storage Tank — a tank (usually fuel) buried at gas stations, ' +
+      'fleet garages, farms, and businesses. Michigan has tens of thousands. Aging ' +
+      'tanks and piping can leak petroleum into soil and groundwater, which is why ' +
+      'they are the most common near-home contamination source.',
+    'LUST':
+      'Leaking Underground Storage Tank — a UST with a confirmed release of ' +
+      'petroleum or other regulated substance. In Michigan these are handled under ' +
+      'Part 213 and require corrective action (cleanup) until the release is closed.',
+    'Part 211':
+      'The Michigan law (administered by LARA) under which underground storage ' +
+      'tanks are registered and LICENSED. A Part 211 tank is a legally operating ' +
+      'tank — a working gas station\'s tanks — and is NOT, by itself, a contaminated ' +
+      'site. It only becomes a Part 213 concern if it leaks.',
+    'Part 213':
+      'The Michigan law (administered by EGLE) governing LEAKING underground ' +
+      'storage tanks — sites with a confirmed release that require investigation ' +
+      'and corrective action. A Part 213 "open release" is active contamination ' +
+      'still being cleaned up; a "closed" release has met cleanup criteria.',
+    'corrective action':
+      'The investigation and cleanup a responsible party must carry out after a ' +
+      'confirmed release — characterizing the contamination, removing or treating ' +
+      'it, and monitoring — until the site meets closure criteria.',
+    'release closure':
+      'The point at which EGLE agrees a leaking-tank release has been addressed to ' +
+      'meet the applicable cleanup criteria and no further corrective action is ' +
+      'required. A "closed" release has been remediated; an "open" one has not.',
+    'RIDE':
+      'EGLE\'s Remediation Information Data Exchange — the state\'s public mapping ' +
+      'system for contaminated sites, including leaking-tank releases, with per-site ' +
+      'status, classification, and corrective-action detail.',
     'municipal course':
       'A golf course owned by a local government (city, county, or township) or another ' +
       'public body such as a public university. Because it is a "public body," its grounds ' +

@@ -208,6 +208,21 @@ OVERPASS_ENDPOINTS = [
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
+# ---- Underground Storage Tanks (EGLE RRD, regularly updated) ----
+#
+# The single richest source of everyday near-home contamination: EGLE's UST layer
+# carries BOTH tanks merely licensed under Part 211 (LARA — a working gas
+# station, not necessarily a problem) AND leaking tanks regulated under Part 213
+# (EGLE — confirmed releases needing corrective action). RegulatoryProgram
+# (211 vs 213) + Open_Release/Total_Release distinguish them; the layer already
+# includes release status/classification, so no fragile RIDE join is needed. RIDE
+# Mapper is cited as the per-site reference viewer.
+UST_URL = ("https://gisagoegle.state.mi.us/arcgis/rest/services/"
+           "EGLE/RRDOpenData/MapServer/1")
+EGLE_RIDE_URL = "https://www.egle.state.mi.us/RIDE/"
+EGLE_UST_HOME_URL = ("https://www.michigan.gov/egle/about/organization/"
+                     "remediation-and-redevelopment/storage-tanks")
+
 # ---- PFAS (Michigan PFAS Action Response Team / EGLE, live ArcGIS) ----
 #
 # Michigan runs the most aggressive state PFAS program in the country; MPART
