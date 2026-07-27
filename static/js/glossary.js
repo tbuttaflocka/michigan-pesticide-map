@@ -105,6 +105,41 @@
       'EGLE\'s Remediation Information Data Exchange — the state\'s public mapping ' +
       'system for contaminated sites, including leaking-tank releases, with per-site ' +
       'status, classification, and corrective-action detail.',
+    'air toxics':
+      'Hazardous air pollutants — chemicals in outdoor air known or suspected to ' +
+      'cause cancer or other serious health effects (e.g. benzene, formaldehyde, ' +
+      '1,3-butadiene, ethylene oxide). EPA models where they come from (industry, ' +
+      'traffic, fires, natural sources) and the health risk they pose.',
+    'hazard air pollutants (HAPs)':
+      'The ~188 pollutants Congress listed in the Clean Air Act as hazardous — the ' +
+      '"air toxics." They come from industry, vehicles, small area sources, and ' +
+      'natural processes, and are regulated separately from the common "criteria" ' +
+      'pollutants like ozone and soot.',
+    'cancer risk in-a-million':
+      'A way to express modeled cancer risk: how many extra cancer cases would be ' +
+      'expected among a million people who breathed that air continuously outdoors ' +
+      'for a 70-year lifetime. "20 in a million" means 20 extra cases per million ' +
+      'people over a lifetime — a modeled estimate, not a count of real cases.',
+    'hazard index':
+      'A measure of NON-cancer risk: the modeled concentration of a pollutant ' +
+      'divided by the level considered safe, summed across pollutants that affect ' +
+      'the same organ system (e.g. the respiratory tract). A hazard index above 1 ' +
+      'means the combined exposure exceeds the safe reference level.',
+    'census block vs tract':
+      'Two Census geographies. A census TRACT is a small statistical area of ' +
+      'roughly 1,200–8,000 people (Michigan has ~2,800); a census BLOCK is much ' +
+      'smaller still. This layer shades tracts — finer than counties, coarse enough ' +
+      'to render and to match how EPA says the data should be used.',
+    'screening assessment':
+      'A modeled, nationwide first-cut that estimates risk from emissions ' +
+      'inventories and dispersion models to FLAG places worth a closer look. It is ' +
+      'not measured air and is not meant to determine risk at a specific home, ' +
+      'school, or address — only to compare areas and guide further study.',
+    'NATA':
+      'EPA\'s National Air Toxics Assessment — the periodic nationwide screening ' +
+      'study of air toxics health risk that this layer draws on. It was renamed ' +
+      'AirToxScreen starting with the 2019 assessment; the methods and caveats are ' +
+      'the same — modeled estimates, not measurements.',
     'heating oil tank':
       'A tank that stored fuel oil to heat a home — buried in the yard or aboveground ' +
       'in a basement. Common in Michigan houses built before natural-gas service ' +

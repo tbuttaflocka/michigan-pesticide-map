@@ -186,6 +186,15 @@
           <p class="muted small">County color = number of <strong>open leaking</strong> <span data-gloss="LUST">underground storage-tank</span> releases (<span data-gloss="Part 213">Part 213</span>, under <span data-gloss="corrective action">corrective action</span>). Individual tanks — including licensed non-leaking ones — are in the <em>Storage tanks</em> overlay below.</p>
           <p class="muted small" id="ust-density-stats">—</p>
         </div>
+        <label class="layer-radio" data-tip="Shade each census TRACT (finer than counties) by EPA's modeled air toxics cancer risk — chance-in-a-million from ~140 hazardous air pollutants. A SCREENING estimate from emissions models, NOT measured air. Source: EPA NATA / AirToxScreen."><input type="radio" name="choropleth" value="air_toxics" /> <span class="lr-dot airtox"></span> <span>Air toxics cancer risk</span></label>
+        <div class="layer-inline" data-layer-filters="air_toxics">
+          <p class="muted small">Shades each <span data-gloss="census block vs tract">census tract</span> by modeled <span data-gloss="air toxics">air toxics</span> <span data-gloss="cancer risk in-a-million">cancer risk (in a million)</span> from <span data-gloss="hazard air pollutants (HAPs)">hazardous air pollutants</span> — pairs with the Cancer &amp; Respiratory layers. This is a <span data-gloss="screening assessment">screening assessment</span> (<span data-gloss="NATA">NATA</span>): <strong>modeled estimates, not measured air</strong>, meant to flag areas for further study — not to judge a specific address. Click a tract for its risk, the source driver (industry vs traffic vs background), and top pollutants.</p>
+          <div class="airtox-metric" role="group" aria-label="Air toxics metric">
+            <label class="small"><input type="radio" name="airtox-metric" value="cancer" checked /> Cancer risk</label>
+            <label class="small airtox-metric-off" title="Not available at tract level in EPA's published data — see the note."><input type="radio" name="airtox-metric" value="respiratory" disabled /> Respiratory hazard <span class="muted">(n/a)</span></label>
+          </div>
+          <p class="muted small" id="airtox-stats">—</p>
+        </div>
       </div>
     </section>
 

@@ -305,6 +305,19 @@ SOURCES: list[Source] = [
         seed_extra=("contamination_sites",),
     ),
     Source(
+        id="airtoxics",
+        label="EPA air toxics risk (NATA / AirToxScreen) — census-tract cancer-risk screening",
+        loaders=[dl.load_airtoxics],
+        targets=["airtoxics_tracts", "airtoxics_stats"],
+        primary_target="airtoxics_tracts", primary_source_id="epa_airtoxics",
+        # EPA releases a new assessment only every year or two (irregular); an
+        # annual check is enough to pick up a new one when it lands.
+        interval_months=12, min_abs=200, floor_frac=0.6,
+        # Assessment year shown in the Data Sources modal (methods differ across
+        # years, so we pin to one assessment and never trend it).
+        coverage=lambda conn: ("2017", "2017"),
+    ),
+    Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
         loaders=[chem_ref.load_chemical_reference],
         targets=["chemical_reference"],

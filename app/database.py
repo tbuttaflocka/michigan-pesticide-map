@@ -415,6 +415,31 @@ CREATE TABLE IF NOT EXISTS pfas_features (
 CREATE INDEX IF NOT EXISTS ix_pfas_kind   ON pfas_features(kind);
 CREATE INDEX IF NOT EXISTS ix_pfas_county ON pfas_features(county_fips);
 
+-- ===== EPA air toxics risk (NATA / AirToxScreen), census-tract level =====
+-- Modeled cancer-risk SCREENING estimates (chance-in-a-million, 70-yr outdoor
+-- lifetime). One row per Michigan census tract. `total_risk` is computed as the
+-- sum of the source-category fields (== sum of pollutant fields); the service's
+-- own coarse total column is NOT trusted. `sources` and `pollutants` are JSON so
+-- the popup can show the source-driver breakdown and top contributing chemicals.
+CREATE TABLE IF NOT EXISTS airtoxics_tracts (
+    tract_geoid   TEXT PRIMARY KEY,       -- 11-digit census tract GEOID
+    county_fips   TEXT,                   -- 5-digit (STCOFIPS) -> counties.fips
+    county_name   TEXT,
+    population    INTEGER,                 -- POP2010 (tract population)
+    total_risk    REAL,                    -- total cancer risk, in a million
+    sources       TEXT,                    -- JSON {key: risk} for the 8 categories
+    pollutants    TEXT,                    -- JSON [[name, risk], ...] top contributors
+    geometry      TEXT                     -- GeoJSON Polygon/MultiPolygon (simplified)
+);
+CREATE INDEX IF NOT EXISTS ix_airtox_county ON airtoxics_tracts(county_fips);
+
+-- Tiny key/value companion for assessment-wide reference numbers (national and
+-- Michigan average tract risk) so popups can say "vs the national/Michigan avg".
+CREATE TABLE IF NOT EXISTS airtoxics_stats (
+    key   TEXT PRIMARY KEY,
+    value REAL
+);
+
 -- ===== Underground Storage Tanks (EGLE RRD, regularly updated) =====
 -- The most common near-home contamination source. CRITICAL distinction, carried
 -- in `category`: a licensed Part 211 tank (a working gas station, not

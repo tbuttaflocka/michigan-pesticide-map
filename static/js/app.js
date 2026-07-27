@@ -138,6 +138,16 @@
       densityByFips: new Map(),    // county Site+AOI counts (choropleth)
       _densityMax: 1,
     },
+    airToxics: {                   // EPA air toxics (NATA) census-tract risk choropleth
+      loaded: false,
+      tracts: [],                  // from /api/airtoxics/features
+      legend: null,
+      stats: null,                 // {max, mi_avg, national_avg}
+      metric: 'cancer',            // selectable metric (hazard index deferred)
+      _max: 1,
+      _canvas: null,               // dedicated L.canvas() renderer for the tracts
+      _polyLayer: null,            // single persistent L.geoJSON of tract polygons
+    },
     ust: {
       legend: null,
       showSites: false,
@@ -392,10 +402,16 @@
     }
   }
 
+  // Choropleths that are painted by their OWN polygon layer (not the county base):
+  // the county fills must be transparent so that layer reads through.
+  function paintsCountiesTransparent(which) {
+    return which === 'none' || which === 'air_toxics';
+  }
+
   function styleFor(feature) {
-    // "None" = no choropleth: transparent fills so the base map + point overlays
-    // read cleanly, with only a faint neutral county outline.
-    if (state.activeChoropleth === 'none') {
+    // "None" (and the tract-level air-toxics layer) = no county fill: transparent
+    // so the base map, point overlays, or tract polygons read cleanly.
+    if (paintsCountiesTransparent(state.activeChoropleth)) {
       return { fillColor: NO_DATA, fillOpacity: 0, color: '#2a3344', weight: 0.5 };
     }
     return {
@@ -409,7 +425,7 @@
   function highlightStyle() {
     // Under "None", highlight the outline only — don't paint a fill that would
     // cover the point overlays the user is trying to see.
-    if (state.activeChoropleth === 'none') {
+    if (paintsCountiesTransparent(state.activeChoropleth)) {
       return { weight: 2.0, color: '#f0b429', fillOpacity: 0 };
     }
     return { weight: 2.2, color: '#f0b429', fillOpacity: 0.92 };
@@ -735,6 +751,13 @@
         paletteStrip(el, UST_PALETTE);
         note.textContent = 'open leaking storage-tank releases per county (lower → higher)';
         break;
+      case 'air_toxics': {
+        const pal = (state.airToxics.legend && state.airToxics.legend.palette) || [];
+        if (pal.length) paletteStrip(el, pal);
+        note.textContent = 'modeled air toxics cancer risk per census tract, in a million '
+          + '(lower → higher) · SCREENING estimate, not measured air';
+        break;
+      }
     }
     renderMarkerKeys();
   }
@@ -852,6 +875,7 @@
       case 'landfill_density': return 'landfill counts';
       case 'pfas_density':   return 'PFAS site counts';
       case 'ust_density':    return 'open leaking-tank counts';
+      case 'air_toxics':     return null;   // tract-level; not a county peek
       default:               return 'pesticide amounts';
     }
   }
@@ -902,6 +926,10 @@
       if (which === 'landfill_density') await loadLandfillDensity();
       if (which === 'pfas_density') await loadPfasDensity();
       if (which === 'ust_density') await loadUstDensity();
+      // Air toxics is a tract-level canvas layer (not county coloring): lazy-load
+      // + show it when selected, and detach it whenever another choropleth is.
+      if (which === 'air_toxics') { await loadAirToxics(); showAirToxicsLayer(); }
+      else hideAirToxicsLayer();
     } catch (e) {
       console.error(e);
     } finally {
@@ -2495,6 +2523,118 @@
       ${f.site_lead ? `<div class="pfas-lead"><span class="k">EGLE contact:</span> ${esc(f.site_lead)}${f.site_lead_email ? ` · <a href="mailto:${esc(f.site_lead_email)}">${esc(f.site_lead_email)}</a>` : ''}</div>` : ''}
       ${f.hyperlink ? `<a class="pfas-cta" href="${esc(f.hyperlink)}" target="_blank" rel="noopener">MiEnviro permit record →</a>` : ''}
       <div class="pfas-src">Source: EGLE — Publicly Owned Treatment Works with PFAS data.</div>
+    </div>`;
+  }
+
+  // ---------- EPA air toxics risk (NATA) census-tract choropleth ----------
+  // A fine-grained choropleth (~2,769 tracts) shaded by modeled cancer risk. It
+  // reuses the PFAS hexbin performance recipe: ONE Canvas renderer draws all the
+  // tract polygons in a single <canvas>, the layer is built once and cached, and
+  // the data is lazy-loaded only when the choropleth is selected.
+  function airToxicsPane() {
+    if (!state.map.getPane('airtox')) state.map.createPane('airtox').style.zIndex = 417;
+    return 'airtox';
+  }
+  function airToxicsCanvasRenderer() {
+    if (!state.airToxics._canvas) {
+      airToxicsPane();
+      state.airToxics._canvas = L.canvas({ pane: 'airtox', padding: 0.5 });
+    }
+    return state.airToxics._canvas;
+  }
+  // Cool sequential palette (from the legend), scaled linearly against the 95th
+  // percentile so the common range shows variation and a few extreme ethylene-
+  // oxide tracts don't flatten the whole map to one color.
+  function airToxicsColor(risk) {
+    const pal = (state.airToxics.legend && state.airToxics.legend.palette) || ['#1c5462', '#c3d64e'];
+    const mx = state.airToxics._max || 1;
+    const idx = Math.min(pal.length - 1, Math.max(0, Math.floor((risk / mx) * pal.length)));
+    return pal[idx];
+  }
+  async function loadAirToxics() {
+    if (state.airToxics.loaded) return;
+    const d = await api('/api/airtoxics/features');
+    state.airToxics.tracts = d.tracts || [];
+    state.airToxics.legend = d.legend || null;
+    state.airToxics.stats = d.stats || null;
+    // 95th-percentile color ceiling for good visual spread on a skewed metric.
+    const risks = state.airToxics.tracts.map((t) => t.r).sort((a, b) => a - b);
+    state.airToxics._max = risks.length
+      ? (risks[Math.floor(risks.length * 0.95)] || risks[risks.length - 1] || 1) : 1;
+    state.airToxics.loaded = true;
+  }
+  function buildAirToxicsPolyLayer() {
+    const fc = { type: 'FeatureCollection', features: [] };
+    for (const t of state.airToxics.tracts) {
+      if (!t.geometry) continue;
+      fc.features.push({ type: 'Feature', geometry: t.geometry, properties: { t } });
+    }
+    return L.geoJSON(fc, {
+      pane: 'airtox',
+      renderer: airToxicsCanvasRenderer(),
+      style: (feat) => ({ color: '#0d1117', weight: 0.3, opacity: 0.5,
+        fillColor: airToxicsColor(feat.properties.t.r), fillOpacity: 0.72 }),
+      onEachFeature: (feat, layer) => {
+        layer.bindPopup(airToxicsPopupHtml(feat.properties.t),
+          { maxWidth: 320, className: 'atx-popup-wrap' });
+      },
+    });
+  }
+  function ensureAirToxicsPolyLayer() {
+    if (!state.airToxics._polyLayer) state.airToxics._polyLayer = buildAirToxicsPolyLayer();
+    return state.airToxics._polyLayer;
+  }
+  function showAirToxicsLayer() {
+    ensureAirToxicsPolyLayer().addTo(state.map);   // idempotent add
+    updateAirToxicsStats();
+  }
+  function hideAirToxicsLayer() {
+    if (state.airToxics._polyLayer && state.map.hasLayer(state.airToxics._polyLayer)) {
+      state.airToxics._polyLayer.remove();
+    }
+  }
+  function updateAirToxicsStats() {
+    const el = $('airtox-stats');
+    if (!el) return;
+    const s = state.airToxics.stats;
+    el.textContent = s
+      ? `${state.airToxics.tracts.length} tracts · Michigan avg ${s.mi_avg} · national avg ${s.national_avg} in-a-million`
+      : '—';
+  }
+  function airToxicsPopupHtml(t) {
+    const L = state.airToxics.legend || {};
+    const s = state.airToxics.stats || {};
+    const mi = s.mi_avg, natl = s.national_avg;
+    const vsMi = mi ? Math.round((t.r - mi) / mi * 100) : null;
+    const srcMeta = {}; (L.sources || []).forEach((x) => { srcMeta[x.key] = x; });
+    const src = t.src || {};
+    const ssum = Object.values(src).reduce((a, b) => a + b, 0) || 1;
+    const sorted = Object.entries(src).sort((a, b) => b[1] - a[1]);
+    const dom = sorted[0];
+    const bars = sorted.slice(0, 4).map(([k, v]) => {
+      const m = srcMeta[k] || { label: k, color: '#8a94a3' };
+      const pct = Math.round(v / ssum * 100);
+      return `<div class="atx-bar"><span class="atx-bar-l">${esc(m.label)}</span>`
+        + `<span class="atx-bar-t"><span style="width:${pct}%;background:${m.color}"></span></span>`
+        + `<span class="atx-bar-v">${pct}%</span></div>`;
+    }).join('');
+    const polls = (t.poll || []).slice(0, 5)
+      .map((p) => `${chemLink(p[0])}`).join(', ');
+    const vsCls = vsMi > 0 ? 'hi' : vsMi < 0 ? 'lo' : '';
+    const vsTxt = vsMi != null ? `${Math.abs(vsMi)}% ${vsMi >= 0 ? 'above' : 'below'} MI avg` : '';
+    return `<div class="atx-popup">
+      <div class="atx-type">🌫 Air toxics cancer risk · modeled</div>
+      <div class="atx-risk"><b>${t.r}</b> <span class="atx-unit">in a million</span>`
+      + `${vsTxt ? ` <span class="atx-vs ${vsCls}">${vsTxt}</span>` : ''}</div>
+      <div class="atx-meta">${esc(t.c || '')} County · Michigan avg ${mi} · national avg ${natl}</div>
+      ${dom ? `<div class="atx-driver">Risk here is driven mostly by <b>${esc((srcMeta[dom[0]] || {}).label || dom[0])}</b></div>` : ''}
+      <div class="atx-bars">${bars}</div>
+      ${polls ? `<div class="atx-poll"><span class="k">Top pollutants:</span> ${polls}</div>` : ''}
+      <details class="atx-caveat">
+        <summary>⚠ A screening estimate — what this is (and isn't)</summary>
+        <ul>${(L.caveats || []).map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
+        <div class="atx-assess">${esc(L.assessment || '')}. EPA cautions against comparing across assessment years, so this is not trended.</div>
+      </details>
     </div>`;
   }
 
@@ -4220,6 +4360,34 @@
       + `${_rEsc(dw.station || '')}${dw.station_mi != null ? ` (${dw.station_mi} mi)` : ''}.</p></div>`;
   }
 
+  // Air toxics section of the homebuyer report. Framed hard as AREA-LEVEL context
+  // with EPA's screening caveats up top — never a property-specific finding.
+  function _airToxicsReportHtml(a) {
+    if (!a) return '';
+    const vs = a.vs_mi_pct;
+    const vsTxt = vs != null
+      ? `${Math.abs(vs)}% ${vs >= 0 ? 'above' : 'below'} the Michigan average` : '';
+    const bars = (a.sources || []).slice(0, 4).map((s) => {
+      const pct = s.pct;
+      return `<div class="atx-bar"><span class="atx-bar-l">${_rEsc(s.label)}</span>`
+        + `<span class="atx-bar-t"><span style="width:${pct}%;background:${s.color || '#8a94a3'}"></span></span>`
+        + `<span class="atx-bar-v">${pct}%</span></div>`;
+    }).join('');
+    const polls = (a.pollutants || []).slice(0, 5).map((p) => chemLink(p[0])).join(', ');
+    const caveats = (a.caveats || []).map((c) => `<li>${_rEsc(c)}</li>`).join('');
+    return `<div class="rpt-section rpt-airtox">
+      <h3>Modeled air toxics risk <span class="rpt-h-note">area-level screening estimate — NOT a measurement at this address</span></h3>
+      <div class="rpt-warn">⚠ This is a <b>modeled screening estimate</b> for the surrounding census tract, <b>not measured air</b> at this property. EPA designed it to identify areas for further study, <b>not</b> to determine risk at a specific home or school. It assumes 70 years of continuous <b>outdoor</b> exposure; indoor air, where people spend most of their time, is not included.</div>
+      <div class="rpt-airtox-fig"><b>${a.total_risk}</b> in a million${vsTxt ? ` <span class="rpt-vs ${vs >= 0 ? 'hi' : 'lo'}">${vsTxt}</span>` : ''}</div>
+      <p class="muted small">Census tract ${_rEsc(a.tract_geoid)} · Michigan average ${a.mi_avg} · national average ${a.national_avg}. ${_rEsc(a.assessment)}.</p>
+      ${a.dominant ? `<p>Risk here is modeled as driven mostly by <b>${_rEsc(a.dominant.label)}</b> (${a.dominant.pct}% of the total).</p>` : ''}
+      <div class="atx-bars">${bars}</div>
+      ${polls ? `<p class="small"><span class="muted">Top modeled pollutants:</span> ${polls}</p>` : ''}
+      <ul class="rpt-airtox-caveats">${caveats}</ul>
+      <p class="rpt-note muted small">EPA cautions against comparing across assessment years (methods change), so this reflects one assessment, not a trend. Source: EPA NATA / AirToxScreen.</p>
+    </div>`;
+  }
+
   function renderReport(d) {
     const loc = d.location;
     const r = d.rating;
@@ -4276,6 +4444,8 @@
         </div>
 
         ${_downwindHtml(d.downwind)}
+
+        ${_airToxicsReportHtml(d.air_toxics)}
 
         ${_countyContextHtml(d.county_context, loc.county)}
 

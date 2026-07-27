@@ -94,7 +94,10 @@ from .config import (
     UST_URL,
     EGLE_RIDE_URL,
     EGLE_UST_HOME_URL,
+    AIRTOXICS_RISK_URL,
+    AIRTOXICS_HOME_URL,
 )
+from . import airtoxics_data
 
 
 # ---------- pretty logging ----------
@@ -2691,23 +2694,29 @@ def load_golf_courses(conn: sqlite3.Connection) -> int:
 # hexbin polygons (never pinpointed). No site/concentration is ever fabricated.
 
 def _arcgis_all(url: str, out_fields: str = "*", *, where: str = "1=1",
-                geometry: bool = False, page: int = 2000, cap: int = 200000) -> list:
+                geometry: bool = False, page: int = 2000, cap: int = 200000,
+                max_offset: float | None = None) -> list:
     """Fetch ALL features from an ArcGIS FeatureServer/MapServer layer, paging via
-    resultOffset (ordered by OBJECTID for stability). Returns raw feature dicts."""
+    resultOffset (ordered by OBJECTID for stability). Returns raw feature dicts.
+
+    max_offset (in outSR units — degrees for 4326) asks the server to GENERALIZE
+    geometry, which both shrinks the transfer and gives us display-ready polygons
+    without any client-side simplification."""
     out, offset = [], 0
     while True:
-        params = urllib.parse.urlencode({
+        base = {
             "where": where, "outFields": out_fields,
             "returnGeometry": "true" if geometry else "false", "outSR": "4326",
             "orderByFields": "OBJECTID", "resultOffset": offset,
-            "resultRecordCount": page, "f": "json"})
+            "resultRecordCount": page, "f": "json"}
+        if geometry and max_offset:
+            base["maxAllowableOffset"] = max_offset
+        params = urllib.parse.urlencode(base)
         try:
             d = json.loads(http_get(f"{url}/query?{params}", timeout=120))
         except Exception:                    # noqa: BLE001 — retry once without ordering
-            params = urllib.parse.urlencode({
-                "where": where, "outFields": out_fields,
-                "returnGeometry": "true" if geometry else "false", "outSR": "4326",
-                "resultOffset": offset, "resultRecordCount": page, "f": "json"})
+            base.pop("orderByFields", None)
+            params = urllib.parse.urlencode(base)
             d = json.loads(http_get(f"{url}/query?{params}", timeout=120))
         feats = d.get("features", [])
         out.extend(feats)
@@ -2736,6 +2745,170 @@ def _poly_centroid(rings):
         for x, y in ring:
             xs += x; ys += y; n += 1
     return (xs / n, ys / n) if n else (None, None)
+
+
+def _arcgis_rings_to_geojson(rings: list) -> dict | None:
+    """Convert an ArcGIS polygon (list of rings) to a GeoJSON geometry.
+
+    ArcGIS uses clockwise rings for outer boundaries and counter-clockwise for
+    holes (opposite of GeoJSON, but Leaflet renders either winding). We classify
+    each ring by its signed area so islands become separate polygons instead of
+    being mistaken for holes — important for the handful of Great-Lakes tracts."""
+    if not rings:
+        return None
+
+    def signed_area(ring):
+        s = 0.0
+        for i in range(len(ring) - 1):
+            x1, y1 = ring[i][0], ring[i][1]
+            x2, y2 = ring[i + 1][0], ring[i + 1][1]
+            s += x1 * y2 - x2 * y1
+        return s / 2.0
+
+    outers, holes = [], []
+    for r in rings:
+        if len(r) < 4:
+            continue
+        (outers if signed_area(r) < 0 else holes).append(r)
+    if not outers:                       # fall back: treat everything as outer
+        outers = [r for r in rings if len(r) >= 4]
+        holes = []
+    if len(outers) == 1:
+        return {"type": "Polygon", "coordinates": [outers[0]] + holes}
+    # Multiple outer rings -> MultiPolygon; attach each hole to the first outer
+    # that contains its first vertex (cheap point-in-ring test).
+    def in_ring(pt, ring):
+        x, y, inside = pt[0], pt[1], False
+        j = len(ring) - 1
+        for i in range(len(ring)):
+            xi, yi = ring[i][0], ring[i][1]
+            xj, yj = ring[j][0], ring[j][1]
+            if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi):
+                inside = not inside
+            j = i
+        return inside
+
+    polys = [[o] for o in outers]
+    for h in holes:
+        for poly in polys:
+            if in_ring(h[0], poly[0]):
+                poly.append(h)
+                break
+    return {"type": "MultiPolygon", "coordinates": polys}
+
+
+def load_airtoxics(conn: sqlite3.Connection) -> int:
+    """Load EPA air toxics (NATA / AirToxScreen) cancer-risk SCREENING estimates
+    for Michigan census tracts from EPA's ArcGIS ATS_Risk_View layer.
+
+    Per tract we store the total cancer risk (in a million) — computed as the SUM
+    of the eight source-category fields, which equals the sum of the per-pollutant
+    fields and is far more granular/reliable than the service's coarse total
+    column — plus the source-category breakdown and the top contributing pollutants
+    (for the popup's driver analysis and clickable chemical links)."""
+    log("Loading EPA air toxics risk (NATA/AirToxScreen, Michigan census tracts)...")
+    cur = conn.cursor()
+
+    # 1. Field metadata -> discover the per-pollutant columns + their nice aliases.
+    meta = json.loads(http_get(f"{AIRTOXICS_RISK_URL}?f=json", timeout=60))
+    alias_by_field = {f["name"]: f.get("alias") for f in meta.get("fields", [])}
+    poll_fields = [f for f in alias_by_field if airtoxics_data.is_pollutant_field(f)]
+    src_fields = airtoxics_data.SOURCE_FIELDS
+    out_fields = ",".join(["FIPS", "STCOFIPS", "County_Nam", "POP2010"]
+                          + src_fields + poll_fields)
+
+    # 2. Page all Michigan tracts with geometry.
+    # maxAllowableOffset ~0.0015° (~130 m) generalizes tract boundaries server-side
+    # — plenty for a statewide/county choropleth and it cuts the geometry payload
+    # roughly 4x versus full-resolution rings.
+    feats = _arcgis_all(AIRTOXICS_RISK_URL, out_fields, where="State='MI'",
+                        geometry=True, page=1000, max_offset=0.0015)
+    log(f"  fetched {len(feats)} Michigan tract features")
+
+    rows, mi_total_sum, kept = [], 0.0, 0
+    for ft in feats:
+        a = ft.get("attributes") or {}
+        geoid = a.get("FIPS")
+        g = ft.get("geometry") or {}
+        geom = _arcgis_rings_to_geojson(g.get("rings"))
+        if not geoid or not geom:
+            continue
+        sources = {}
+        for field in src_fields:
+            v = a.get(field)
+            sources[airtoxics_data.SOURCE_KEY_BY_FIELD[field]] = round(v, 3) if v else 0.0
+        total = round(sum(sources.values()), 2)
+        polls = []
+        for field in poll_fields:
+            v = a.get(field)
+            if v and v > 0:
+                polls.append([airtoxics_data.clean_pollutant_name(field, alias_by_field.get(field)),
+                              round(v, 3)])
+        polls.sort(key=lambda p: p[1], reverse=True)
+        polls = polls[:6]
+        geom = pfas_data.round_geometry(geom)          # 5-dp coords, smaller payload
+        county_fips = a.get("STCOFIPS")
+        cty = (a.get("County_Nam") or "").replace(" County", "").strip() or None
+        rows.append({
+            "tract_geoid": str(geoid), "county_fips": county_fips, "county_name": cty,
+            "population": int(a["POP2010"]) if a.get("POP2010") is not None else None,
+            "total_risk": total, "sources": json.dumps(sources),
+            "pollutants": json.dumps(polls), "geometry": json.dumps(geom),
+        })
+        mi_total_sum += total
+        kept += 1
+
+    if kept < 200:
+        log(f"  only {kept} tracts parsed — leaving air toxics unchanged", level="warn")
+        airtoxics_data_record(conn, "skipped", 0)
+        return 0
+
+    cur.execute("DELETE FROM airtoxics_tracts")
+    cur.executemany(
+        "INSERT OR REPLACE INTO airtoxics_tracts"
+        "(tract_geoid, county_fips, county_name, population, total_risk,"
+        " sources, pollutants, geometry) VALUES"
+        "(:tract_geoid, :county_fips, :county_name, :population, :total_risk,"
+        " :sources, :pollutants, :geometry)", rows)
+
+    # 3. Reference averages: national unweighted tract mean (sum of the per-source
+    #    field averages over ALL US tracts) and the Michigan tract mean. Both are
+    #    simple tract means so they are directly comparable in the popup.
+    national_avg = None
+    try:
+        stat_defs = [{"statisticType": "avg", "onStatisticField": f,
+                      "outStatisticFieldName": f"a{i}"} for i, f in enumerate(src_fields)]
+        q = urllib.parse.urlencode({"where": "1=1", "f": "json",
+                                    "outStatistics": json.dumps(stat_defs)})
+        sd = json.loads(http_get(f"{AIRTOXICS_RISK_URL}/query?{q}", timeout=90))
+        at = (sd.get("features") or [{}])[0].get("attributes", {})
+        national_avg = round(sum((at.get(f"a{i}") or 0) for i in range(len(src_fields))), 2)
+    except Exception as e:                     # noqa: BLE001 — reference number is optional
+        log(f"  national-average query failed ({e}); leaving null", level="warn")
+    mi_avg = round(mi_total_sum / kept, 2) if kept else None
+
+    cur.execute("DELETE FROM airtoxics_stats")
+    cur.executemany("INSERT OR REPLACE INTO airtoxics_stats(key, value) VALUES (?, ?)",
+                    [("national_avg", national_avg), ("mi_avg", mi_avg)])
+
+    airtoxics_data_record(conn, "ok", kept)
+    conn.commit()
+    log(f"  loaded {kept} MI tracts · MI avg {mi_avg} / national {national_avg} in-a-million",
+        level="ok")
+    return kept
+
+
+def airtoxics_data_record(conn: sqlite3.Connection, status: str, rows: int) -> None:
+    record_source(
+        conn, "epa_airtoxics",
+        "EPA air toxics risk (NATA / AirToxScreen) — census-tract cancer-risk screening",
+        AIRTOXICS_HOME_URL, status, rows,
+        "Modeled cancer-risk SCREENING estimates (chance-in-a-million, 70-yr outdoor "
+        "lifetime) at census-tract level, with source-category and pollutant "
+        "breakdown. EPA releases new assessments every year or two and cautions "
+        "against comparing across years (methods change), so only one assessment "
+        "year is shown and it is not trended. Not a measurement; identifies areas "
+        "for further study, not risk at a specific address.")
 
 
 def load_pfas(conn: sqlite3.Connection) -> int:

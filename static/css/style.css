@@ -1543,6 +1543,12 @@ a:hover { text-decoration: underline; }
 .lr-dot.landfill { background: #b5762e; }
 .lr-dot.pfas { background: #c2535a; }
 .lr-dot.ust { background: #c85f2c; }
+.lr-dot.airtox { background: linear-gradient(90deg, #1c5462, #5aa657, #c3d64e); }
+
+/* Air toxics metric selector (respiratory deferred) */
+.airtox-metric { display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0 6px; }
+.airtox-metric label { display: inline-flex; align-items: center; gap: 5px; }
+.airtox-metric-off { opacity: 0.55; }
 
 .tri-suboptions { margin: 4px 0 6px 22px; }
 .tri-suboptions label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
@@ -1761,6 +1767,50 @@ a:hover { text-decoration: underline; }
   background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
 }
 .pfas-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+
+/* Air toxics tract popup */
+.atx-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.atx-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.atx-popup { max-width: 300px; font-size: 12.5px; line-height: 1.4; }
+.atx-popup .atx-type {
+  display: inline-block; color: #0d1117; font-weight: 700; font-size: 10px;
+  padding: 1px 8px; border-radius: 10px; margin-bottom: 5px;
+  background: linear-gradient(90deg, #5aa657, #c3d64e); text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.atx-popup .atx-risk { font-size: 15px; margin-bottom: 2px; }
+.atx-popup .atx-risk b { font-size: 20px; color: #d7e36a; }
+.atx-popup .atx-unit { color: var(--muted); font-size: 11.5px; }
+.atx-vs { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
+.atx-vs.hi { background: rgba(224,98,60,.2); color: #f0a58a; }
+.atx-vs.lo { background: rgba(79,170,107,.2); color: #93d6a6; }
+.atx-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 5px; }
+.atx-driver { margin: 4px 0 6px; }
+.atx-bars { margin: 5px 0; display: flex; flex-direction: column; gap: 3px; }
+.atx-bar { display: grid; grid-template-columns: 88px 1fr 30px; align-items: center; gap: 6px; font-size: 11px; }
+.atx-bar-l { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atx-bar-t { height: 8px; background: rgba(255,255,255,.07); border-radius: 4px; overflow: hidden; }
+.atx-bar-t > span { display: block; height: 100%; border-radius: 4px; }
+.atx-bar-v { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+.atx-poll { margin: 6px 0 4px; font-size: 11.5px; }
+.atx-poll .k { color: var(--muted); }
+.atx-caveat { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 5px; }
+.atx-caveat > summary {
+  cursor: pointer; list-style: none; color: #f0c060; font-size: 11.5px; font-weight: 600;
+}
+.atx-caveat > summary::-webkit-details-marker { display: none; }
+.atx-caveat ul { margin: 5px 0 4px; padding-left: 16px; }
+.atx-caveat li { margin: 3px 0; font-size: 11px; color: var(--text); }
+.atx-assess { color: var(--muted); font-size: 10.5px; }
+
+/* Air toxics section inside the homebuyer report */
+.rpt-airtox-fig { font-size: 14px; margin: 6px 0 2px; }
+.rpt-airtox-fig b { font-size: 22px; color: #bcd05a; }
+.rpt-airtox .atx-bars { margin: 6px 0; }
+.rpt-airtox-caveats { margin: 6px 0 4px; padding-left: 18px; font-size: 11.5px; color: var(--muted); }
+.rpt-airtox-caveats li { margin: 3px 0; }
 .pfas-popup { max-width: 340px; font-size: 12.5px; }
 .pfas-popup .pfas-type {
   display: inline-block; color: #fff; font-weight: 700; font-size: 10.5px;

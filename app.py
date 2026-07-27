@@ -26,6 +26,7 @@ from app import contamination_data
 from app import landfill_data
 from app import golf_data
 from app import pfas_data
+from app import airtoxics_data
 from app import ust_data
 from app import spraying_programs
 from app import tri_reference
@@ -2470,6 +2471,17 @@ def _explore_x_map(conn, x_key: str):
     if x_key and x_key.startswith("contamination"):
         xmap, label, _ = _cancer_x_map(conn, x_key)
         return xmap, label.capitalize(), "number of sites", True
+    if x_key == "air_toxics:cancer_risk":
+        # Population-weighted mean tract risk per county — a genuine control: it
+        # lets you weigh "pesticides vs cancer" against "modeled air toxics vs
+        # cancer" and see which association is stronger.
+        rows = conn.execute(
+            "SELECT county_fips AS f, "
+            "SUM(total_risk*COALESCE(population,1))/SUM(COALESCE(population,1)) AS v "
+            "FROM airtoxics_tracts WHERE total_risk IS NOT NULL "
+            "GROUP BY county_fips").fetchall()
+        return ({r["f"]: r["v"] for r in rows},
+                "Air toxics cancer risk (EPA, modeled)", "in a million", False)
     # pesticide metric or compound (kg values, converted to lbs by caller)
     xmap, label, is_count = _cancer_x_map(conn, x_key)
     unit = _EXPLORE_PEST.get(x_key, ("", "lbs applied (latest year)"))[1]
@@ -2518,6 +2530,11 @@ def _explore_variables(conn) -> dict:
         {"key": "water_detections", "label": "Water pesticide detections",
          "unit": "number of detections", "group": "Pollution"},
     ]
+    # Air toxics cancer risk (modeled) — a control variable, only if loaded.
+    if conn.execute("SELECT COUNT(*) FROM airtoxics_tracts").fetchone()[0]:
+        x.append({"key": "air_toxics:cancer_risk",
+                  "label": "Air toxics cancer risk (EPA, modeled)",
+                  "unit": "in a million (pop-weighted)", "group": "Air quality"})
     # Industrial toxic releases (TRI) — only when the layer has data. Air
     # releases in particular are a well-established respiratory driver, so they
     # double as a control/comparison against the agricultural-pesticide signal.
@@ -3445,6 +3462,52 @@ def api_pfas_density():
                               "total_sites": sum(vals)}})
 
 
+# ---------- EPA air toxics risk (NATA / AirToxScreen) ----------
+def _airtoxics_stats(conn) -> dict:
+    return {r["key"]: r["value"]
+            for r in conn.execute("SELECT key, value FROM airtoxics_stats")}
+
+
+@app.route("/api/airtoxics/features")
+def api_airtoxics_features():
+    """Michigan census-tract air toxics cancer-risk polygons for the choropleth.
+
+    Returns one lightweight feature per tract (geometry already generalized and
+    5-dp rounded) with total risk, the eight-category source breakdown, and the
+    top contributing pollutants — enough for the popup without a second request.
+    Colors are assigned client-side from the value + palette so the legend and the
+    fill stay consistent. The response is gzipped by the after_request hook."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT tract_geoid, county_name, total_risk, sources, pollutants, geometry "
+        "FROM airtoxics_tracts").fetchall()
+    stats = _airtoxics_stats(conn)
+    conn.close()
+    tracts, mx = [], 0.0
+    for r in rows:
+        try:
+            geom = json.loads(r["geometry"]) if r["geometry"] else None
+        except (TypeError, ValueError):
+            geom = None
+        if not geom:
+            continue
+        risk = r["total_risk"] or 0
+        if risk > mx:
+            mx = risk
+        tracts.append({
+            "g": r["tract_geoid"], "c": r["county_name"], "r": risk,
+            "src": json.loads(r["sources"] or "{}"),
+            "poll": json.loads(r["pollutants"] or "[]"),
+            "geometry": geom,
+        })
+    legend = airtoxics_data.legend_payload(stats.get("national_avg"), stats.get("mi_avg"))
+    return jsonify({
+        "count": len(tracts), "tracts": tracts, "legend": legend,
+        "stats": {"max": round(mx, 1), "national_avg": stats.get("national_avg"),
+                  "mi_avg": stats.get("mi_avg")},
+    })
+
+
 # ---------- Underground Storage Tanks overlay (EGLE RRD) ----------
 
 def _ust_row(r) -> dict:
@@ -3916,6 +3979,90 @@ def _report_county_context(conn, fips):
     return ctx
 
 
+# Cached point-in-tract index for the air toxics section of the address report.
+# Built once from the tract geometries (same "cache until restart" pattern the
+# county/watershed locators use; a refresh + restart rebuilds it).
+_ATX_INDEX = None
+
+
+def _atx_index():
+    global _ATX_INDEX
+    if _ATX_INDEX is not None:
+        return _ATX_INDEX
+    conn = db()
+    try:
+        rows = conn.execute(
+            "SELECT tract_geoid, county_name, total_risk, sources, pollutants, geometry "
+            "FROM airtoxics_tracts").fetchall()
+    finally:
+        conn.close()
+    idx = []
+    for r in rows:
+        try:
+            geom = json.loads(r["geometry"]) if r["geometry"] else None
+        except (TypeError, ValueError):
+            geom = None
+        if not geom:
+            continue
+        if geom["type"] == "Polygon":
+            outer_rings = [geom["coordinates"][0]]
+        elif geom["type"] == "MultiPolygon":
+            outer_rings = [poly[0] for poly in geom["coordinates"]]
+        else:
+            continue
+        boxed = []
+        for ring in outer_rings:
+            xs = [p[0] for p in ring]
+            ys = [p[1] for p in ring]
+            boxed.append((min(xs), min(ys), max(xs), max(ys), ring))
+        idx.append((r["tract_geoid"], r["county_name"], r["total_risk"],
+                    r["sources"], r["pollutants"], boxed))
+    _ATX_INDEX = idx
+    return idx
+
+
+def _report_airtoxics(lat, lng, stats):
+    """The air toxics section of the homebuyer report: the modeled cancer risk for
+    the census tract containing this point, how it compares to the Michigan and
+    national tract averages, and the dominant source category — framed as
+    AREA-LEVEL context with EPA's screening caveats, never a property finding."""
+    hit = None
+    for geoid, cty, total, srcjson, polljson, boxed in _atx_index():
+        for (minx, miny, maxx, maxy, ring) in boxed:
+            if minx <= lng <= maxx and miny <= lat <= maxy and _pip(lng, lat, ring):
+                hit = (geoid, cty, total, srcjson, polljson)
+                break
+        if hit:
+            break
+    if not hit:
+        return None
+    geoid, cty, total, srcjson, polljson = hit
+    try:
+        sources = json.loads(srcjson or "{}")
+    except (TypeError, ValueError):
+        sources = {}
+    try:
+        polls = json.loads(polljson or "[]")
+    except (TypeError, ValueError):
+        polls = []
+    ssum = sum(sources.values()) or 1.0
+    src_list = sorted(
+        ({"key": k, "label": airtoxics_data.SOURCE_META.get(k, {}).get("label", k),
+          "color": airtoxics_data.SOURCE_META.get(k, {}).get("color", "#8a94a3"),
+          "risk": round(v, 2), "pct": round(v / ssum * 100)}
+         for k, v in sources.items()), key=lambda s: s["risk"], reverse=True)
+    dominant = src_list[0] if src_list else None
+    mi_avg = stats.get("mi_avg")
+    vs_mi = round((total - mi_avg) / mi_avg * 100) if mi_avg else None
+    return {
+        "tract_geoid": geoid, "county": cty, "total_risk": round(total, 1),
+        "mi_avg": mi_avg, "national_avg": stats.get("national_avg"),
+        "vs_mi_pct": vs_mi, "dominant": dominant, "sources": src_list,
+        "pollutants": polls, "assessment": airtoxics_data.ASSESSMENT_LABEL,
+        "caveats": airtoxics_data.CAVEATS,
+    }
+
+
 @app.route("/api/address-report", methods=["POST"])
 def api_address_report():
     """Homebuyer environmental report for one address. PRIVACY: the address is
@@ -4073,9 +4220,12 @@ def api_address_report():
                               "datasets. Many hazards are not publicly mapped."),
         }
 
+        air_toxics = _report_airtoxics(lat, lng, _airtoxics_stats(conn))
+
         report = {
             "location": location, "in_michigan": True,
             "near": near, "county_context": ctx, "monitoring": coverage,
+            "air_toxics": air_toxics,
             "downwind": downwind, "rating": rating,
             "rings_mi": list(_RINGS_MI),
             "disclaimers": _REPORT_DISCLAIMERS, "sources": _REPORT_SOURCES,

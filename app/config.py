@@ -242,6 +242,14 @@ PFAS_FISH_SITES_URL = PFAS_EGLE_BASE + "/FcmpOpenData/FeatureServer/0"
 PFAS_FISH_DATA_URL = PFAS_EGLE_BASE + "/FcmpOpenData/FeatureServer/1"
 PFAS_POTW_URL = (PFAS_AGO_BASE
     + "/Industrial_Pretreatment_Program_Waste_Water_Treatment_Plants_Public_View/FeatureServer/0")
+# EPA air toxics risk (NATA / AirToxScreen) — census-tract cancer-risk screening.
+# Served from EPA's OAR/OAQPS ArcGIS Online org (the same org we already use for
+# contamination). ATS_Risk_View exposes tract polygons with total + per-pollutant
+# cancer risk AND the source-category breakdown in a single queryable layer.
+EPA_ATS_ORG = "https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services"
+AIRTOXICS_RISK_URL = EPA_ATS_ORG + "/ATS_Risk_View/FeatureServer/0"
+AIRTOXICS_HOME_URL = "https://www.epa.gov/AirToxScreen"
+
 # Official landing pages (Data Sources modal + popups).
 MPART_HUB_URL = "https://gis-egle.hub.arcgis.com/search?tags=pfas"
 MPART_HOME_URL = "https://www.michigan.gov/pfasresponse"
