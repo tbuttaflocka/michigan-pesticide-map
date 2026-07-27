@@ -88,6 +88,30 @@ def title_county(name):
 MDHHS_FISH_URL = MDHHS_EAT_SAFE_FISH_URL
 
 
+# Coordinate precision for the hexbin geometry sent to the browser. EGLE's raw
+# rings carry ~14 decimal places (sub-micron) — absurd overkill for hexagons a
+# few km across. 5 decimals is ~1.1 m at Michigan's latitude, far finer than the
+# hexbins need, and it roughly halves the geometry payload before gzip.
+GEOM_COORD_DIGITS = 5
+
+
+def round_coords(coords, ndigits: int = GEOM_COORD_DIGITS):
+    """Recursively round the leaf [x, y] numbers of a GeoJSON coordinate tree."""
+    if not coords:
+        return coords
+    if isinstance(coords[0], (int, float)):
+        return [round(c, ndigits) for c in coords]
+    return [round_coords(c, ndigits) for c in coords]
+
+
+def round_geometry(geom):
+    """Return a copy of a GeoJSON geometry with coordinates rounded for transport."""
+    if not isinstance(geom, dict) or "coordinates" not in geom:
+        return geom
+    return {"type": geom.get("type"),
+            "coordinates": round_coords(geom["coordinates"])}
+
+
 def augment_row(row: dict) -> dict:
     """Add glyph/color/label and parse JSON props for the API response."""
     kind = row.get("kind") or "site"
@@ -108,6 +132,8 @@ def augment_row(row: dict) -> dict:
             row["geometry"] = json.loads(row["geometry"])
         except (TypeError, ValueError):
             row["geometry"] = None
+    if row.get("geometry"):
+        row["geometry"] = round_geometry(row["geometry"])
     return row
 
 

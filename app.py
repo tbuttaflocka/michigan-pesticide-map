@@ -6,6 +6,7 @@ Usage:
 """
 from __future__ import annotations
 
+import gzip
 import json
 import math
 import sqlite3
@@ -81,6 +82,37 @@ def _security_headers(resp):
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     resp.headers.setdefault("Permissions-Policy",
                             "geolocation=(), microphone=(), camera=()")
+    return resp
+
+
+# Gzip compressible responses. The big win is the API GeoJSON — the PFAS feature
+# collection (with 1,449 hexbin polygons) is a few MB of highly repetitive JSON
+# that compresses ~85%. The dev server does not compress; a production proxy may,
+# but doing it here means the payload shrinks regardless of how it is served.
+_GZIP_MIN_BYTES = 1024
+_GZIP_TYPES = ("application/json", "application/javascript",
+               "text/css", "text/html", "text/plain", "image/svg+xml")
+
+
+@app.after_request
+def _gzip_response(resp):
+    if "gzip" not in request.headers.get("Accept-Encoding", "").lower():
+        return resp
+    # Never touch streamed responses, already-encoded bodies, or non-2xx.
+    if resp.direct_passthrough or not (200 <= resp.status_code < 300):
+        return resp
+    if resp.headers.get("Content-Encoding"):
+        return resp
+    ctype = (resp.content_type or "").split(";")[0].strip().lower()
+    if ctype not in _GZIP_TYPES:
+        return resp
+    data = resp.get_data()
+    if len(data) < _GZIP_MIN_BYTES:
+        return resp
+    resp.set_data(gzip.compress(data, 6))
+    resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Content-Length"] = str(len(resp.get_data()))
+    resp.headers.add("Vary", "Accept-Encoding")
     return resp
 
 
@@ -3361,6 +3393,11 @@ def _pfas_row(r) -> dict:
         "contam_site_key": r["contam_site_key"], "tri_facility_id": r["tri_facility_id"],
         "landfill_site_key": r["landfill_site_key"],
     }
+    # Drop null columns before serializing. Most fields are kind-specific (a pws
+    # hexbin has no address/site_lead/hyperlink, etc.), and 1,449 hexbins each
+    # carrying a dozen "key": null pairs is pure payload weight. The client reads
+    # missing keys as absent (JS `undefined == null`), so behavior is unchanged.
+    row = {k: v for k, v in row.items() if v is not None}
     return pfas_data.augment_row(row)
 
 

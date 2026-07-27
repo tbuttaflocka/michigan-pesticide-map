@@ -132,7 +132,9 @@
       filters: { site: true, aoi: true, surface_water: true,
                  pws: false, fish: false, potw: false },
       markers: null,               // L.markerClusterGroup (points)
-      polys: null,                 // L.layerGroup (PWS hexbins)
+      polys: null,                 // (legacy) not used since hexbins moved to _polyLayer
+      _polyLayer: null,            // single persistent L.geoJSON of PWS hexbins (canvas)
+      _canvas: null,               // dedicated L.canvas() renderer for the hexbins
       densityByFips: new Map(),    // county Site+AOI counts (choropleth)
       _densityMax: 1,
     },
@@ -2317,23 +2319,62 @@
   }
   function pfasVisible(f) { return state.pfas.filters[f.kind] !== false; }
 
+  // The 1,449 public-water-supply hexbins are the heavy part of this layer. Two
+  // things keep them fast: (1) a dedicated Canvas renderer draws all of them in a
+  // SINGLE <canvas> element instead of 1,449 individual SVG paths; (2) the layer
+  // is built ONCE and cached — toggling just adds/removes the same instance rather
+  // than re-parsing GeoJSON and reconstructing every polygon.
+  function pfasCanvasRenderer() {
+    if (!state.pfas._canvas) {
+      pfasPolyPane();                                  // ensure the pane exists
+      // padding 0.5 draws a little beyond the viewport so hexes don't pop in at
+      // the edges while panning; Canvas culls off-screen drawing on its own.
+      state.pfas._canvas = L.canvas({ pane: 'pfaspoly', padding: 0.5 });
+    }
+    return state.pfas._canvas;
+  }
+
+  function buildPfasPolyLayer() {
+    // One L.geoJSON FeatureCollection (not 1,449 separate layers) on one canvas.
+    const fc = { type: 'FeatureCollection', features: [] };
+    for (const f of state.pfas.features) {
+      if (f.kind !== 'pws' || !f.geometry) continue;
+      fc.features.push({ type: 'Feature', geometry: f.geometry, properties: { f } });
+    }
+    return L.geoJSON(fc, {
+      pane: 'pfaspoly',
+      renderer: pfasCanvasRenderer(),
+      style: (feat) => {
+        const f = feat.properties.f;
+        return { color: f.color, weight: 1, opacity: 0.8,
+          fillColor: f.color, fillOpacity: 0.18 };
+      },
+      onEachFeature: (feat, layer) => {
+        layer.bindPopup(pfasPopupHtml(feat.properties.f),
+          { maxWidth: 340, className: 'pfas-popup-wrap' });
+      },
+    });
+  }
+
+  function ensurePfasPolyLayer() {
+    if (!state.pfas._polyLayer) state.pfas._polyLayer = buildPfasPolyLayer();
+    return state.pfas._polyLayer;
+  }
+
   function renderPfas() {
     if (state.pfas.markers) { state.pfas.markers.remove(); state.pfas.markers = null; }
-    if (state.pfas.polys) { state.pfas.polys.remove(); state.pfas.polys = null; }
+    // Hexbins: build-once + show/hide. Detach the cached layer when it shouldn't
+    // show (full-layer off, or the PWS sub-filter off) — this fully removes it
+    // from the map (no ghost) but keeps the instance so re-enabling is instant.
+    const wantPolys = state.pfas.showSites && state.pfas.filters.pws !== false;
+    if (!wantPolys && state.pfas._polyLayer && state.map.hasLayer(state.pfas._polyLayer)) {
+      state.pfas._polyLayer.remove();
+    }
     if (!state.pfas.showSites) { updatePfasStats(); renderMarkerKeys(); return; }
     const pane = pfasPane();
     const grp = newPfasClusterLayer();
-    const polys = L.layerGroup();
     for (const f of state.pfas.features) {
       if (!pfasVisible(f)) continue;
-      const html = pfasPopupHtml(f);
-      if (f.kind === 'pws' && f.geometry) {
-        const gj = L.geoJSON(f.geometry, {
-          style: () => ({ color: f.color, weight: 1, opacity: 0.8,
-            fillColor: f.color, fillOpacity: 0.18, pane: pfasPolyPane() }) });
-        gj.bindPopup(html, { maxWidth: 340, className: 'pfas-popup-wrap' });
-        polys.addLayer(gj);
-      }
       if (f.lat == null || f.lng == null) continue;
       const isSite = f.kind === 'site';
       const isAoi = f.kind === 'aoi';
@@ -2346,11 +2387,12 @@
           html: `<div class="${cls}" style="width:${size}px;height:${size}px;background:${f.color}"><span>${f.glyph}</span></div>`,
           iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
       });
-      m.bindPopup(html, { maxWidth: 340, className: 'pfas-popup-wrap' });
+      m.bindPopup(pfasPopupHtml(f), { maxWidth: 340, className: 'pfas-popup-wrap' });
       grp.addLayer(m);
     }
-    polys.addTo(state.map); grp.addTo(state.map);
-    state.pfas.polys = polys; state.pfas.markers = grp;
+    grp.addTo(state.map);
+    state.pfas.markers = grp;
+    if (wantPolys) ensurePfasPolyLayer().addTo(state.map);   // add is idempotent
     updatePfasStats(); renderMarkerKeys();
   }
 
