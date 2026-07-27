@@ -279,6 +279,20 @@ SOURCES: list[Source] = [
         seed_extra=("pesticide_use", "water_quality_sites", "water_quality_results"),
     ),
     Source(
+        id="pfas",
+        label="Michigan MPART / EGLE — PFAS sites, sampling & treatment plants",
+        loaders=[dl.load_pfas],
+        targets=["pfas_features"],
+        primary_target="pfas_features", primary_source_id="egle_mpart_pfas",
+        # MPART feeds are live-updated as new contamination is found — a quarterly
+        # check keeps the sites list and sampling results current.
+        interval_months=3, min_abs=200, floor_frac=0.6,
+        coverage=lambda conn: (None, None),
+        # Seed the Superfund/TRI/landfill tables so Sites/AOIs can be cross-linked.
+        seed_extra=("contamination_sites", "tri_facility", "tri_release",
+                    "landfill_sites"),
+    ),
+    Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
         loaders=[chem_ref.load_chemical_reference],
         targets=["chemical_reference"],

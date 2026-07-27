@@ -24,6 +24,7 @@ from app.water_quality import to_ugl, mcl_for, benchmark_for, AQUATIC_BENCHMARK_
 from app import contamination_data
 from app import landfill_data
 from app import golf_data
+from app import pfas_data
 from app import spraying_programs
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
@@ -3344,6 +3345,68 @@ def api_golf_sites():
     })
 
 
+# ---------- PFAS overlay (Michigan MPART / EGLE) ----------
+
+def _pfas_row(r) -> dict:
+    row = {
+        "feature_key": r["feature_key"], "kind": r["kind"], "name": r["name"],
+        "site_type": r["site_type"], "address": r["address"], "city": r["city"],
+        "zip": r["zip"], "county": r["county"], "county_fips": r["county_fips"],
+        "lat": r["latitude"], "lng": r["longitude"], "geometry": r["geometry"],
+        "residential_wells": r["residential_wells"], "hyperlink": r["hyperlink"],
+        "site_lead": r["site_lead"], "site_lead_email": r["site_lead_email"],
+        "site_lead_phone": r["site_lead_phone"], "max_ppt": r["max_ppt"],
+        "sample_date": r["sample_date"], "props": r["props"],
+        "contam_site_key": r["contam_site_key"], "tri_facility_id": r["tri_facility_id"],
+        "landfill_site_key": r["landfill_site_key"],
+    }
+    return pfas_data.augment_row(row)
+
+
+@app.route("/api/pfas/features")
+def api_pfas_features():
+    """Michigan PFAS features (MPART/EGLE), optionally filtered by ?kind= (a
+    comma-separated list). Includes the legend + caveat."""
+    kinds = request.args.get("kind")
+    q = "SELECT * FROM pfas_features WHERE 1=1"
+    params: list = []
+    if kinds and kinds != "all":
+        wanted = [k.strip() for k in kinds.split(",") if k.strip()]
+        if wanted:
+            q += " AND kind IN (%s)" % ",".join("?" * len(wanted))
+            params += wanted
+    q += " ORDER BY (kind IN ('site','aoi')) DESC, max_ppt DESC NULLS LAST, name"
+    conn = db()
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return jsonify({"count": len(rows), "legend": pfas_data.legend_payload(),
+                    "features": [_pfas_row(r) for r in rows]})
+
+
+@app.route("/api/pfas/density")
+def api_pfas_density():
+    """Per-county PFAS Site + Area-of-Interest count for the choropleth option."""
+    conn = db()
+    rows = conn.execute("""
+        SELECT c.fips, c.name,
+               COUNT(p.id) AS total,
+               SUM(CASE WHEN p.kind='site' THEN 1 ELSE 0 END) AS sites,
+               SUM(CASE WHEN p.kind='aoi'  THEN 1 ELSE 0 END) AS aois
+          FROM counties c
+     LEFT JOIN pfas_features p ON p.county_fips = c.fips AND p.kind IN ('site','aoi')
+      GROUP BY c.fips, c.name ORDER BY c.name
+    """).fetchall()
+    conn.close()
+    out = [{"fips": r["fips"], "name": r["name"], "value": r["total"],
+            "total": r["total"], "sites": r["sites"] or 0, "aois": r["aois"] or 0}
+           for r in rows]
+    vals = [r["value"] for r in out if r["value"]]
+    return jsonify({"counties": out,
+                    "stats": {"max": max(vals) if vals else 0,
+                              "counties_with_sites": len(vals),
+                              "total_sites": sum(vals)}})
+
+
 # ==========================================================================
 # "Check an address" — homebuyer environmental report
 # ==========================================================================
@@ -3587,8 +3650,33 @@ def _report_near(conn, lat, lng):
         lambda r, d: {"id": r["course_key"], "name": r["name"], "county": r["county"],
                       "ownership_class": r["ownership_class"], "acres": r["acres"]})
 
+    # --- PFAS sites & Areas of Interest (AOIs flag areas where residential wells
+    # may be affected — especially relevant to a homebuyer) ---
+    rows = conn.execute(
+        "SELECT feature_key, kind, name, latitude, longitude, county, site_type, "
+        "residential_wells, hyperlink FROM pfas_features WHERE kind IN ('site','aoi')").fetchall()
+    pfas = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "pfas",
+        lambda r, d: {"id": r["feature_key"], "name": r["name"], "county": r["county"],
+                      "kind": r["kind"], "site_type": r["site_type"],
+                      "residential_wells": r["residential_wells"], "hyperlink": r["hyperlink"]})
+
+    # --- PFAS surface-water sampling ---
+    rows = conn.execute(
+        "SELECT feature_key, name, latitude, longitude, county, max_ppt, sample_date, props "
+        "FROM pfas_features WHERE kind='surface_water'").fetchall()
+    def _pfas_water(r, d):
+        try:
+            p = json.loads(r["props"] or "{}")
+        except (TypeError, ValueError):
+            p = {}
+        return {"id": r["feature_key"], "name": r["name"], "county": r["county"],
+                "max_ppt": r["max_ppt"], "sample_date": r["sample_date"],
+                "waterbody": p.get("waterbody"), "detected": p.get("detected")}
+    pfas_water = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
+                              "pfas_water", _pfas_water)
+
     return {"contamination": contam, "tri": tri, "landfill": landfill,
-            "water": water, "golf": golf}
+            "water": water, "golf": golf, "pfas": pfas, "pfas_water": pfas_water}
 
 
 def _report_spraying(alat, alng, fips, locate):

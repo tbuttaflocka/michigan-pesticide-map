@@ -74,11 +74,21 @@
       showSites: false,
       showZones: false,
       showDensity: false,
-      filters: { npl: true, pfas: true, state: true, deleted: false },
+      filters: { npl: true, state: true, deleted: false },
       markers: null,               // L.featureGroup
       zones: null,                 // L.layerGroup
       density: null,               // L.geoJSON
       densityByFips: new Map(),
+    },
+    pfas: {
+      loaded: false,
+      features: [],                // from /api/pfas/features
+      legend: null,
+      showSites: false,
+      filters: { site: true, aoi: true, surface_water: true,
+                 pws: false, fish: false, potw: false },
+      markers: null,               // L.markerClusterGroup (points)
+      polys: null,                 // L.layerGroup (PWS hexbins)
     },
     spraying: {
       loaded: false,
@@ -163,6 +173,12 @@
     let data = null;
     try { data = await r.json(); } catch (e) { /* non-JSON error */ }
     return { ok: r.ok, status: r.status, data };
+  }
+
+  // HTML-escape for text interpolated into popup/report markup.
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   function loading(on) {
@@ -673,6 +689,14 @@
           `<div class="mk"><span class="mk-dot" style="background:${o.color}"></span>${o.glyph} ${o.label}</div>`
         ).join('') +
         '<div class="mk mk-sub">Footprint = land under turf management · locations only, no pesticide amounts</div>';
+    }
+    // PFAS key — confirmed Sites vs Areas of Interest and the sampling kinds.
+    if (state.pfas.showSites && state.pfas.legend) {
+      html += '<div class="mk-title" style="margin-top:8px">PFAS · MPART</div>' +
+        state.pfas.legend.kinds.filter((k) => state.pfas.filters[k.key] !== false).map((k) =>
+          `<div class="mk"><span class="mk-dot" style="background:${k.color}"></span>${k.glyph} ${k.label}</div>`
+        ).join('') +
+        '<div class="mk mk-sub">AOI = area under investigation · public water shown as hexbin areas</div>';
     }
     // Spraying-programs type key — the markers are colored by program type.
     if (state.spraying.showMarkers && state.spraying.types.length) {
@@ -1637,11 +1661,13 @@
   }
 
   function contamSiteVisible(s) {
+    // PFAS now has its own dedicated first-class layer (see the PFAS overlay), so
+    // this overlay no longer carries a PFAS sub-filter — that avoids duplicate
+    // PFAS markers from two sources. Genuine Superfund/state PFAS sites still show
+    // here under their NPL/state status and are cross-linked from the PFAS layer.
     const f = state.contam.filters;
-    const hasPfas = (s.contaminants || []).some((c) => /pfas/i.test(c));
     const st = s.status_class;
     return (f.npl && (st === 'npl' || st === 'proposed')) ||
-           (f.pfas && hasPfas) ||
            (f.state && st === 'state') ||
            (f.deleted && st === 'deleted');
   }
@@ -2097,6 +2123,176 @@
     </div>`;
   }
 
+  // ---------- PFAS overlay (Michigan MPART / EGLE) ----------
+  // A dedicated first-class layer. Confirmed Sites read as red hazard markers;
+  // Areas of Interest are amber diamonds (under investigation). Public-water
+  // results render as hexbin polygons (never precise locations, by EGLE design).
+  function pfasPane() {
+    if (!state.map.getPane('pfas')) state.map.createPane('pfas').style.zIndex = 648;
+    return 'pfas';
+  }
+  function pfasPolyPane() {
+    if (!state.map.getPane('pfaspoly')) state.map.createPane('pfaspoly').style.zIndex = 416;
+    return 'pfaspoly';
+  }
+  function newPfasClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      return L.markerClusterGroup({
+        clusterPane: 'pfas', maxClusterRadius: 42, chunkedLoading: true,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: true,
+      });
+    }
+    return L.layerGroup();
+  }
+  async function loadPfas() {
+    if (state.pfas.loaded) return;
+    const d = await api('/api/pfas/features');
+    state.pfas.features = d.features || [];
+    state.pfas.legend = d.legend || null;
+    state.pfas.loaded = true;
+  }
+  function pfasVisible(f) { return state.pfas.filters[f.kind] !== false; }
+
+  function renderPfas() {
+    if (state.pfas.markers) { state.pfas.markers.remove(); state.pfas.markers = null; }
+    if (state.pfas.polys) { state.pfas.polys.remove(); state.pfas.polys = null; }
+    if (!state.pfas.showSites) { updatePfasStats(); renderMarkerKeys(); return; }
+    const pane = pfasPane();
+    const grp = newPfasClusterLayer();
+    const polys = L.layerGroup();
+    for (const f of state.pfas.features) {
+      if (!pfasVisible(f)) continue;
+      const html = pfasPopupHtml(f);
+      if (f.kind === 'pws' && f.geometry) {
+        const gj = L.geoJSON(f.geometry, {
+          style: () => ({ color: f.color, weight: 1, opacity: 0.8,
+            fillColor: f.color, fillOpacity: 0.18, pane: pfasPolyPane() }) });
+        gj.bindPopup(html, { maxWidth: 340, className: 'pfas-popup-wrap' });
+        polys.addLayer(gj);
+      }
+      if (f.lat == null || f.lng == null) continue;
+      const isSite = f.kind === 'site';
+      const isAoi = f.kind === 'aoi';
+      // Site = solid red hazard square; AOI = amber diamond (under investigation).
+      const cls = isSite ? 'pfas-marker site' : isAoi ? 'pfas-marker aoi' : 'pfas-marker';
+      const size = (isSite || isAoi) ? 26 : 20;
+      const m = L.marker([f.lat, f.lng], {
+        pane,
+        icon: L.divIcon({ className: 'pfas-divicon',
+          html: `<div class="${cls}" style="width:${size}px;height:${size}px;background:${f.color}"><span>${f.glyph}</span></div>`,
+          iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+      });
+      m.bindPopup(html, { maxWidth: 340, className: 'pfas-popup-wrap' });
+      grp.addLayer(m);
+    }
+    polys.addTo(state.map); grp.addTo(state.map);
+    state.pfas.polys = polys; state.pfas.markers = grp;
+    updatePfasStats(); renderMarkerKeys();
+  }
+
+  function updatePfasStats() {
+    const el = $('pfas-stats');
+    if (!el) return;
+    if (!state.pfas.loaded) { el.textContent = '—'; return; }
+    const vis = state.pfas.features.filter(pfasVisible);
+    const sites = vis.filter((f) => f.kind === 'site').length;
+    const aois = vis.filter((f) => f.kind === 'aoi').length;
+    el.textContent = `${sites} confirmed sites · ${aois} areas of interest · investigation ongoing`;
+  }
+
+  function _pfasXlinks(f) {
+    let out = '';
+    if (f.contam_site_key) out += `<button type="button" class="pfas-xlink" data-lf-focus="contam" data-lat="${f.lat}" data-lng="${f.lng}">☣ Also a contamination / Superfund site · show on map →</button>`;
+    if (f.tri_facility_id) out += `<button type="button" class="pfas-xlink" data-lf-focus="tri" data-id="${f.tri_facility_id}" data-lat="${f.lat}" data-lng="${f.lng}">🏭 Also reports to TRI · show on map →</button>`;
+    if (f.landfill_site_key) out += `<button type="button" class="pfas-xlink" data-lf-focus="landfill" data-lat="${f.lat}" data-lng="${f.lng}">🗑 Also a landfill / waste facility · show on map →</button>`;
+    return out ? `<div class="pfas-xlinks">${out}</div>` : '';
+  }
+
+  function pfasPopupHtml(f) {
+    const p = f.props || {};
+    const loc = [f.city, f.county ? f.county + ' Co.' : ''].filter(Boolean).join(', ');
+    if (f.kind === 'site' || f.kind === 'aoi') {
+      const wells = f.residential_wells;
+      const wellsHtml = wells
+        ? `<div class="pfas-wells ${/^y/i.test(wells) ? 'yes' : 'no'}"><span class="k">Residential wells sampled:</span> <b>${esc(wells)}</b></div>`
+        : '';
+      const lead = f.site_lead
+        ? `<div class="pfas-lead"><span class="k">EGLE site lead:</span> ${esc(f.site_lead)}`
+          + `${f.site_lead_email ? ` · <a href="mailto:${esc(f.site_lead_email)}">${esc(f.site_lead_email)}</a>` : ''}`
+          + `${f.site_lead_phone ? ` · ${esc(f.site_lead_phone)}` : ''}</div>`
+        : '';
+      const link = f.hyperlink
+        ? `<a class="pfas-cta" href="${esc(f.hyperlink)}" target="_blank" rel="noopener">Official EGLE site investigation summary →</a>` : '';
+      return `<div class="pfas-popup">
+        <div class="pfas-type ${f.kind}" style="background:${f.color}">${f.glyph} ${esc(f.kind_label)}</div>
+        <h4>${esc(f.name)}</h4>
+        ${f.site_type ? `<div class="pfas-meta">${esc(f.site_type)}${loc ? ' · ' + esc(loc) : ''}</div>` : (loc ? `<div class="pfas-meta">${esc(loc)}</div>` : '')}
+        ${f.kind === 'aoi' ? '<div class="pfas-aoi-note">An Area of Interest is under investigation — the PFAS source has not yet been determined, and residential wells in the area may be affected.</div>' : ''}
+        ${wellsHtml}
+        ${lead}
+        ${_pfasXlinks(f)}
+        ${link}
+        <div class="pfas-src">Source: Michigan PFAS Action Response Team (MPART) / EGLE, live. Investigation ongoing — absence of a site does not mean absence of PFAS.</div>
+      </div>`;
+    }
+    if (f.kind === 'surface_water') {
+      const det = p.detected || {};
+      const chips = Object.keys(det).map((k) => `<span class="pfas-chip">${esc(k)} ${det[k]} ppt</span>`).join(' ');
+      return `<div class="pfas-popup">
+        <div class="pfas-type" style="background:${f.color}">${f.glyph} ${esc(f.kind_label)}</div>
+        <h4>${esc(f.name)}</h4>
+        ${p.waterbody ? `<div class="pfas-meta">${esc(p.waterbody)}${f.county ? ' · ' + esc(f.county) + ' Co.' : ''}</div>` : ''}
+        <div class="pfas-conc">${chips || 'No key PFAS analytes above the reporting limit in the highest sample.'}</div>
+        <div class="pfas-meta small">Highest sample${f.sample_date ? ` (${esc(f.sample_date)})` : ''}. Values in parts per trillion (ng/L). Surface water is not drinking water; for context, EPA's drinking-water limit for PFOA/PFOS is 4 ppt.</div>
+        <div class="pfas-src">Source: EGLE Water Resources Division — surface-water PFAS sampling.</div>
+      </div>`;
+    }
+    if (f.kind === 'pws') {
+      return `<div class="pfas-popup">
+        <div class="pfas-type" style="background:${f.color}">${f.glyph} ${esc(f.kind_label)}</div>
+        <h4>Public water supply sampling area</h4>
+        <div class="pfas-meta">${f.county ? esc(f.county) + ' County' : ''} · general hexbin area (exact system locations withheld by EGLE)</div>
+        <div class="pfas-conc">
+          <div><b>${p.systems || 0}</b> water system(s) · <b>${p.samples || 0}</b> samples · <b>${p.detections || 0}</b> with a PFAS detection</div>
+          ${p.max_pfos != null ? `<div>Max PFOS: <b>${p.max_pfos} ppt</b></div>` : ''}
+          ${p.max_pfoa != null ? `<div>Max PFOA: <b>${p.max_pfoa} ppt</b></div>` : ''}
+        </div>
+        <div class="pfas-meta small">${f.sample_date ? `Latest sample ${esc(f.sample_date)}. ` : ''}EPA's 2024 drinking-water limit for PFOA and PFOS is 4 ppt. Locations are shown as hexbin areas by EGLE's design to protect critical infrastructure.</div>
+        <div class="pfas-src">Source: EGLE / AECOM — Public Water Supply PFAS sampling.</div>
+      </div>`;
+    }
+    if (f.kind === 'fish') {
+      const url = (state.pfas.legend && state.pfas.legend.mdhhs_fish_url) || f.hyperlink;
+      return `<div class="pfas-popup">
+        <div class="pfas-type" style="background:${f.color}">${f.glyph} ${esc(f.kind_label)}</div>
+        <h4>${esc(f.name)}</h4>
+        <div class="pfas-meta">${f.county ? esc(f.county) + ' County' : ''}${f.site_type ? ' · ' + esc(f.site_type) : ''}</div>
+        <div class="pfas-conc">
+          ${p.max_pfos_ppb != null ? `<div>Max PFOS in fish tissue: <b>${p.max_pfos_ppb} ppb</b></div>` : '<div>PFOS results on record for this water body.</div>'}
+          ${(p.species || []).length ? `<div class="small">Species tested: ${p.species.map(esc).join(', ')}</div>` : ''}
+        </div>
+        <div class="pfas-meta small">${f.sample_date ? `Latest sample ${esc(f.sample_date)}. ` : ''}Fish-tissue PFOS is measured in parts per billion (ppb). Consumption guidance is set by MDHHS.</div>
+        ${url ? `<a class="pfas-cta" href="${esc(url)}" target="_blank" rel="noopener">MDHHS Eat Safe Fish guidance →</a>` : ''}
+        <div class="pfas-src">Source: Michigan Fish Contaminant Monitoring Program (EGLE).</div>
+      </div>`;
+    }
+    // potw
+    return `<div class="pfas-popup">
+      <div class="pfas-type" style="background:${f.color}">${f.glyph} ${esc(f.kind_label)}</div>
+      <h4>${esc(f.name)}</h4>
+      <div class="pfas-meta">${f.county ? esc(f.county) + ' County' : ''}${p.permit ? ' · Permit ' + esc(p.permit) : ''}</div>
+      <div class="pfas-conc">
+        ${p.receiving_water ? `<div>Discharges to: ${esc(p.receiving_water)}${p.outfall ? ` (outfall ${esc(p.outfall)})` : ''}</div>` : ''}
+        ${p.approved_ipp ? `<div>Approved industrial pretreatment program: <b>${esc(p.approved_ipp)}</b></div>` : ''}
+        ${p.exceeds_gw_criteria ? `<div>Exceeds groundwater cleanup criteria: <b>${esc(p.exceeds_gw_criteria)}</b></div>` : ''}
+      </div>
+      ${f.site_lead ? `<div class="pfas-lead"><span class="k">EGLE contact:</span> ${esc(f.site_lead)}${f.site_lead_email ? ` · <a href="mailto:${esc(f.site_lead_email)}">${esc(f.site_lead_email)}</a>` : ''}</div>` : ''}
+      ${f.hyperlink ? `<a class="pfas-cta" href="${esc(f.hyperlink)}" target="_blank" rel="noopener">MiEnviro permit record →</a>` : ''}
+      <div class="pfas-src">Source: EGLE — Publicly Owned Treatment Works with PFAS data.</div>
+    </div>`;
+  }
+
   // "Request monitoring records (FOIA)" button inside a landfill popup: build a
   // facility-specific, type-adapted request and open the reusable FOIA modal.
   document.addEventListener('click', (e) => {
@@ -2150,6 +2346,13 @@
       if (cb && !cb.checked) {
         cb.checked = true; state.contam.showSites = true;
         await loadContamination(); renderContamMarkers(); renderMarkerKeys();
+      }
+      if (!Number.isNaN(lat)) state.map.setView([lat, lng], zoom);
+    } else if (kind === 'landfill') {
+      const cb = $('landfill-sites');
+      if (cb && !cb.checked) {
+        cb.checked = true; state.landfill.showSites = true;
+        await loadLandfills(); renderLandfillMarkers();
       }
       if (!Number.isNaN(lat)) state.map.setView([lat, lng], zoom);
     }
@@ -2956,10 +3159,27 @@
       if (e.target.checked) await loadContamination();
       renderContamMarkers(); renderContamZones(); renderMarkerKeys();
     });
-    ['npl', 'pfas', 'state', 'deleted'].forEach((k) => {
+    ['npl', 'state', 'deleted'].forEach((k) => {
       $(`contam-f-${k}`).addEventListener('change', (e) => {
         state.contam.filters[k] = e.target.checked;
         renderContamMarkers(); renderContamZones();
+      });
+    });
+
+    // PFAS overlay (dedicated first-class layer) + per-kind sub-toggles.
+    const pfasToggle = $('pfas-sites');
+    if (pfasToggle) {
+      pfasToggle.addEventListener('change', async (e) => {
+        state.pfas.showSites = e.target.checked;
+        if (e.target.checked) await loadPfas();
+        renderPfas();
+      });
+    }
+    ['site', 'aoi', 'surface_water', 'pws', 'fish', 'potw'].forEach((k) => {
+      const cb = $(`pfas-f-${k}`);
+      if (cb) cb.addEventListener('change', (e) => {
+        state.pfas.filters[k] = e.target.checked;
+        renderPfas();
       });
     });
     $('contam-zones').addEventListener('change', async (e) => {
@@ -3349,6 +3569,8 @@
     water: { cb: 'wq-sites', grp: () => state.water.sitesLayer },
     golf: { cb: 'golf-sites', grp: () => state.golf.markers },
     spraying: { cb: 'spraying-programs', grp: () => state.spraying.markers },
+    pfas: { cb: 'pfas-sites', grp: () => state.pfas.markers },
+    pfas_water: { cb: 'pfas-sites', grp: () => state.pfas.markers },
   };
 
   function _openInGroup(group, lat, lng) {
@@ -3440,6 +3662,20 @@
       return `${_rEsc(it.ownership_class === 'municipal' ? 'public/municipal'
         : it.ownership_class || '')}${it.acres ? ` · ~${Math.round(it.acres)} acres` : ''}`
         + ` · <span class="muted">turf-pesticide land use</span>`;
+    }
+    if (layer === 'pfas') {
+      const tag = it.kind === 'aoi'
+        ? '<span class="rpt-tag" style="background:#e8873c;color:#0d1117">Area of Interest</span>'
+        : '<span class="rpt-tag" style="background:#e5484d;color:#fff">Confirmed site</span>';
+      const wells = it.residential_wells
+        ? ` · residential wells sampled: <b>${_rEsc(it.residential_wells)}</b>` : '';
+      return `${tag}${it.site_type ? ' ' + _rEsc(it.site_type) : ''}${wells}`;
+    }
+    if (layer === 'pfas_water') {
+      const det = it.detected || {};
+      const key = det.PFOS != null ? `PFOS ${det.PFOS} ppt` : (it.max_ppt != null ? `max ${it.max_ppt} ppt` : '');
+      return `${_rEsc(it.waterbody || 'surface water')}${key ? ` · <b>${key}</b>` : ''}`
+        + `${it.sample_date ? ` <span class="muted">(${_rEsc(it.sample_date)})</span>` : ''}`;
     }
     return '';
   }
@@ -3574,6 +3810,10 @@
         'No active landfills within 5 miles.')
       + _nearBlock('water', 'Water monitoring sites', '💧', near.water,
         'No water-monitoring sites within 5 miles.')
+      + _nearBlock('pfas', 'PFAS sites & Areas of Interest', '⚠', near.pfas,
+        'No PFAS sites or Areas of Interest within 5 miles — but investigation is ongoing, so this does not mean absence of PFAS.')
+      + _nearBlock('pfas_water', 'PFAS surface-water sampling', '💧', near.pfas_water,
+        'No PFAS surface-water sampling within 5 miles.')
       + _nearBlock('golf', 'Golf courses (turf pesticide use)', '⛳', near.golf,
         'No golf courses within 5 miles.')
       + _sprayingBlock(near.spraying);

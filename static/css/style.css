@@ -1742,6 +1742,65 @@ a:hover { text-decoration: underline; }
   color: var(--muted); font-size: 10px; margin-top: 2px; line-height: 1.35;
 }
 
+/* ================= PFAS (MPART / EGLE) ================= */
+.pfas-divicon { background: transparent; border: 0; }
+.pfas-marker {
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  border: 2px solid #fff; box-shadow: 0 2px 7px rgba(0,0,0,.6);
+  font-size: 12px; line-height: 1; color: #fff;
+}
+.pfas-marker span { filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+/* Confirmed site = solid rounded square; AOI = dashed diamond (under investigation). */
+.pfas-marker.site { border-radius: 5px; }
+.pfas-marker.aoi { transform: rotate(45deg); border-radius: 3px; border-style: dashed; }
+.pfas-marker.aoi span { transform: rotate(-45deg); }
+
+.pfas-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.pfas-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.pfas-popup { max-width: 340px; font-size: 12.5px; }
+.pfas-popup .pfas-type {
+  display: inline-block; color: #fff; font-weight: 700; font-size: 10.5px;
+  padding: 1px 8px; border-radius: 10px; margin-bottom: 6px;
+}
+.pfas-popup .pfas-type.aoi { color: #0d1117; }
+.pfas-popup h4 { margin: 2px 0 4px; font-size: 14px; color: var(--text); }
+.pfas-popup .pfas-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 3px; }
+.pfas-popup .pfas-aoi-note {
+  background: rgba(232,135,60,.12); border: 1px solid rgba(232,135,60,.35);
+  border-radius: 7px; padding: 6px 8px; font-size: 11.5px; line-height: 1.4; margin: 6px 0;
+}
+.pfas-popup .pfas-wells {
+  margin: 6px 0; padding: 5px 8px; border-radius: 7px; font-size: 12px;
+  border: 1px solid var(--line);
+}
+.pfas-popup .pfas-wells.yes { background: rgba(63,185,80,.12); border-color: rgba(63,185,80,.4); }
+.pfas-popup .pfas-wells.no { background: rgba(240,180,41,.10); border-color: rgba(240,180,41,.35); }
+.pfas-popup .pfas-wells .k, .pfas-popup .pfas-lead .k { color: var(--muted); font-weight: 700; }
+.pfas-popup .pfas-lead { margin: 5px 0; font-size: 11.5px; line-height: 1.45; }
+.pfas-popup .pfas-lead a, .pfas-popup .pfas-cta { color: var(--accent-2); }
+.pfas-popup .pfas-conc { margin: 6px 0; line-height: 1.5; font-size: 12px; }
+.pfas-popup .pfas-conc div { margin: 1px 0; }
+.pfas-popup .pfas-chip {
+  display: inline-block; background: rgba(59,130,196,.16); color: #9ecbf0;
+  border-radius: 9px; padding: 1px 8px; margin: 2px 3px 0 0; font-size: 11px; font-weight: 600;
+}
+.pfas-popup .pfas-xlinks { display: flex; flex-direction: column; gap: 5px; margin: 7px 0; }
+.pfas-popup .pfas-xlink {
+  text-align: left; width: 100%; cursor: pointer; font: inherit; font-size: 11.5px;
+  padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line);
+  background: rgba(229,72,77,.10); color: var(--text);
+}
+.pfas-popup .pfas-xlink:hover { background: rgba(229,72,77,.20); }
+.pfas-popup .pfas-cta {
+  display: block; margin: 7px 0 2px; font-weight: 700; font-size: 12.5px;
+}
+.pfas-popup .pfas-src {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.3px; font-style: italic; color: var(--muted); line-height: 1.4;
+}
+
 /* ================= "Check an address" homebuyer report ================= */
 .address-btn { font-weight: 700; }
 .county-address-btn {

@@ -376,6 +376,45 @@ CREATE TABLE IF NOT EXISTS golf_courses (
 CREATE INDEX IF NOT EXISTS ix_golf_county ON golf_courses(county_fips);
 CREATE INDEX IF NOT EXISTS ix_golf_owner  ON golf_courses(ownership_class);
 
+-- ===== PFAS (Michigan PFAS Action Response Team / EGLE, live) =====
+-- One row per mapped PFAS feature across all five MPART feeds, discriminated by
+-- `kind`. Confirmed Sites vs Areas of Interest (AOI = area under investigation
+-- where the source hasn't been determined) are distinguished by kind. Sampling
+-- results are aggregated to their location (max concentration + latest date);
+-- Public Water Supply results are HEXBINS (polygons), never precise locations,
+-- by EGLE's design. No concentration or site is ever fabricated. Sites/AOIs are
+-- cross-linked (name-token + proximity) to the app's Superfund/TRI/landfill data.
+CREATE TABLE IF NOT EXISTS pfas_features (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    feature_key       TEXT UNIQUE NOT NULL,   -- <kind>:<source id>
+    kind              TEXT NOT NULL,          -- site|aoi|surface_water|pws|fish|potw
+    name              TEXT,
+    site_type         TEXT,                   -- Type (Landfill/Airport/…) or waterbody
+    address           TEXT,
+    city              TEXT,
+    zip               TEXT,
+    county            TEXT,
+    county_fips       TEXT,
+    latitude          REAL,                   -- representative point (hexbin centroid for pws)
+    longitude         REAL,
+    geometry          TEXT,                   -- GeoJSON polygon for pws hexbins; NULL for points
+    residential_wells TEXT,                   -- site/aoi: whether residential wells were sampled
+    hyperlink         TEXT,                   -- site investigation summary / MiEnviro / Eat-Safe-Fish
+    site_lead         TEXT,
+    site_lead_email   TEXT,
+    site_lead_phone   TEXT,
+    max_ppt           REAL,                   -- key concentration (surface_water/pws), ppt/ng-L
+    sample_date       TEXT,                   -- latest sample date, ISO
+    summary           TEXT,                   -- short human-readable key figures
+    props             TEXT,                   -- JSON: kind-specific fields
+    contam_site_key   TEXT,                   -- cross-link: contamination_sites.site_key
+    tri_facility_id   TEXT,                   -- cross-link: tri_facility.facility_id
+    landfill_site_key TEXT,                   -- cross-link: landfill_sites.site_key
+    source            TEXT DEFAULT 'EGLE_MPART'
+);
+CREATE INDEX IF NOT EXISTS ix_pfas_kind   ON pfas_features(kind);
+CREATE INDEX IF NOT EXISTS ix_pfas_county ON pfas_features(county_fips);
+
 -- ===== Wind / pesticide-drift modeling =====
 
 CREATE TABLE IF NOT EXISTS wind_data (

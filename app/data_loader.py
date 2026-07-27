@@ -67,6 +67,7 @@ from . import cancer_data
 from . import contamination_data
 from . import landfill_data
 from . import golf_data
+from . import pfas_data
 from .config import (
     CANCER_DATA_DIR,
     EPA_NPL_QUERY,
@@ -79,6 +80,16 @@ from .config import (
     GEOJSON_PATH,
     OVERPASS_ENDPOINTS,
     OVERPASS_GOLF_QUERY,
+    PFAS_SITES_URL,
+    PFAS_SURFACE_WATER_URL,
+    PFAS_PWS_HEXBIN_URL,
+    PFAS_PWS_RESULTS_URL,
+    PFAS_FISH_SITES_URL,
+    PFAS_FISH_DATA_URL,
+    PFAS_POTW_URL,
+    MPART_HOME_URL,
+    MPART_HUB_URL,
+    MDHHS_EAT_SAFE_FISH_URL,
 )
 
 
@@ -2666,6 +2677,366 @@ def load_golf_courses(conn: sqlite3.Connection) -> int:
         ("ny_ag_toxic_fairways", golf_data.SOURCES[3]),
     ):
         record_source(conn, sid, src["title"], src["url"], "reference", 0, src["note"])
+    return total
+
+
+# ---------- PFAS (Michigan PFAS Action Response Team / EGLE, live) ----------
+#
+# Five live MPART feeds -> one pfas_features table (kind-discriminated). Sampling
+# results are aggregated to their location; Public Water Supply results stay as
+# hexbin polygons (never pinpointed). No site/concentration is ever fabricated.
+
+def _arcgis_all(url: str, out_fields: str = "*", *, where: str = "1=1",
+                geometry: bool = False, page: int = 2000, cap: int = 200000) -> list:
+    """Fetch ALL features from an ArcGIS FeatureServer/MapServer layer, paging via
+    resultOffset (ordered by OBJECTID for stability). Returns raw feature dicts."""
+    out, offset = [], 0
+    while True:
+        params = urllib.parse.urlencode({
+            "where": where, "outFields": out_fields,
+            "returnGeometry": "true" if geometry else "false", "outSR": "4326",
+            "orderByFields": "OBJECTID", "resultOffset": offset,
+            "resultRecordCount": page, "f": "json"})
+        try:
+            d = json.loads(http_get(f"{url}/query?{params}", timeout=120))
+        except Exception:                    # noqa: BLE001 — retry once without ordering
+            params = urllib.parse.urlencode({
+                "where": where, "outFields": out_fields,
+                "returnGeometry": "true" if geometry else "false", "outSR": "4326",
+                "resultOffset": offset, "resultRecordCount": page, "f": "json"})
+            d = json.loads(http_get(f"{url}/query?{params}", timeout=120))
+        feats = d.get("features", [])
+        out.extend(feats)
+        if len(feats) < page or len(out) >= cap or not d.get("exceededTransferLimit", len(feats) == page):
+            if len(feats) < page:
+                break
+        if len(feats) < page or len(out) >= cap:
+            break
+        offset += page
+    return out
+
+
+# Key PFAS analytes we summarise for surface water (value column, ppt/ng-L).
+_SW_ANALYTES = [
+    ("CAS1763231_PFOS", "PFOS"), ("CAS335671_PFOA", "PFOA"),
+    ("CAS355464_PFHxS", "PFHxS"), ("CAS375951_PFNA", "PFNA"),
+    ("CAS375735_PFBS", "PFBS"), ("CAS307244_PFHxA", "PFHxA"),
+    ("CAS13252136_GenX", "GenX"),
+]
+
+
+def _poly_centroid(rings):
+    """Rough area-weighted centroid of an ArcGIS polygon's rings ([[[x,y],...]])."""
+    xs, ys, n = 0.0, 0.0, 0
+    for ring in rings or []:
+        for x, y in ring:
+            xs += x; ys += y; n += 1
+    return (xs / n, ys / n) if n else (None, None)
+
+
+def load_pfas(conn: sqlite3.Connection) -> int:
+    """Load Michigan PFAS features from the five live MPART/EGLE feeds, cross-link
+    Sites/AOIs to the app's Superfund/TRI/landfill records, and insert them."""
+    log("Loading PFAS features (Michigan MPART / EGLE, live)...")
+    cur = conn.cursor()
+
+    def _ckey(name):
+        return (name or "").replace(".", "").replace(" county", "", 1).strip().lower()
+    fips_by_lname = {_ckey(name): fips for fips, name in _county_fips_list(conn)}
+    locate = _build_county_locator()
+
+    def county_of(county_name, lat, lng):
+        """Prefer the feed's county name; fall back to point-in-polygon."""
+        fips = fips_by_lname.get(_ckey(county_name)) if county_name else None
+        name = pfas_data.title_county(county_name)
+        if not fips and lat is not None and lng is not None:
+            fips, nm = locate(lng, lat)
+            name = name or nm
+        return name, fips
+
+    # cross-link indexes (Sites/AOIs only)
+    tri_by_fips, contam_by_fips = _build_crosslink_index(conn)
+    landfill_by_fips: dict[str, list] = {}
+    for r in conn.execute("SELECT site_key, name, operator, latitude, longitude, "
+                          "county_fips FROM landfill_sites WHERE county_fips IS NOT NULL"):
+        landfill_by_fips.setdefault(r["county_fips"], []).append(dict(r))
+
+    rows: list[dict] = []
+    counts = {}
+
+    # ---- 1. Sites & Areas of Interest (flagship) ----
+    try:
+        for f in _arcgis_all(PFAS_SITES_URL):
+            a = f.get("attributes", {})
+            lat, lng = _to_float(a.get("Latitude")), _to_float(a.get("Longitude"))
+            if lat is None or lng is None:
+                continue
+            is_aoi = (a.get("SiteOrAoi") or "").strip().lower().startswith("area")
+            cname, fips = county_of(a.get("County"), lat, lng)
+            rows.append({
+                "feature_key": f"{'aoi' if is_aoi else 'site'}:{a.get('GlobalID') or a.get('OBJECTID')}",
+                "kind": "aoi" if is_aoi else "site",
+                "name": (a.get("Name") or "PFAS site").strip(),
+                "site_type": (a.get("Type") or "").strip() or None,
+                "address": (a.get("Address") or "").strip() or None,
+                "city": (a.get("City") or "").strip().title() or None,
+                "zip": str(a.get("ZipCode")).strip() if a.get("ZipCode") else None,
+                "county": cname, "county_fips": fips, "latitude": lat, "longitude": lng,
+                "residential_wells": (a.get("ResidentialWellsSampled") or "").strip() or None,
+                "hyperlink": (a.get("WebpageSite") or "").strip() or None,
+                "site_lead": (a.get("SiteLead") or "").strip() or None,
+                "site_lead_email": (a.get("SiteLeadEmail") or "").strip() or None,
+                "site_lead_phone": (a.get("SiteLeadPhone") or "").strip() or None,
+                "summary": None,
+                "props": {"site_or_aoi": a.get("SiteOrAoi"),
+                          "additional_files": (a.get("WebpageAdditionalFiles") or "").strip() or None},
+            })
+        counts["sites_aois"] = sum(1 for r in rows if r["kind"] in ("site", "aoi"))
+        log(f"  PFAS sites/AOIs: {counts['sites_aois']}", level="ok")
+    except Exception as e:                   # noqa: BLE001
+        log(f"  PFAS sites fetch failed: {e}", level="warn")
+
+    # ---- 2. Surface water sampling (aggregate to location, max PFOS+PFOA) ----
+    try:
+        of = ",".join(["SiteCode", "CocSampleId", "CollectionDate", "Unit", "Waterbody",
+                       "Longitude", "Latitude"]
+                      + [c for c, _ in _SW_ANALYTES] + [c + "Flag" for c, _ in _SW_ANALYTES])
+        best: dict = {}
+        for f in _arcgis_all(PFAS_SURFACE_WATER_URL, of):
+            a = f.get("attributes", {})
+            lat, lng = _to_float(a.get("Latitude")), _to_float(a.get("Longitude"))
+            if lat is None or lng is None:
+                continue
+            detected = {}
+            for col, nm in _SW_ANALYTES:
+                v, det = pfas_data.parse_ppt(a.get(col))
+                flag = (a.get(col + "Flag") or "").strip().upper()
+                if det and flag not in ("U", "ND"):
+                    detected[nm] = v
+            score = (detected.get("PFOS", 0) or 0) + (detected.get("PFOA", 0) or 0)
+            key = a.get("SiteCode") or f"{lat:.5f},{lng:.5f}"
+            prev = best.get(key)
+            if prev is None or score > prev["_score"]:
+                best[key] = {
+                    "_score": score, "name": (a.get("CocSampleId") or a.get("SiteCode")
+                                              or "Surface-water sample"),
+                    "waterbody": a.get("Waterbody"), "unit": a.get("Unit") or "ng/L",
+                    "date": pfas_data.epoch_to_iso(a.get("CollectionDate")),
+                    "lat": lat, "lng": lng, "detected": detected,
+                    "site_code": a.get("SiteCode")}
+        for key, b in best.items():
+            cname, fips = county_of(None, b["lat"], b["lng"])
+            total = round(sum(b["detected"].values()), 1) if b["detected"] else None
+            rows.append({
+                "feature_key": f"sw:{key}", "kind": "surface_water",
+                "name": str(b["name"]).strip(), "site_type": b["waterbody"],
+                "county": cname, "county_fips": fips, "latitude": b["lat"], "longitude": b["lng"],
+                "max_ppt": max(b["detected"].values()) if b["detected"] else None,
+                "sample_date": b["date"],
+                "summary": None,
+                "props": {"waterbody": b["waterbody"], "unit": b["unit"],
+                          "detected": {k: round(v, 1) for k, v in b["detected"].items()},
+                          "total_key_pfas": total}})
+        counts["surface_water"] = len(best)
+        log(f"  PFAS surface-water locations: {len(best)}", level="ok")
+    except Exception as e:                   # noqa: BLE001
+        log(f"  PFAS surface-water fetch failed: {e}", level="warn")
+
+    # ---- 3. Public Water Supply — hexbins + results (aggregate by HexID) ----
+    try:
+        agg: dict = {}
+        for f in _arcgis_all(PFAS_PWS_RESULTS_URL,
+                             "HexID,WSSN,SystemName,SampleDate,PFOS,PFOA"):
+            a = f.get("attributes", {})
+            hid = a.get("HexID")
+            if hid is None:
+                continue
+            d = agg.setdefault(hid, {"systems": set(), "samples": 0, "detections": 0,
+                                     "max_pfos": None, "max_pfoa": None, "latest": None})
+            d["systems"].add(a.get("WSSN"))
+            d["samples"] += 1
+            pfos, dets = pfas_data.parse_ppt(a.get("PFOS"))
+            pfoa, deta = pfas_data.parse_ppt(a.get("PFOA"))
+            if dets or deta:
+                d["detections"] += 1
+            if pfos is not None:
+                d["max_pfos"] = max(d["max_pfos"] or 0, pfos)
+            if pfoa is not None:
+                d["max_pfoa"] = max(d["max_pfoa"] or 0, pfoa)
+            iso = pfas_data.epoch_to_iso(a.get("SampleDate"))
+            if iso and (d["latest"] is None or iso > d["latest"]):
+                d["latest"] = iso
+        pws_n = 0
+        for f in _arcgis_all(PFAS_PWS_HEXBIN_URL, "HexID", geometry=True):
+            a = f.get("attributes", {})
+            hid = a.get("HexID")
+            g = f.get("geometry") or {}
+            rings = g.get("rings")
+            if hid not in agg or not rings:
+                continue                     # only hexbins that actually have results
+            clng, clat = _poly_centroid(rings)
+            if clat is None:
+                continue
+            d = agg[hid]
+            cname, fips = county_of(None, clat, clng)
+            rows.append({
+                "feature_key": f"pws:{hid}", "kind": "pws",
+                "name": f"Public water supply area (hex {hid})",
+                "county": cname, "county_fips": fips, "latitude": clat, "longitude": clng,
+                "geometry": json.dumps({"type": "Polygon", "coordinates": rings}),
+                "max_ppt": max(d["max_pfos"] or 0, d["max_pfoa"] or 0) or None,
+                "sample_date": d["latest"], "summary": None,
+                "props": {"systems": len([s for s in d["systems"] if s is not None]),
+                          "samples": d["samples"], "detections": d["detections"],
+                          "max_pfos": d["max_pfos"], "max_pfoa": d["max_pfoa"]}})
+            pws_n += 1
+        counts["pws"] = pws_n
+        log(f"  PFAS public-water hexbins with results: {pws_n}", level="ok")
+    except Exception as e:                   # noqa: BLE001
+        log(f"  PFAS public-water fetch failed: {e}", level="warn")
+
+    # ---- 4. Fish contaminant monitoring (sites + data aggregated by StationID) ----
+    try:
+        fagg: dict = {}
+        for f in _arcgis_all(PFAS_FISH_DATA_URL,
+                             "StationID,WaterBody,Species,CollectionDate,PFOSppb,PFOScode"):
+            a = f.get("attributes", {})
+            sid = a.get("StationID")
+            if sid is None:
+                continue
+            d = fagg.setdefault(sid, {"species": set(), "samples": 0,
+                                      "max_pfos_ppb": None, "latest": None})
+            d["samples"] += 1
+            if a.get("Species"):
+                d["species"].add(a.get("Species"))
+            pfos = _to_float(a.get("PFOSppb"))
+            code = (a.get("PFOScode") or "").strip().upper()
+            if pfos is not None and code not in ("U", "ND", "NA"):
+                d["max_pfos_ppb"] = max(d["max_pfos_ppb"] or 0, pfos)
+            iso = pfas_data.epoch_to_iso(a.get("CollectionDate"))
+            if iso and (d["latest"] is None or iso > d["latest"]):
+                d["latest"] = iso
+        fish_n = 0
+        for f in _arcgis_all(PFAS_FISH_SITES_URL,
+                             "StationID,WaterBody,CountyName,SamplingLocation,Lat,Long"):
+            a = f.get("attributes", {})
+            sid = a.get("StationID")
+            lat, lng = _to_float(a.get("Lat")), _to_float(a.get("Long"))
+            if lat is None or lng is None:
+                continue
+            d = fagg.get(sid)
+            cname, fips = county_of(a.get("CountyName"), lat, lng)
+            rows.append({
+                "feature_key": f"fish:{sid}", "kind": "fish",
+                "name": (a.get("WaterBody") or "Fish sampling site").strip(),
+                "site_type": (a.get("SamplingLocation") or "").strip() or None,
+                "county": cname, "county_fips": fips, "latitude": lat, "longitude": lng,
+                "hyperlink": MDHHS_EAT_SAFE_FISH_URL,
+                "max_ppt": (d["max_pfos_ppb"] if d else None),   # note: fish is ppb, labelled in popup
+                "sample_date": d["latest"] if d else None, "summary": None,
+                "props": {"waterbody": a.get("WaterBody"),
+                          "species": sorted(d["species"])[:8] if d else [],
+                          "samples": d["samples"] if d else 0,
+                          "max_pfos_ppb": d["max_pfos_ppb"] if d else None,
+                          "unit": "ppb (fish tissue)"}})
+            fish_n += 1
+        counts["fish"] = fish_n
+        log(f"  PFAS fish sampling sites: {fish_n}", level="ok")
+    except Exception as e:                   # noqa: BLE001
+        log(f"  PFAS fish fetch failed: {e}", level="warn")
+
+    # ---- 5. Publicly Owned Treatment Works with PFAS data ----
+    try:
+        potw_n = 0
+        for f in _arcgis_all(PFAS_POTW_URL):
+            a = f.get("attributes", {})
+            lat, lng = _to_float(a.get("Latitude")), _to_float(a.get("Longitude"))
+            if lat is None or lng is None:
+                continue
+            cname, fips = county_of(a.get("County"), lat, lng)
+            rows.append({
+                "feature_key": f"potw:{a.get('GlobalID') or a.get('OBJECTID')}",
+                "kind": "potw", "name": (a.get("Name") or "Treatment plant").strip(),
+                "site_type": a.get("DischargeType"),
+                "county": cname, "county_fips": fips, "latitude": lat, "longitude": lng,
+                "hyperlink": (a.get("MiEnviroUrl") or "").strip() or None,
+                "site_lead": (a.get("EGLEContact") or "").strip() or None,
+                "site_lead_email": (a.get("ContactEmail") or "").strip() or None,
+                "site_lead_phone": (a.get("ContactPhone") or "").strip() or None,
+                "summary": None,
+                "props": {"permit": a.get("PermitNumber"), "outfall": a.get("NPDESOutfall"),
+                          "receiving_water": a.get("ReceivingWaterbody"),
+                          "approved_ipp": a.get("ApprovedIPP"),
+                          "exceeds_gw_criteria": a.get("ExceedsGwCleanUpCriteria")}})
+            potw_n += 1
+        counts["potw"] = potw_n
+        log(f"  PFAS treatment plants (POTW): {potw_n}", level="ok")
+    except Exception as e:                   # noqa: BLE001
+        log(f"  PFAS POTW fetch failed: {e}", level="warn")
+
+    # ---- cross-link Sites/AOIs to Superfund / TRI / landfill (precision-first) ----
+    xlinks = 0
+    for rec in rows:
+        if rec["kind"] not in ("site", "aoi"):
+            continue
+        fips = rec["county_fips"]
+        if not fips:
+            continue
+        c = _best_crosslink(rec, contam_by_fips.get(fips, []), "site_name", "company")
+        if c:
+            rec["contam_site_key"] = c["site_key"]; xlinks += 1
+        t = _best_crosslink(rec, tri_by_fips.get(fips, []), "facility_name")
+        if t:
+            rec["tri_facility_id"] = t["facility_id"]
+        lf = _best_crosslink(rec, landfill_by_fips.get(fips, []), "name", "operator")
+        if lf:
+            rec["landfill_site_key"] = lf["site_key"]
+
+    cur.execute("DELETE FROM pfas_features")
+    for r in rows:
+        cur.execute(
+            """INSERT OR REPLACE INTO pfas_features(
+                 feature_key, kind, name, site_type, address, city, zip, county,
+                 county_fips, latitude, longitude, geometry, residential_wells,
+                 hyperlink, site_lead, site_lead_email, site_lead_phone, max_ppt,
+                 sample_date, summary, props, contam_site_key, tri_facility_id,
+                 landfill_site_key, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (r["feature_key"], r["kind"], r.get("name"), r.get("site_type"),
+             r.get("address"), r.get("city"), r.get("zip"), r.get("county"),
+             r.get("county_fips"), r.get("latitude"), r.get("longitude"),
+             r.get("geometry"), r.get("residential_wells"), r.get("hyperlink"),
+             r.get("site_lead"), r.get("site_lead_email"), r.get("site_lead_phone"),
+             r.get("max_ppt"), r.get("sample_date"), r.get("summary"),
+             json.dumps(r.get("props") or {}), r.get("contam_site_key"),
+             r.get("tri_facility_id"), r.get("landfill_site_key"), "EGLE_MPART"))
+    conn.commit()
+
+    total = len(rows)
+    sites = counts.get("sites_aois", 0)
+    status = "ok" if sites else ("partial" if total else "unavailable")
+    log(f"  PFAS: {total} features ({sites} sites/AOIs, {xlinks} contamination "
+        f"cross-links)", level="ok" if total else "warn")
+    record_source(
+        conn, "egle_mpart_pfas",
+        "Michigan PFAS Action Response Team (MPART) / EGLE — PFAS data",
+        MPART_HOME_URL, status, total,
+        f"{total} PFAS features from five live EGLE/MPART ArcGIS feeds: "
+        f"{sites} Sites & Areas of Interest, plus surface-water, public-water-"
+        f"supply (hexbin), fish, and treatment-plant sampling. Live-updated; "
+        f"investigation ongoing. Public water results are hexbins, not precise "
+        f"locations, by EGLE design. No site or concentration is fabricated.")
+    record_source(
+        conn, "mdhhs_eat_safe_fish",
+        "MDHHS Eat Safe Fish — Michigan fish consumption guidance",
+        MDHHS_EAT_SAFE_FISH_URL, "reference", 0,
+        "Official Michigan fish-consumption advisories (incl. PFOS). Fish PFAS "
+        "sampling popups link here rather than inventing consumption advice.")
+    record_source(
+        conn, "mpart_hub",
+        "EGLE PFAS Open Data Hub (ArcGIS)", MPART_HUB_URL, "reference", 0,
+        "Live EGLE ArcGIS feeds behind the PFAS layer (sites/AOIs, surface water, "
+        "public water supply, fish, treatment plants).")
     return total
 
 

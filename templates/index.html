@@ -185,10 +185,9 @@
         <label class="overlay-toggle" data-tip="Water sampling stations tested for pesticides. Source: USGS/EPA Water Quality Portal."><input type="checkbox" id="wq-sites" /> <span>Water monitoring sites</span></label>
         <label class="overlay-toggle" data-tip="A heat map of where pesticides were actually detected in water samples."><input type="checkbox" id="wq-heat" /> <span>Water detection heatmap</span></label>
         <label class="overlay-toggle" data-tip="Watershed boundaries — regions where all streams drain to the same place (USGS HUC-8 subbasins)."><input type="checkbox" id="wq-watersheds" /> <span>HUC-8 watersheds</span></label>
-        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund, PFAS, and state cleanups. Source: EPA + compiled records."><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
+        <label class="overlay-toggle" data-tip="Known contaminated industrial sites: Superfund and state cleanups. Source: EPA + compiled records. (PFAS now has its own dedicated layer below.)"><input type="checkbox" id="contam-sites" /> <span>Contamination sites</span></label>
         <div class="contam-subtoggles" id="contam-subtoggles">
           <label class="small"><input type="checkbox" id="contam-f-npl" checked /> <span class="cdot" style="background:#f85149"></span> Superfund NPL</label>
-          <label class="small"><input type="checkbox" id="contam-f-pfas" checked /> <span class="cdot" style="background:#33b0c9"></span> PFAS</label>
           <label class="small"><input type="checkbox" id="contam-f-state" checked /> <span class="cdot" style="background:#e8873c"></span> State cleanup</label>
           <label class="small"><input type="checkbox" id="contam-f-deleted" /> <span class="cdot" style="background:#3fb950"></span> Deleted (cleaned up)</label>
         </div>
@@ -215,6 +214,21 @@
         <details class="collapsible golf-caveat">
           <summary><span class="info-icon">ℹ️</span>&nbsp;About golf courses &amp; pesticide use</summary>
           <p class="disclaimer-text small">This layer shows where golf courses are <strong>located</strong>, not how much pesticide they apply. Michigan does not require public reporting of golf-course pesticide use, and industry records are not publicly available. The chemicals listed in each popup are those commonly used in <span data-gloss="turfgrass management">turfgrass management</span> <strong>generally</strong> (from turf <span data-gloss="IPM">IPM</span>/BMP references), <strong>not</strong> records for any specific course. Public/<span data-gloss="municipal course">municipally-owned</span> courses are colored green — their records can more often be obtained by a <span data-gloss="FOIA">FOIA</span> request; most courses aren't tagged with an owner in OpenStreetMap and show grey. Note also that the app's agricultural pesticide layer (USGS <span data-gloss="EPest">EPest</span>) <strong>excludes golf courses, lawns, and other <span data-gloss="non-agricultural pesticide use">non-agricultural uses</span></strong> entirely — so this land use is missing from those county totals. Locations are crowd-sourced (OpenStreetMap) and coverage may be incomplete or out of date.</p>
+        </details>
+        <div class="overlay-subhead">PFAS <span class="lg-hint">Michigan MPART / EGLE · live</span></div>
+        <label class="overlay-toggle" data-tip="Michigan PFAS Action Response Team (MPART) data — the most aggressive state PFAS program in the country. Confirmed PFAS Sites vs Areas of Interest (areas under investigation where the source isn't yet determined), plus surface-water, public-water-supply, fish, and treatment-plant sampling. Click a site for whether residential wells were sampled and a link to the official investigation summary."><input type="checkbox" id="pfas-sites" /> <span>PFAS (MPART)</span></label>
+        <div class="landfill-subtoggles" id="pfas-subtoggles">
+          <label class="small"><input type="checkbox" id="pfas-f-site" checked /> <span class="cdot" style="background:#e5484d"></span> Confirmed sites</label>
+          <label class="small"><input type="checkbox" id="pfas-f-aoi" checked /> <span class="cdot" style="background:#e8873c"></span> Areas of Interest</label>
+          <label class="small"><input type="checkbox" id="pfas-f-surface_water" checked /> <span class="cdot" style="background:#3b82c4"></span> Surface water</label>
+          <label class="small"><input type="checkbox" id="pfas-f-pws" /> <span class="cdot" style="background:#8957e5"></span> Public water (hexbins)</label>
+          <label class="small"><input type="checkbox" id="pfas-f-fish" /> <span class="cdot" style="background:#2fa39a"></span> Fish sampling</label>
+          <label class="small"><input type="checkbox" id="pfas-f-potw" /> <span class="cdot" style="background:#b0863c"></span> Treatment plants</label>
+        </div>
+        <p class="muted small overlay-substat" id="pfas-stats" style="margin:2px 0 4px 22px"></p>
+        <details class="collapsible pfas-caveat">
+          <summary><span class="info-icon">ℹ️</span>&nbsp;About PFAS data</summary>
+          <p class="disclaimer-text small">PFAS investigation in Michigan is <strong>ongoing</strong> — the site list grows as new contamination is found, so <strong>absence of a PFAS site does not mean absence of <span data-gloss="PFAS">PFAS</span></strong>. An <span data-gloss="Area of Interest">Area of Interest</span> is an area under investigation where the source hasn't been determined; residential wells there may be affected. Public water supply results are shown as general <strong>hexbin areas</strong> rather than precise locations — <span data-gloss="MPART">EGLE</span> withholds exact system locations by design to protect critical infrastructure. Concentrations are in <span data-gloss="parts per trillion">parts per trillion (ppt)</span>; EPA's 2024 drinking-water limit for <span data-gloss="PFOA">PFOA</span> and <span data-gloss="PFOS">PFOS</span> is 4&nbsp;ppt. Fish sampling links to MDHHS Eat Safe Fish guidance rather than inventing consumption advice. Nothing here is fabricated. Source: <span data-gloss="MPART">Michigan PFAS Action Response Team (MPART)</span> / EGLE, live.</p>
         </details>
         <label class="overlay-toggle" data-tip="A directory of Michigan's known organized spraying programs (county spongy-moth suppression, mosquito abatement, and the state's EEE/West Nile aerial response). Each links to its official page for current schedules — not a live spray-date feed."><input type="checkbox" id="spraying-programs" /> <span>Spraying programs (directory)</span></label>
         <details class="collapsible spraying-caveat">

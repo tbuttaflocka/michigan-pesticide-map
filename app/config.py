@@ -208,6 +208,31 @@ OVERPASS_ENDPOINTS = [
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
+# ---- PFAS (Michigan PFAS Action Response Team / EGLE, live ArcGIS) ----
+#
+# Michigan runs the most aggressive state PFAS program in the country; MPART
+# publishes five live feeds. Two orgs host them: EGLE's ArcGIS Online org
+# (services1.arcgis.com/FNjlrOFR0aGJ71Tg) and EGLE's on-prem server
+# (gisagoegle.state.mi.us). The Public Water Supply results are published as
+# HEXBINS (not precise locations) by EGLE's design to protect critical
+# infrastructure — we render the hexbins as provided and never pinpoint systems.
+PFAS_AGO_BASE = "https://services1.arcgis.com/FNjlrOFR0aGJ71Tg/arcgis/rest/services"
+PFAS_EGLE_BASE = "https://gisagoegle.state.mi.us/arcgis/rest/services/EGLE"
+PFAS_SITES_URL = (PFAS_AGO_BASE
+    + "/Michigan_PFAS_Sites_and_Areas_of_Interest_PUBLIC_view/FeatureServer/1")
+PFAS_SURFACE_WATER_URL = PFAS_EGLE_BASE + "/PfasOpenData/MapServer/0"
+PFAS_PWS_HEXBIN_URL = PFAS_EGLE_BASE + "/PublicWaterSupplySamplingOpenData/FeatureServer/0"
+PFAS_PWS_RESULTS_URL = PFAS_EGLE_BASE + "/PublicWaterSupplySamplingOpenData/FeatureServer/1"
+PFAS_FISH_SITES_URL = PFAS_EGLE_BASE + "/FcmpOpenData/FeatureServer/0"
+PFAS_FISH_DATA_URL = PFAS_EGLE_BASE + "/FcmpOpenData/FeatureServer/1"
+PFAS_POTW_URL = (PFAS_AGO_BASE
+    + "/Industrial_Pretreatment_Program_Waste_Water_Treatment_Plants_Public_View/FeatureServer/0")
+# Official landing pages (Data Sources modal + popups).
+MPART_HUB_URL = "https://gis-egle.hub.arcgis.com/search?tags=pfas"
+MPART_HOME_URL = "https://www.michigan.gov/pfasresponse"
+MDHHS_EAT_SAFE_FISH_URL = ("https://www.michigan.gov/mdhhs/safety-injury-prev/"
+                           "environmental-health/topics/eat-safe-fish")
+
 OVERPASS_GOLF_QUERY = (
     "[out:json][timeout:180];"
     'area["name"="Michigan"]["admin_level"="4"]["boundary"="administrative"]->.mi;'

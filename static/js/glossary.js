@@ -41,6 +41,39 @@
       'Pesticide use that is NOT on farm crops — golf courses, lawns, parks, roadsides, ' +
       'rights-of-way, and structures. The USGS EPest data this app maps covers agriculture ' +
       'only, so none of this use appears in the county pesticide totals.',
+    'PFAS':
+      'Per- and polyfluoroalkyl substances — a large family of synthetic "forever chemicals" ' +
+      'used in firefighting foam, non-stick and stain-resistant coatings, and many industrial ' +
+      'processes. They resist breaking down, build up in water, soil, fish, and people, and are ' +
+      'linked to cancer, immune, thyroid, and developmental effects. Michigan runs the most ' +
+      'aggressive state PFAS response program in the country (MPART).',
+    'PFOA':
+      'Perfluorooctanoic acid — one of the most-studied PFAS, formerly used to make Teflon and ' +
+      'other coatings. EPA set an enforceable drinking-water limit of 4 parts per trillion in 2024.',
+    'PFOS':
+      'Perfluorooctanesulfonic acid — a PFAS formerly used in Scotchgard and firefighting foam. ' +
+      'It bioaccumulates strongly in fish and is the main driver of Michigan fish-consumption ' +
+      'advisories. EPA set an enforceable drinking-water limit of 4 parts per trillion in 2024.',
+    'AFFF':
+      'Aqueous Film-Forming Foam — a firefighting foam containing PFAS, used at airports, ' +
+      'military bases, and fire-training sites. It is a major source of PFAS groundwater ' +
+      'contamination at many Michigan Areas of Interest.',
+    'parts per trillion':
+      'A concentration unit (ppt) — one part in a trillion, roughly a single drop in 20 Olympic ' +
+      'swimming pools. PFAS are toxic at extraordinarily low levels; EPA\'s drinking-water limit ' +
+      'for PFOA and PFOS is just 4 ppt. Water results are often reported in ng/L, which equals ppt.',
+    'Area of Interest':
+      'An "AOI" is an area EGLE is investigating for PFAS where the SOURCE has not yet been ' +
+      'determined. It flags a place where residential wells may be affected while the ' +
+      'investigation is ongoing — distinct from a confirmed PFAS Site with an identified source.',
+    'MPART':
+      'The Michigan PFAS Action Response Team — the multi-agency state body (led by EGLE) that ' +
+      'investigates PFAS contamination, samples water and fish, and publishes the live data ' +
+      'behind this layer. Michigan\'s program is the most aggressive of any U.S. state.',
+    'bioaccumulation':
+      'The buildup of a chemical in living tissue faster than the body can get rid of it, so ' +
+      'concentrations rise up the food chain. PFOS bioaccumulates strongly in fish, which is why ' +
+      'fish caught in contaminated waters can carry far higher PFAS levels than the water itself.',
     'municipal course':
       'A golf course owned by a local government (city, county, or township) or another ' +
       'public body such as a public university. Because it is a "public body," its grounds ' +
