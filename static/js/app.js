@@ -3226,7 +3226,10 @@
       if (e.target.id === 'address-modal') hide($('address-modal'));
     });
     $('address-form').addEventListener('submit', submitAddress);
-    $('report-close').addEventListener('click', () => hide($('report-modal')));
+    $('report-close').addEventListener('click', closeReport);
+    $('report-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'report-modal') closeReport();
+    });
     $('report-print').addEventListener('click', () => window.print());
     $('report-reopen').addEventListener('click', () => {
       if (_report) { show($('report-modal')); hide($('report-reopen')); }
@@ -3234,7 +3237,10 @@
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (!$('address-modal').classList.contains('hidden')) hide($('address-modal'));
-      else if (!$('report-modal').classList.contains('hidden')) hide($('report-modal'));
+      // Fully dismiss the report (and its map graphics) whether it's showing or
+      // minimised to the floating "View report" button.
+      else if (!$('report-modal').classList.contains('hidden')
+               || !$('report-reopen').classList.contains('hidden')) closeReport();
     });
     // Delegated "Show on map →" buttons inside the report.
     document.addEventListener('click', (e) => {
@@ -3286,9 +3292,26 @@
   }
 
   // ---- map: pin + 1/3/5-mile rings -------------------------------------------
+  // A single persistent layer group holds the pin + rings. We clear it (not
+  // recreate it) before each draw and remove it entirely on close, so nothing
+  // ever stacks or ghosts.
+  function _reportGroup() {
+    if (!_reportLayer) _reportLayer = L.layerGroup();
+    if (!state.map.hasLayer(_reportLayer)) _reportLayer.addTo(state.map);
+    return _reportLayer;
+  }
+
+  function clearReportGraphics() {
+    if (_reportLayer) {
+      _reportLayer.clearLayers();
+      state.map.removeLayer(_reportLayer);
+      _reportLayer = null;
+    }
+  }
+
   function drawReportMap(loc) {
-    if (_reportLayer) { _reportLayer.remove(); _reportLayer = null; }
-    const g = L.layerGroup();
+    const g = _reportGroup();
+    g.clearLayers();                                 // wipe any prior pin/rings
     const ringColors = ['#f85149', '#e8873c', '#d9b458'];
     [5, 3, 1].forEach((mi) => {
       L.circle([loc.lat, loc.lng], {
@@ -3301,10 +3324,20 @@
         html: '<div class="report-pin">📍</div>', iconSize: [30, 30], iconAnchor: [15, 30] }),
       zIndexOffset: 1000,
     }).addTo(g);
-    g.addTo(state.map);
-    _reportLayer = g;
     const bounds = L.latLng(loc.lat, loc.lng).toBounds(11000);   // ~5 mi + margin
     state.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+  }
+
+  // Fully dismiss the report: hide the modal + floating button, remove the pin
+  // and rings from the map, and reset the report state. The "Show on map →"
+  // buttons only open existing overlay popups (they add no separate graphics),
+  // so there is nothing extra to clean up beyond closing any open popup.
+  function closeReport() {
+    hide($('report-modal'));
+    hide($('report-reopen'));
+    clearReportGraphics();
+    if (state.map && state.map.closePopup) state.map.closePopup();
+    _report = null;
   }
 
   // ---- focus a finding: enable its layer, fly, open its popup ----------------
