@@ -174,6 +174,12 @@
           <p class="muted small">County color = number of active licensed landfills &amp; disposal-capable hazardous-waste facilities. Facility markers are in the <em>Overlays</em> section below.</p>
           <p class="muted small" id="landfill-stats">—</p>
         </div>
+
+        <label class="layer-radio" data-tip="Shade counties by how many confirmed PFAS sites and Areas of Interest they contain. Source: Michigan PFAS Action Response Team (MPART) / EGLE, live."><input type="radio" name="choropleth" value="pfas_density" /> <span class="lr-dot pfas"></span> <span>PFAS site density</span></label>
+        <div class="layer-inline" data-layer-filters="pfas_density">
+          <p class="muted small">County color = number of confirmed PFAS <span data-gloss="MPART">MPART</span> sites &amp; <span data-gloss="Area of Interest">Areas of Interest</span>. Individual sites, sampling, and hexbins are in the <em>PFAS</em> overlay below. Investigation is ongoing — absence does not mean absence of <span data-gloss="PFAS">PFAS</span>.</p>
+          <p class="muted small" id="pfas-density-stats">—</p>
+        </div>
       </div>
     </section>
 

@@ -89,6 +89,8 @@
                  pws: false, fish: false, potw: false },
       markers: null,               // L.markerClusterGroup (points)
       polys: null,                 // L.layerGroup (PWS hexbins)
+      densityByFips: new Map(),    // county Site+AOI counts (choropleth)
+      _densityMax: 1,
     },
     spraying: {
       loaded: false,
@@ -307,6 +309,15 @@
           Math.floor(Math.sqrt(v / max) * LANDFILL_PALETTE.length));
         return LANDFILL_PALETTE[idx];
       }
+      case 'pfas_density': {
+        const c = state.pfas.densityByFips.get(fips);
+        const v = c ? c.value : 0;
+        if (!v) return NO_DATA;
+        const max = state.pfas._densityMax || 1;
+        const idx = Math.min(PFAS_PALETTE.length - 1,
+          Math.floor(Math.sqrt(v / max) * PFAS_PALETTE.length));
+        return PFAS_PALETTE[idx];
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         return colorFor(c ? c.value : 0, state.breaks, state.palette);
@@ -500,6 +511,12 @@
         const haz = c.hazardous ? ` <span class="muted">(${c.hazardous} hazardous)</span>` : '';
         return `<div><span class="muted">Landfills &amp; waste facilities:</span> <span class="v">${c.value}</span>${haz}</div>`;
       }
+      case 'pfas_density': {
+        const c = state.pfas.densityByFips.get(fips);
+        if (!c || !c.value) return '<div class="muted">No mapped PFAS sites</div>';
+        const aoi = c.aois ? ` <span class="muted">(${c.aois} area${c.aois > 1 ? 's' : ''} of interest)</span>` : '';
+        return `<div><span class="muted">PFAS sites &amp; AOIs:</span> <span class="v">${c.value}</span>${aoi}</div>`;
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         if (!c) return '<div class="muted">No pesticide data</div>';
@@ -541,6 +558,7 @@
       case 'contam_density': return 'Contamination site density';
       case 'tri':    return `TRI toxic releases — ${triMetricLabel(state.tri.metric).toLowerCase()}`;
       case 'landfill_density': return 'Landfill density';
+      case 'pfas_density': return 'PFAS site density';
       default:       return `Pesticide — ${pestFilterLabel()}`;
     }
   }
@@ -634,6 +652,10 @@
       case 'landfill_density':
         paletteStrip(el, LANDFILL_PALETTE);
         note.textContent = 'active landfills & waste facilities per county (lower → higher)';
+        break;
+      case 'pfas_density':
+        paletteStrip(el, PFAS_PALETTE);
+        note.textContent = 'PFAS sites & areas of interest per county (lower → higher)';
         break;
     }
     renderMarkerKeys();
@@ -742,6 +764,7 @@
       case 'contam_density': return 'contamination-site counts';
       case 'tri':            return 'toxic-release amounts';
       case 'landfill_density': return 'landfill counts';
+      case 'pfas_density':   return 'PFAS site counts';
       default:               return 'pesticide amounts';
     }
   }
@@ -790,6 +813,7 @@
       if (which === 'contam_density') await loadContamDensity();
       if (which === 'tri') await loadTriDensity(state.tri.metric);
       if (which === 'landfill_density') await loadLandfillDensity();
+      if (which === 'pfas_density') await loadPfasDensity();
     } catch (e) {
       console.error(e);
     } finally {
@@ -1507,6 +1531,15 @@
         showCard2(false);
         break;
       }
+      case 'pfas_density': {
+        const c = state.pfas.densityByFips.get(fips);
+        v1.textContent = (c && c.value) ? String(c.value) : '0';
+        l1.textContent = 'PFAS sites & areas of interest';
+        v2.textContent = (c && c.aois) ? String(c.aois) : '0';
+        l2.textContent = 'Areas of interest';
+        showCard2(true);
+        break;
+      }
       case 'tri': {
         const c = state.tri.densityByFips.get(fips);
         v1.textContent = (c && c.value) ? fmtLbs(c.value) + '/yr' : '—';
@@ -1840,6 +1873,20 @@
     }
   }
 
+  // Per-county PFAS Site + Area-of-Interest count for the PFAS choropleth.
+  async function loadPfasDensity() {
+    if (!state.pfas.densityByFips.size) {
+      const d = await api('/api/pfas/density');
+      for (const c of d.counties) state.pfas.densityByFips.set(c.fips, c);
+      state.pfas._densityMax = (d.stats && d.stats.max) || 1;
+      const el = $('pfas-density-stats');
+      if (el && d.stats) {
+        el.textContent = `${d.stats.total_sites} PFAS sites & areas of interest across `
+          + `${d.stats.counties_with_sites} of 83 counties.`;
+      }
+    }
+  }
+
   function landfillVisible(s) { return state.landfill.filters[s.category] !== false; }
   function landfillSize(s) { return s.category === 'hazardous' ? 30 : 26; }
 
@@ -2122,6 +2169,10 @@
         pesticide-use amounts are shown because Michigan publishes none for golf courses.</div>
     </div>`;
   }
+
+  // Choropleth ramp for PFAS site density (dark → PFAS red).
+  const PFAS_PALETTE = ['#22171b', '#361c24', '#4d2029', '#6a2530', '#8a2c37',
+                        '#a83a41', '#c2535a', '#d67680', '#e79fa6', '#f4ccd0'];
 
   // ---------- PFAS overlay (Michigan MPART / EGLE) ----------
   // A dedicated first-class layer. Confirmed Sites read as red hazard markers;

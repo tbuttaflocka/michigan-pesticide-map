@@ -1541,6 +1541,7 @@ a:hover { text-decoration: underline; }
 /* ---------- EPA Toxics Release Inventory (TRI) ---------- */
 .lr-dot.tri { background: #2f8783; }
 .lr-dot.landfill { background: #b5762e; }
+.lr-dot.pfas { background: #c2535a; }
 
 .tri-suboptions { margin: 4px 0 6px 22px; }
 .tri-suboptions label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); }
