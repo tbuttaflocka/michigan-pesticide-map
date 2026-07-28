@@ -83,6 +83,40 @@ NASS_API_URL = "https://quickstats.nass.usda.gov/api/api_GET/"
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8080"))
 
+# The prebuilt SQLite database is not committed to git (it outgrew GitHub's
+# size limits); it is fetched from a Release asset by scripts/fetch_db.py. A
+# missing DB path would make sqlite3 silently create an EMPTY database and the
+# app would boot serving no data — worse than a clear error. Entry points call
+# require_db() to fail fast with instructions instead.
+DB_MIN_BYTES = 50 * 1024 * 1024  # sanity floor; the real DB is ~90 MB and grows
+
+
+def db_is_present() -> bool:
+    """True only if the database exists AND is plausibly complete (not truncated)."""
+    try:
+        return DB_PATH.exists() and DB_PATH.stat().st_size >= DB_MIN_BYTES
+    except OSError:
+        return False
+
+
+def require_db() -> None:
+    """Abort with a helpful message if the database is missing or truncated."""
+    if db_is_present():
+        return
+    import sys
+    size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    print(
+        "\nERROR: the pesticide database is missing or incomplete.\n"
+        f"  path: {DB_PATH}\n"
+        f"  size: {size:,} bytes (need >= {DB_MIN_BYTES:,})\n\n"
+        "It is no longer committed to git. Fetch the prebuilt copy with:\n"
+        "  python scripts/fetch_db.py --if-missing\n\n"
+        "Or rebuild it from source datasets with:\n"
+        "  python -m app.data_loader\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 # ---- Water Quality Portal (USGS/EPA) ----
 WQP_BASE = "https://www.waterqualitydata.us/data"
 WQP_STATION_URL = (

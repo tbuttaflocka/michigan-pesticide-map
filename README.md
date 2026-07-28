@@ -34,9 +34,20 @@ python -m venv .venv
 .venv/Scripts/activate            # Windows
 # source .venv/bin/activate       # macOS / Linux
 pip install -r requirements.txt
-python -m app.data_loader         # downloads ~120 MB of real USGS files into ./data
+python scripts/fetch_db.py --if-missing   # grabs the ~90 MB prebuilt DB if absent
 python app.py                     # serves http://127.0.0.1:8080
 ```
+
+> **The database is not stored in git.** It outgrew GitHub's file-size limits, so
+> it's published as a GitHub Release asset (tag `data`) and fetched by
+> `scripts/fetch_db.py`. `--if-missing` only downloads when the DB is absent, so
+> it's safe to run any time and does nothing once you have it. The app refuses to
+> start without a real database rather than serving an empty one.
+>
+> Prefer to **build the DB from source** instead of downloading it? Run
+> `python -m app.data_loader` (downloads ~120 MB of raw USGS/Census files and
+> ingests them — slower, but no Release asset needed). `setup.sh` / `setup.bat`
+> take this from-source path.
 
 > `python app.py` starts Flask's built-in **development** server — fine for local
 > use, but **not** for public hosting. To share the app publicly, use the
@@ -91,8 +102,11 @@ Notes for a public deployment:
 ### Deploying to Render
 
 This repo is ready to deploy on [Render](https://render.com) as a free Python web
-service. The pre-built database ships in the repo (`data/michigan_pesticides.sqlite`,
-~76 MB), so the app boots with all data present — no build-time data download.
+service. The ~90 MB database is **not** in the repo (it outgrew GitHub's file-size
+limits); Render downloads it during the build from a GitHub Release asset via
+`scripts/fetch_db.py`. That script **verifies** the download (size + SHA-256) and
+**fails the build loudly** if the file is missing or truncated, so a broken app is
+never deployed.
 
 The included **`render.yaml`**, **`runtime.txt`**, and **`serve.py`** provide everything
 Render needs:
@@ -100,17 +114,26 @@ Render needs:
 | Setting | Value |
 |---|---|
 | Runtime | Python (`runtime.txt` → `python-3.13.4`) |
-| Build command | `pip install -r requirements.txt` |
+| Build command | `pip install -r requirements.txt && python scripts/fetch_db.py` |
 | Start command | `python serve.py` |
 | Env vars | none required — `serve.py` binds `0.0.0.0` and reads the `PORT` Render sets automatically |
 
-Steps: push this repo to GitHub → in Render, **New → Web Service** → connect the repo →
-Render reads `render.yaml` (or enter the build/start commands above) → **Create**. Render
-provides HTTPS automatically on the `*.onrender.com` URL. On the free plan the service
-sleeps after inactivity, so the first request after idle takes ~30–60 s to wake.
+Steps: push this repo to GitHub → **publish the database as a Release asset once**
+(see [Keeping the data fresh](#keeping-the-data-fresh)) → in Render, **New → Web
+Service** → connect the repo → Render reads `render.yaml` (or enter the build/start
+commands above) → **Create**. Render provides HTTPS automatically on the
+`*.onrender.com` URL. On the free plan the service sleeps after inactivity, so the
+first request after idle takes ~30–60 s to wake.
 
-To update the deployed data later, re-run the loader/refresh locally, commit the updated
-`data/michigan_pesticides.sqlite`, and push — Render redeploys automatically.
+> **If your Render service was created before this change** (build command was just
+> `pip install -r requirements.txt`), update it: Render dashboard → your service →
+> **Settings → Build Command** → set it to
+> `pip install -r requirements.txt && python scripts/fetch_db.py`. Services created
+> from `render.yaml` as a Blueprint pick this up automatically.
+
+To update the deployed data later, refresh locally and **re-upload the Release asset**
+(don't commit the DB) — see [Keeping the data fresh](#keeping-the-data-fresh). Render
+downloads the new database on the next deploy.
 
 ### Optional API keys (`.env`)
 
@@ -336,6 +359,44 @@ silently left partial). Because date-bounded pulls key off the *sample* date, a
 sample collected before the watermark but uploaded to WQP late can be missed;
 run `--full` occasionally (e.g. yearly) to re-pull everything and backfill.
 
+### Publishing the refreshed database (deploy step)
+
+The database is **not committed to git** — it's a GitHub Release asset (fixed tag
+`data`) that the Render build downloads. So after refreshing locally, you **upload
+the new DB to the Release** instead of committing it. The download URL never
+changes, so nothing in the build has to be edited.
+
+```bash
+python refresh_data.py            # 1. refresh the local DB as usual
+python scripts/publish_db.py      # 2. hash it, write the .sha256, upload the asset
+```
+
+`publish_db.py` computes the SHA-256, writes a `data/michigan_pesticides.sqlite.sha256`
+sidecar (the build verifies against it), then:
+
+- **If the [GitHub CLI](https://cli.github.com) (`gh`) is installed and authenticated**,
+  it creates the `data` release if needed and uploads both files with `--clobber`
+  (replacing the previous copies). One command, done.
+- **If `gh` isn't installed**, it prints exact step-by-step instructions to attach
+  the two files through the GitHub web UI, and the fixed asset URL to expect.
+
+Then trigger a deploy (Render auto-deploys on push, or use **Manual Deploy** in the
+Render dashboard). The build runs `scripts/fetch_db.py`, which downloads the new
+asset, verifies its size and SHA-256, and only then swaps it into place — a failed
+or truncated download **fails the build** rather than shipping a broken app.
+
+> **First-time setup:** you must create the `data` release once (either
+> `python scripts/publish_db.py` with `gh`, or the web-UI steps it prints) *before*
+> the first Render deploy, or the build will have nothing to download and will fail
+> loudly by design. The asset lives at:
+> `https://github.com/tbuttaflocka/michigan-pesticide-map/releases/download/data/michigan_pesticides.sqlite`
+
+> **Why not commit the DB or use Git LFS?** At ~90 MB it's over GitHub's 50 MB
+> warning and near the 100 MB hard limit, and every committed copy bloats history
+> permanently. Git LFS was rejected too: the free tier's 1 GB/month bandwidth cap
+> would be exhausted quickly because Render pulls the file on every deploy, and
+> hitting the cap breaks deploys. A Release asset has no such bandwidth cap.
+
 ### Recommended refresh interval per source
 
 | Source (`--source`) | Cadence | Why |
@@ -413,13 +474,16 @@ michigan-pesticide-map/
 ├── refresh_data.py         Safe, staged data-refresh harness (scheduled)
 ├── enrich_chemicals.py     Cache PubChem chemical info (re-runnable)
 ├── enrich_narratives.py    Fill contamination-site narratives (re-runnable)
+├── scripts/
+│   ├── fetch_db.py         Download + verify the prebuilt DB (build/local)
+│   └── publish_db.py       Hash + upload the DB as a GitHub Release asset
 ├── app/
 │   ├── config.py           Paths, URLs, env wiring
 │   ├── database.py         SQLite schema + connection helper
 │   ├── data_loader.py      Downloads + ingests all data
 │   ├── chemical_reference.py  PubChem client + chemical_reference cache
 │   └── categories.py       Compound -> category lookup
-├── data/                   Raw downloads + SQLite DB (created on first run)
+├── data/                   Raw downloads + SQLite DB (fetched, not committed)
 ├── static/css|js/          Dark-theme stylesheet + Leaflet/Chart.js app
 ├── templates/index.html    Single-page UI shell
 ├── requirements.txt

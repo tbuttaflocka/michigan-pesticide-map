@@ -4297,5 +4297,7 @@ def api_correlation_contamination():
 # ---------- entrypoint ----------
 
 if __name__ == "__main__":
+    from app.config import require_db
+    require_db()  # fail fast if the DB wasn't fetched/built (serves empty otherwise)
     print(f" * Michigan Pollution Map serving on http://{HOST}:{PORT}")
     app.run(host=HOST, port=PORT, debug=False)

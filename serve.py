@@ -32,6 +32,11 @@ _spec.loader.exec_module(_mod)
 application = _mod.app          # WSGI callable
 
 if __name__ == "__main__":
+    # Fail fast if the database wasn't fetched/built. On Render the build step
+    # (scripts/fetch_db.py) downloads it; this guards against a misconfigured
+    # build serving an empty app.
+    from app.config import require_db
+    require_db()
     # Bind 0.0.0.0 unconditionally: hosting platforms like Render route traffic
     # to the container's public interface, so the app MUST listen on all
     # interfaces (not 127.0.0.1/localhost) or the platform can't reach it and

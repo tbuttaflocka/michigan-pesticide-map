@@ -11,13 +11,17 @@ venv/
 !.env.example
 
 # Downloaded / generated data artifacts (recreate with `python -m app.data_loader`).
-# Everything under data/ is ignored EXCEPT the small, read-only runtime files
-# committed below, so the app boots on a fresh host (e.g. Render) without having
-# to rebuild the ~76 MB database. Large build inputs (EPest .txt, the WQP CSV,
-# the 24 MB raw HUC-8 geojson, etc.) stay ignored.
+# Everything under data/ is ignored EXCEPT the small, read-only geojson runtime
+# files committed below. Large build inputs (EPest .txt, the WQP CSV, the 24 MB
+# raw HUC-8 geojson, etc.) stay ignored.
+#
+# The SQLite database (data/michigan_pesticides.sqlite, ~90 MB) is NO LONGER
+# committed — it outgrew GitHub's file-size limits. It is published as a GitHub
+# Release asset (tag `data`) and downloaded at build time by scripts/fetch_db.py.
+# See README "Data refresh workflow". The .sha256 sidecar is generated locally
+# by scripts/publish_db.py and is likewise not tracked.
 data/*
 !data/.gitkeep
-!data/michigan_pesticides.sqlite
 !data/michigan_counties.geojson
 !data/mi_huc8.simplified.geojson
 

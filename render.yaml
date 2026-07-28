@@ -2,16 +2,22 @@
 # Docs: https://render.com/docs/blueprint-spec
 #
 # On Render you can either point a new "Web Service" at this repo and use the
-# Build/Start commands below, or use this file as a Blueprint. The pre-built
-# SQLite database ships in the repo (data/michigan_pesticides.sqlite), so the
-# app boots with all data present — no build-time data download is needed.
+# Build/Start commands below, or use this file as a Blueprint.
+#
+# The pre-built SQLite database is NO LONGER committed (it outgrew GitHub's
+# file-size limits). It is published as a GitHub Release asset (tag `data`) and
+# downloaded during the build by scripts/fetch_db.py, which verifies the file
+# and FAILS the build loudly if the download is missing or truncated — so a
+# broken app is never deployed. See README "Data refresh workflow".
 services:
   - type: web
     name: michigan-pesticide-map
     runtime: python
     plan: free
-    # Install runtime deps (Flask + Waitress). Python version comes from runtime.txt.
-    buildCommand: "pip install -r requirements.txt"
+    # Install runtime deps (Flask + Waitress), then fetch + verify the database.
+    # Python version comes from runtime.txt. The `&&` ensures a failed download
+    # aborts the build.
+    buildCommand: "pip install -r requirements.txt && python scripts/fetch_db.py"
     # serve.py runs Waitress. It always binds 0.0.0.0 (so Render can reach it)
     # and reads the port from the PORT env var that Render provides — no extra
     # env vars are required.
