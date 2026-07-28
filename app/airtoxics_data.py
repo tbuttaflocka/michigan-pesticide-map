@@ -38,14 +38,14 @@ from __future__ import annotations
 # glossary key ties each label to a plain-language definition (see glossary.js),
 # surfaced as a tap-friendly tooltip in the popup and the homebuyer report.
 SOURCE_CATEGORIES = [
-    ("PT_Stationary_Point", "point",      "Industry (point sources)",  "#c0553a", "point source"),
-    ("NP_Cancer_Risk",      "nonpoint",   "Area & nonpoint sources",   "#d98a3d", "nonpoint/area source"),
-    ("OR_Cancer_Risk",      "onroad",     "On-road traffic",           "#4f9dd6", "on-road traffic"),
-    ("NR_Cancer_Risk",      "nonroad",    "Non-road mobile",           "#7b6cd9", "non-road mobile"),
-    ("Fire_Risk",           "fire",       "Fires",                     "#e0623c", "fire emissions"),
-    ("Biogenics_Risk",      "biogenic",   "Biogenic (natural)",        "#4faa6b", "biogenic emissions"),
-    ("Secondary_Risk",      "secondary",  "Secondary formation",       "#9aa63c", "secondary formation"),
-    ("Background_Risk",     "background", "Background",                "#8a94a3", "background concentration"),
+    ("PT_Stationary_Point", "point",      "Industry (point)",   "#c0553a", "point source"),
+    ("NP_Cancer_Risk",      "nonpoint",   "Area / nonpoint",    "#d98a3d", "nonpoint/area source"),
+    ("OR_Cancer_Risk",      "onroad",     "On-road traffic",    "#4f9dd6", "on-road traffic"),
+    ("NR_Cancer_Risk",      "nonroad",    "Non-road mobile",    "#7b6cd9", "non-road mobile"),
+    ("Fire_Risk",           "fire",       "Fires",              "#e0623c", "fire emissions"),
+    ("Biogenics_Risk",      "biogenic",   "Biogenic",           "#4faa6b", "biogenic emissions"),
+    ("Secondary_Risk",      "secondary",  "Secondary formation", "#9aa63c", "secondary formation"),
+    ("Background_Risk",     "background", "Background",          "#8a94a3", "background concentration"),
 ]
 SOURCE_FIELDS = [f for f, _k, _l, _c, _g in SOURCE_CATEGORIES]
 SOURCE_KEY_BY_FIELD = {f: k for f, k, _l, _c, _g in SOURCE_CATEGORIES}

@@ -1791,8 +1791,9 @@ a:hover { text-decoration: underline; }
 .atx-share-note { font-size: 11px; color: var(--muted); line-height: 1.4; margin: 4px 0 6px; }
 .atx-share-note b { color: var(--text); }
 .atx-bars { margin: 5px 0; display: flex; flex-direction: column; gap: 3px; }
-.atx-bar { display: grid; grid-template-columns: 108px 1fr 30px; align-items: center; gap: 6px; font-size: 11px; }
-.atx-bar-l { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atx-bar { display: grid; grid-template-columns: 118px 1fr 30px; align-items: center; gap: 6px; font-size: 11px; }
+/* Wrap labels instead of truncating them — never cut a source name mid-word. */
+.atx-bar-l { color: var(--muted); white-space: normal; line-height: 1.2; overflow-wrap: break-word; }
 /* Tappable / hoverable plain-language term (shares the app's tooltip component) */
 .gloss-term { border-bottom: 1px dotted currentColor; cursor: help; }
 .gloss-term:hover, .gloss-term:focus { color: var(--text); outline: none; }
@@ -1969,7 +1970,7 @@ a:hover { text-decoration: underline; }
   color: #0b1f10; box-shadow: 0 3px 12px rgba(0,0,0,.5); min-height: 44px;
 }
 
-.rpt { font-size: 13px; line-height: 1.5; }
+.rpt { font-size: 13px; line-height: 1.5; color: var(--text); }
 .rpt-head h2 { margin: 0 0 2px; font-size: 19px; }
 .rpt-addr { font-weight: 700; color: var(--accent-2); font-size: 14px; }
 .rpt-sub { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
@@ -2046,9 +2047,9 @@ a:hover { text-decoration: underline; }
    distinct from the amber/red severity bands used for actual findings. Sits
    directly under the UST section; collapsible with the headline always shown. */
 .rpt-oiltank {
-  margin: 8px 0 14px; border: 1px solid rgba(88,166,255,.5);
+  margin: 8px 0 14px; border: 1px solid var(--line);
   border-left: 4px solid #58a6ff; border-radius: 8px;
-  background: rgba(88,166,255,.09);
+  background: var(--bg-2); color: var(--text);
 }
 .rpt-oiltank > summary {
   cursor: pointer; list-style: none; padding: 9px 12px;
@@ -2076,8 +2077,9 @@ a:hover { text-decoration: underline; }
    "worth understanding" treatment (a real nearby finding), expanded when an open
    release is close. Prints expanded via the report's beforeprint handler. */
 .rpt-ustnote {
-  margin: 8px 0 12px; border: 1px solid rgba(227,179,65,.5);
-  border-left: 4px solid #e3b341; border-radius: 8px; background: rgba(227,179,65,.09);
+  margin: 8px 0 12px; border: 1px solid var(--line);
+  border-left: 4px solid #e3b341; border-radius: 8px;
+  background: var(--bg-2); color: var(--text);
 }
 .rpt-ustnote > summary {
   cursor: pointer; list-style: none; padding: 9px 12px;
@@ -2109,7 +2111,7 @@ a:hover { text-decoration: underline; }
 .rpt-focus:hover { background: rgba(240,180,41,.24); }
 .rpt-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
   border-radius: 8px; }
-.rpt-tag.npl { background: #f85149; color: #fff; }
+.rpt-tag.npl { background: #cf3b32; color: #fff; }  /* darkened for AA on small badge text */
 .rpt-sev { font-weight: 600; }
 .sev-exceeds_mcl { color: #f85149; }
 .sev-exceeds_benchmark { color: #c77dff; }
@@ -2124,8 +2126,9 @@ a:hover { text-decoration: underline; }
 .rpt-vs.hi { color: #f0a35a; }
 .rpt-vs.lo { color: #6cc06c; }
 
-.rpt-disc { margin: 14px 0 8px; background: rgba(248,81,73,.07);
-  border: 1px solid rgba(248,81,73,.28); border-radius: 8px; padding: 10px 12px; }
+.rpt-disc { margin: 14px 0 8px; background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-left: 3px solid #f85149;
+  border-radius: 8px; padding: 10px 12px; }
 .rpt-disc h3 { margin: 0 0 5px; font-size: 13.5px; border: 0; }
 .rpt-disc ul, .rpt-src ul { margin: 4px 0 0; padding-left: 18px; }
 .rpt-disc li { margin: 4px 0; line-height: 1.45; font-size: 12px; }
@@ -2157,9 +2160,16 @@ a:hover { text-decoration: underline; }
   .report-toolbar, .rpt-focus, #report-close, #report-print, .report-reopen { display: none !important; }
   .rpt, .rpt * { color: #000 !important; }
   .rpt a { color: #000 !important; text-decoration: underline; }
-  .rpt-rating, .rpt-cat, .rpt-cov, .rpt-warn, .rpt-list li, .rpt-cc, .rpt-disc {
+  .rpt-rating, .rpt-cat, .rpt-cov, .rpt-warn, .rpt-list li, .rpt-cc, .rpt-disc,
+  .rpt-ustnote, .rpt-airtox {
     background: #fff !important; break-inside: avoid;
   }
+  /* Keep the source-category bar fills visible on paper (browsers drop
+     backgrounds by default). */
+  .atx-bar-t, .atx-bar-t > span {
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+  }
+  .atx-bar-t { background: #e5e5e5 !important; }
   .rpt-rating, .rpt-cat { border: 1px solid #999 !important; }
   .band-few { border-left: 5px solid #2a8a3e !important; }
   .band-some { border-left: 5px solid #b8860b !important; }
@@ -2172,9 +2182,12 @@ a:hover { text-decoration: underline; }
     background: #fff !important; border: 1px solid #999 !important;
     border-left: 4px solid #333 !important; break-inside: avoid;
   }
-  .rpt-oiltank > summary { list-style: none; }
-  .rpt-oiltank > summary::after { content: '' !important; }
-  .rpt-oiltank-tag {
+  .rpt-oiltank > summary, .rpt-ustnote > summary { list-style: none; }
+  .rpt-oiltank > summary::after, .rpt-ustnote > summary::after { content: '' !important; }
+  .rpt-oiltank, .rpt-ustnote {
+    border: 1px solid #999 !important; border-left: 4px solid #333 !important;
+  }
+  .rpt-oiltank-tag, .rpt-ustnote-tag {
     background: #fff !important; color: #000 !important;
     border: 1px solid #000; padding: 0 5px;
   }

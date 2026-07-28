@@ -4049,6 +4049,21 @@
   let _report = null;          // last report payload (for the reopen button)
   let _reportLayer = null;     // L.layerGroup holding the pin + 1/3/5-mile rings
 
+  // Filename-safe "Environmental Report for <address>" for the print/PDF title.
+  // Strips characters invalid in filenames, collapses whitespace, caps length.
+  function _reportPrintTitle() {
+    const addr = _report && _report.location && _report.location.matched_address;
+    if (!addr) return null;
+    const clean = String(addr)
+      .replace(/[\/\\:*?"<>|]/g, ' ')       // characters invalid in filenames
+      .replace(/[\x00-\x1f\x7f]/g, ' ')       // control characters
+      .replace(/\s+/g, ' ')                  // collapse whitespace
+      .trim()
+      .slice(0, 120)                         // reasonable length cap
+      .trim();
+    return clean ? `Environmental Report for ${clean}` : null;
+  }
+
   const _rEsc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -4079,8 +4094,17 @@
     // collapsed on screen but must appear in the printed / saved PDF. Force any
     // <details> in the report open for printing, then restore screen state.
     const _printOpened = [];
+    let _savedTitle = null;
+    // The browser derives the default PDF/print filename from document.title, so
+    // give it a meaningful name for the duration of the print only. The matched
+    // address lives client-side already (in the rendered report); this is a local
+    // save on the user's own machine and the title is restored on afterprint, so
+    // the address never lingers in the tab — and it is still never stored,
+    // logged, or placed in any URL server-side.
     window.addEventListener('beforeprint', () => {
       _printOpened.length = 0;
+      const t = _reportPrintTitle();
+      if (t) { _savedTitle = document.title; document.title = t; }
       const body = $('report-body');
       if (!body) return;
       body.querySelectorAll('details:not([open])').forEach((d) => {
@@ -4090,6 +4114,7 @@
     window.addEventListener('afterprint', () => {
       _printOpened.forEach((d) => { d.open = false; });
       _printOpened.length = 0;
+      if (_savedTitle != null) { document.title = _savedTitle; _savedTitle = null; }
     });
     $('report-reopen').addEventListener('click', () => {
       if (_report) { show($('report-modal')); hide($('report-reopen')); }
@@ -4315,7 +4340,7 @@
     if (layer === 'pfas') {
       const tag = it.kind === 'aoi'
         ? '<span class="rpt-tag" style="background:#e8873c;color:#0d1117">Area of Interest</span>'
-        : '<span class="rpt-tag" style="background:#e5484d;color:#fff">Confirmed site</span>';
+        : '<span class="rpt-tag" style="background:#c62f34;color:#fff">Confirmed site</span>';
       const wells = it.residential_wells
         ? ` · residential wells sampled: <b>${_rEsc(it.residential_wells)}</b>` : '';
       return `${tag}${it.site_type ? ' ' + _rEsc(it.site_type) : ''}${wells}`;
@@ -4332,7 +4357,7 @@
         ? ` · <b>${_rEsc(it.classification)}</b>${plain ? ` <span class="muted">(${_rEsc(plain)})</span>` : ''}` : '';
       const rel = it.open_release ? ` · ${it.open_release} open release${it.open_release > 1 ? 's' : ''}` : '';
       const approx = it.address_matched ? ' <span class="muted">(approx. location)</span>' : '';
-      return `<span class="rpt-tag" style="background:#e5484d;color:#fff">Open leaking release</span>`
+      return `<span class="rpt-tag" style="background:#c62f34;color:#fff">Open leaking release</span>`
         + `${_rEsc(it.address || '')}${rel}${cls}${approx}`;
     }
     if (layer === 'ust_other') {
