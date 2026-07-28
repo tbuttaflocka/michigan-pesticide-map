@@ -164,6 +164,49 @@
       'study of air toxics health risk that this layer draws on. It was renamed ' +
       'AirToxScreen starting with the 2019 assessment; the methods and caveats are ' +
       'the same — modeled estimates, not measurements.',
+    // ---- air toxics SOURCE categories (EPA AirToxScreen/NATA definitions) ----
+    'point source':
+      'A specific, identifiable facility with permitted emission points — a factory, ' +
+      'power plant, refinery, or incinerator — whose exact location EPA can pin to ' +
+      'coordinates. In the air toxics model this is the "industry" category.',
+    'nonpoint/area source':
+      'Many small, diffuse sources that are each too small or too numerous to list ' +
+      'individually but add up across an area: gas stations, dry cleaners, auto body ' +
+      'shops, residential wood burning, consumer and personal-care products, paints, ' +
+      'and solvents. EPA also calls these "area sources."',
+    'on-road traffic':
+      'Cars, trucks, buses, and motorcycles driven on roads and highways — the ' +
+      '"on-road mobile" source category in EPA\'s air toxics model.',
+    'non-road mobile':
+      'Engines that are not driven on roads: construction and farm equipment, lawn ' +
+      'and garden equipment, boats, trains, and aircraft. EPA\'s "non-road mobile" ' +
+      'source category.',
+    'fire emissions':
+      'Air toxics released by wildfires and by prescribed and agricultural burning — ' +
+      'the "fires" source category in the model.',
+    'biogenic emissions':
+      'Natural emissions from living things — mainly vegetation (trees and plants), ' +
+      'plus soils and microbes. EPA\'s "biogenic" category; these are natural, not ' +
+      'human-made.',
+    'secondary formation':
+      'Pollutants that are not released directly by anything, but FORM in the air ' +
+      'when other emitted chemicals react with sunlight and each other (EPA calls ' +
+      'this atmospheric transformation). Formaldehyde and acetaldehyde are the main ' +
+      'ones. Because they form from precursor chemicals emitted by traffic, industry, ' +
+      'solvents, and consumer products, a large "secondary" share still traces back ' +
+      'to those sources indirectly — it just can\'t be pinned to one smokestack or ' +
+      'tailpipe.',
+    'background concentration':
+      'Pollution already present in the air that EPA can\'t tie to any modeled local ' +
+      'source — including long-range transport from outside the region, natural ' +
+      'sources, and persistent chemicals lingering from past emissions. It is ' +
+      'averaged over broad areas, so a large "background" share means the risk is not ' +
+      'coming from nearby sources.',
+    'precursor emissions':
+      'The directly-emitted chemicals that later react in the air to form secondary ' +
+      'pollutants. Traffic, industry, solvents, and consumer products emit precursors ' +
+      'that sunlight and other reactions turn into pollutants like formaldehyde — so ' +
+      '"secondary" risk ultimately traces back to these emissions.',
     'heating oil tank':
       'A tank that stored fuel oil to heat a home — buried in the yard or aboveground ' +
       'in a basement. Common in Michigan houses built before natural-gas service ' +

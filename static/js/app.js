@@ -2601,6 +2601,39 @@
       ? `${state.airToxics.tracts.length} tracts · Michigan avg ${s.mi_avg} · national avg ${s.national_avg} in-a-million`
       : '—';
   }
+  // One-sentence clarifying clause for the "driven mostly by X" headline, so
+  // secondary/background aren't dead ends a layperson can't interpret.
+  function _atxDriverClause(key) {
+    if (key === 'secondary') {
+      return ' — which forms in the air from precursor emissions (traffic, industry, '
+        + 'solvents), rather than being released directly from any one source';
+    }
+    if (key === 'background') {
+      return ' — which reflects regional and long-range pollution already in the air, '
+        + 'not local sources';
+    }
+    return '';
+  }
+  // What the percentages actually mean — not obvious, and it changes how they read.
+  const ATX_SHARE_NOTE = 'Each bar is that category’s share of the total modeled '
+    + 'cancer risk in this tract — <b>not</b> share of emissions or pollution by weight. '
+    + 'Tap or hover a name to see what it means.';
+
+  // Render the eight source-category bars, labels tappable for a plain definition.
+  function _atxSourceBars(entries, ssum, meta) {
+    return entries.map(([k, v]) => {
+      const m = meta[k] || { label: k, color: '#8a94a3', gloss: '' };
+      const pct = Math.round(v / ssum * 100);
+      const pctTxt = (pct < 1 && v > 0) ? '<1%' : pct + '%';
+      const lbl = m.gloss
+        ? `<span class="gloss-term" data-gloss="${esc(m.gloss)}" tabindex="0">${esc(m.label)}</span>`
+        : esc(m.label);
+      return `<div class="atx-bar"><span class="atx-bar-l">${lbl}</span>`
+        + `<span class="atx-bar-t"><span style="width:${pct}%;background:${m.color}"></span></span>`
+        + `<span class="atx-bar-v">${pctTxt}</span></div>`;
+    }).join('');
+  }
+
   function airToxicsPopupHtml(t) {
     const L = state.airToxics.legend || {};
     const s = state.airToxics.stats || {};
@@ -2609,15 +2642,9 @@
     const srcMeta = {}; (L.sources || []).forEach((x) => { srcMeta[x.key] = x; });
     const src = t.src || {};
     const ssum = Object.values(src).reduce((a, b) => a + b, 0) || 1;
-    const sorted = Object.entries(src).sort((a, b) => b[1] - a[1]);
+    const sorted = Object.entries(src).sort((a, b) => b[1] - a[1]);  // all 8 shown
     const dom = sorted[0];
-    const bars = sorted.slice(0, 4).map(([k, v]) => {
-      const m = srcMeta[k] || { label: k, color: '#8a94a3' };
-      const pct = Math.round(v / ssum * 100);
-      return `<div class="atx-bar"><span class="atx-bar-l">${esc(m.label)}</span>`
-        + `<span class="atx-bar-t"><span style="width:${pct}%;background:${m.color}"></span></span>`
-        + `<span class="atx-bar-v">${pct}%</span></div>`;
-    }).join('');
+    const bars = _atxSourceBars(sorted, ssum, srcMeta);
     const polls = (t.poll || []).slice(0, 5)
       .map((p) => `${chemLink(p[0])}`).join(', ');
     const vsCls = vsMi > 0 ? 'hi' : vsMi < 0 ? 'lo' : '';
@@ -2627,7 +2654,8 @@
       <div class="atx-risk"><b>${t.r}</b> <span class="atx-unit">in a million</span>`
       + `${vsTxt ? ` <span class="atx-vs ${vsCls}">${vsTxt}</span>` : ''}</div>
       <div class="atx-meta">${esc(t.c || '')} County · Michigan avg ${mi} · national avg ${natl}</div>
-      ${dom ? `<div class="atx-driver">Risk here is driven mostly by <b>${esc((srcMeta[dom[0]] || {}).label || dom[0])}</b></div>` : ''}
+      ${dom ? `<div class="atx-driver">Risk here is driven mostly by <b>${esc((srcMeta[dom[0]] || {}).label || dom[0])}</b>${_atxDriverClause(dom[0])}.</div>` : ''}
+      <div class="atx-share-note">${ATX_SHARE_NOTE}</div>
       <div class="atx-bars">${bars}</div>
       ${polls ? `<div class="atx-poll"><span class="k">Top pollutants:</span> ${polls}</div>` : ''}
       <details class="atx-caveat">
@@ -4519,11 +4547,14 @@
     const vs = a.vs_mi_pct;
     const vsTxt = vs != null
       ? `${Math.abs(vs)}% ${vs >= 0 ? 'above' : 'below'} the Michigan average` : '';
-    const bars = (a.sources || []).slice(0, 4).map((s) => {
-      const pct = s.pct;
-      return `<div class="atx-bar"><span class="atx-bar-l">${_rEsc(s.label)}</span>`
-        + `<span class="atx-bar-t"><span style="width:${pct}%;background:${s.color || '#8a94a3'}"></span></span>`
-        + `<span class="atx-bar-v">${pct}%</span></div>`;
+    const bars = (a.sources || []).map((s) => {   // all eight categories
+      const pctTxt = (s.pct < 1 && s.risk > 0) ? '<1%' : s.pct + '%';
+      const lbl = s.gloss
+        ? `<span class="gloss-term" data-gloss="${_rEsc(s.gloss)}" tabindex="0">${_rEsc(s.label)}</span>`
+        : _rEsc(s.label);
+      return `<div class="atx-bar"><span class="atx-bar-l">${lbl}</span>`
+        + `<span class="atx-bar-t"><span style="width:${s.pct}%;background:${s.color || '#8a94a3'}"></span></span>`
+        + `<span class="atx-bar-v">${pctTxt}</span></div>`;
     }).join('');
     const polls = (a.pollutants || []).slice(0, 5).map((p) => chemLink(p[0])).join(', ');
     const caveats = (a.caveats || []).map((c) => `<li>${_rEsc(c)}</li>`).join('');
@@ -4532,7 +4563,8 @@
       <div class="rpt-warn">⚠ This is a <b>modeled screening estimate</b> for the surrounding census tract, <b>not measured air</b> at this property. EPA designed it to identify areas for further study, <b>not</b> to determine risk at a specific home or school. It assumes 70 years of continuous <b>outdoor</b> exposure; indoor air, where people spend most of their time, is not included.</div>
       <div class="rpt-airtox-fig"><b>${a.total_risk}</b> in a million${vsTxt ? ` <span class="rpt-vs ${vs >= 0 ? 'hi' : 'lo'}">${vsTxt}</span>` : ''}</div>
       <p class="muted small">Census tract ${_rEsc(a.tract_geoid)} · Michigan average ${a.mi_avg} · national average ${a.national_avg}. ${_rEsc(a.assessment)}.</p>
-      ${a.dominant ? `<p>Risk here is modeled as driven mostly by <b>${_rEsc(a.dominant.label)}</b> (${a.dominant.pct}% of the total).</p>` : ''}
+      ${a.dominant ? `<p>Risk here is modeled as driven mostly by <b>${_rEsc(a.dominant.label)}</b> (${a.dominant.pct}% of the total)${_atxDriverClause(a.dominant.key)}.</p>` : ''}
+      <div class="atx-share-note">${ATX_SHARE_NOTE}</div>
       <div class="atx-bars">${bars}</div>
       ${polls ? `<p class="small"><span class="muted">Top modeled pollutants:</span> ${polls}</p>` : ''}
       <ul class="rpt-airtox-caveats">${caveats}</ul>
@@ -5392,9 +5424,10 @@
     document.addEventListener('focusout', (e) => {
       if (e.target.closest(TIP_SELECTOR) === current) hide();
     });
-    // Tap an info icon on touch devices to toggle its definition.
+    // Tap an info icon — or any tappable gloss term (e.g. air-toxics source
+    // categories) — on touch devices to toggle its definition.
     document.addEventListener('click', (e) => {
-      const el = e.target.closest('.info-i');
+      const el = e.target.closest('.info-i, .gloss-term');
       if (!el) return;
       e.stopPropagation();
       if (current === el && tip.classList.contains('show')) { hide(); return; }

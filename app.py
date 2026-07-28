@@ -4049,6 +4049,7 @@ def _report_airtoxics(lat, lng, stats):
     src_list = sorted(
         ({"key": k, "label": airtoxics_data.SOURCE_META.get(k, {}).get("label", k),
           "color": airtoxics_data.SOURCE_META.get(k, {}).get("color", "#8a94a3"),
+          "gloss": airtoxics_data.SOURCE_META.get(k, {}).get("gloss", ""),
           "risk": round(v, 2), "pct": round(v / ssum * 100)}
          for k, v in sources.items()), key=lambda s: s["risk"], reverse=True)
     dominant = src_list[0] if src_list else None

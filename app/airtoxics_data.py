@@ -32,22 +32,25 @@ ONE assessment year and never trend it.
 from __future__ import annotations
 
 # The eight EPA source categories, in display order. Each maps a raw service
-# field -> (key, short label, color). These sum to the tract's total cancer risk.
-# Colors are chosen to read as "who is responsible": industrial reds/browns for
-# point & nonpoint, blues for mobile, greens for natural, grey for background.
+# field -> (key, short label, color, glossary key). These sum to the tract's total
+# cancer risk. Colors read as "who is responsible": industrial reds/browns for
+# point & nonpoint, blues for mobile, greens for natural, grey for background. The
+# glossary key ties each label to a plain-language definition (see glossary.js),
+# surfaced as a tap-friendly tooltip in the popup and the homebuyer report.
 SOURCE_CATEGORIES = [
-    ("PT_Stationary_Point", "point",      "Industry (point sources)",     "#c0553a"),
-    ("NP_Cancer_Risk",      "nonpoint",   "Area & nonpoint sources",      "#d98a3d"),
-    ("OR_Cancer_Risk",      "onroad",     "On-road traffic",              "#4f9dd6"),
-    ("NR_Cancer_Risk",      "nonroad",    "Non-road engines",             "#7b6cd9"),
-    ("Fire_Risk",           "fire",       "Fires",                        "#e0623c"),
-    ("Biogenics_Risk",      "biogenic",   "Biogenic (natural)",           "#4faa6b"),
-    ("Secondary_Risk",      "secondary",  "Secondary formation",          "#9aa63c"),
-    ("Background_Risk",     "background", "Background",                   "#8a94a3"),
+    ("PT_Stationary_Point", "point",      "Industry (point sources)",  "#c0553a", "point source"),
+    ("NP_Cancer_Risk",      "nonpoint",   "Area & nonpoint sources",   "#d98a3d", "nonpoint/area source"),
+    ("OR_Cancer_Risk",      "onroad",     "On-road traffic",           "#4f9dd6", "on-road traffic"),
+    ("NR_Cancer_Risk",      "nonroad",    "Non-road mobile",           "#7b6cd9", "non-road mobile"),
+    ("Fire_Risk",           "fire",       "Fires",                     "#e0623c", "fire emissions"),
+    ("Biogenics_Risk",      "biogenic",   "Biogenic (natural)",        "#4faa6b", "biogenic emissions"),
+    ("Secondary_Risk",      "secondary",  "Secondary formation",       "#9aa63c", "secondary formation"),
+    ("Background_Risk",     "background", "Background",                "#8a94a3", "background concentration"),
 ]
-SOURCE_FIELDS = [f for f, _k, _l, _c in SOURCE_CATEGORIES]
-SOURCE_KEY_BY_FIELD = {f: k for f, k, _l, _c in SOURCE_CATEGORIES}
-SOURCE_META = {k: {"label": lbl, "color": col} for _f, k, lbl, col in SOURCE_CATEGORIES}
+SOURCE_FIELDS = [f for f, _k, _l, _c, _g in SOURCE_CATEGORIES]
+SOURCE_KEY_BY_FIELD = {f: k for f, k, _l, _c, _g in SOURCE_CATEGORIES}
+SOURCE_META = {k: {"label": lbl, "color": col, "gloss": g}
+               for _f, k, lbl, col, g in SOURCE_CATEGORIES}
 
 # Sequential palette for the tract choropleth — deliberately COOL (indigo → teal →
 # green → chartreuse) so it is NOT confused with the warm red/orange scale the
@@ -146,8 +149,8 @@ SOURCE_URL = "https://www.epa.gov/AirToxScreen"
 def legend_payload(national_avg: float | None, mi_avg: float | None) -> dict:
     return {
         "metrics": [{"key": k, **v} for k, v in METRICS.items()],
-        "sources": [{"key": k, "label": lbl, "color": col}
-                    for _f, k, lbl, col in SOURCE_CATEGORIES],
+        "sources": [{"key": k, "label": lbl, "color": col, "gloss": g}
+                    for _f, k, lbl, col, g in SOURCE_CATEGORIES],
         "palette": RISK_PALETTE,
         "assessment": ASSESSMENT_LABEL,
         "national_avg": national_avg,
