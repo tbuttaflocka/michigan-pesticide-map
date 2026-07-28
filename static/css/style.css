@@ -1877,6 +1877,27 @@ a:hover { text-decoration: underline; }
 .ust-popup .ust-type.leaking_open { color: #fff; }
 .ust-popup h4 { margin: 2px 0 4px; font-size: 14px; color: var(--text); }
 .ust-popup .ust-meta { color: var(--muted); font-size: 11.5px; }
+/* Plain-language lead — visible by default, the first thing a skimmer reads */
+.ust-popup .ust-plain {
+  margin: 5px 0 6px; line-height: 1.45; font-size: 12.5px; color: var(--text);
+  border-left: 3px solid var(--accent-2); padding-left: 8px;
+}
+.ust-popup .ust-gloss { color: var(--muted); font-weight: 400; font-size: 11px; }
+/* Progressive-disclosure detail: contaminants + exposure pathways */
+.ust-popup .ust-more { margin: 7px 0 2px; border-top: 1px solid var(--line); padding-top: 5px; }
+.ust-popup .ust-more > summary {
+  cursor: pointer; list-style: none; color: var(--accent-2); font-weight: 600; font-size: 12px;
+}
+.ust-popup .ust-more > summary::-webkit-details-marker { display: none; }
+.ust-popup .ust-more > summary::after { content: ' ▾'; font-size: 9px; }
+.ust-popup .ust-more[open] > summary::after { content: ' ▴'; }
+.ust-popup .ust-more-body { margin-top: 6px; }
+.ust-popup .ust-sub { font-weight: 700; font-size: 11.5px; margin: 6px 0 2px; color: var(--text); }
+.ust-popup .ust-fine { color: var(--muted); font-size: 11px; line-height: 1.45; margin: 2px 0; }
+.ust-popup .ust-chem-list, .ust-popup .ust-path-list {
+  margin: 3px 0 4px; padding-left: 16px; font-size: 11.5px; line-height: 1.45;
+}
+.ust-popup .ust-chem-list li, .ust-popup .ust-path-list li { margin: 3px 0; }
 .ust-popup .ust-body { margin: 6px 0; line-height: 1.5; font-size: 12px; }
 .ust-popup .ust-body div { margin: 1px 0; }
 .ust-popup .ust-body .k { color: var(--muted); font-weight: 700; }
@@ -2045,6 +2066,35 @@ a:hover { text-decoration: underline; }
 .rpt-oiltank-actions li { margin: 4px 0; }
 .rpt-oiltank-src { color: var(--muted); font-size: 11.5px; }
 .rpt-oiltank-src a { color: var(--link); }
+
+/* Plain-language explainer for the leaking-tank section of the report — amber
+   "worth understanding" treatment (a real nearby finding), expanded when an open
+   release is close. Prints expanded via the report's beforeprint handler. */
+.rpt-ustnote {
+  margin: 8px 0 12px; border: 1px solid rgba(227,179,65,.5);
+  border-left: 4px solid #e3b341; border-radius: 8px; background: rgba(227,179,65,.09);
+}
+.rpt-ustnote > summary {
+  cursor: pointer; list-style: none; padding: 9px 12px;
+  font-weight: 600; font-size: 13px; line-height: 1.45; color: var(--text);
+}
+.rpt-ustnote > summary::-webkit-details-marker { display: none; }
+.rpt-ustnote > summary::after { content: ' ▾'; color: #e3b341; font-size: 11px; font-weight: 700; }
+.rpt-ustnote[open] > summary::after { content: ' ▴'; }
+.rpt-ustnote-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px;
+  background: #e3b341; color: #0d1117; font-size: 10px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px;
+}
+.rpt-ustnote-body { padding: 0 13px 11px; font-size: 12.3px; line-height: 1.5; }
+.rpt-ustnote-body p { margin: 6px 0; }
+.rpt-ustnote-body .ust-sub { font-weight: 700; font-size: 12px; margin: 8px 0 2px; }
+.rpt-ustnote-body .ust-fine { color: var(--muted); font-size: 11.5px; margin: 2px 0; }
+.rpt-ustnote-body .ust-chem-list { margin: 3px 0 4px; padding-left: 18px; font-size: 11.8px; }
+.rpt-ustnote-body .ust-chem-list li { margin: 3px 0; }
+.rpt-ustnote-actions { margin: 4px 0 6px; padding-left: 18px; }
+.rpt-ustnote-actions li { margin: 4px 0; }
+.rpt-ustnote-do { margin-bottom: 2px; }
 
 .rpt-focus {
   display: inline-block; margin-top: 5px; cursor: pointer; font: inherit;

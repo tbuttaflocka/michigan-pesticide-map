@@ -100,7 +100,31 @@
     'release closure':
       'The point at which EGLE agrees a leaking-tank release has been addressed to ' +
       'meet the applicable cleanup criteria and no further corrective action is ' +
-      'required. A "closed" release has been remediated; an "open" one has not.',
+      'required. A "closed" release has been remediated; an "open" one has not. ' +
+      'Closure does not always mean every trace was removed — some sites close with ' +
+      'residual contamination left in place under land-use restrictions.',
+    'BTEX':
+      'Benzene, toluene, ethylbenzene, and xylenes — four light petroleum chemicals ' +
+      'that are the standard markers of a fuel release. Benzene is the biggest health ' +
+      'concern (a known human carcinogen). Because they dissolve and move in ' +
+      'groundwater, BTEX is what testing usually looks for after a tank leak.',
+    'MTBE':
+      'Methyl tert-butyl ether — a gasoline additive used from the late 1970s into ' +
+      'the early 2000s to boost octane and cut emissions. It is extremely mobile in ' +
+      'groundwater (it travels farther and faster than most fuel chemicals) and can ' +
+      'be tasted or smelled at very low concentrations, so it often shows up first in ' +
+      'a contaminated well.',
+    'vapor intrusion':
+      'When contamination in soil or groundwater gives off vapors that seep up through ' +
+      'the ground and into the basements and crawlspaces of buildings, affecting the ' +
+      'indoor air people breathe. It matters because it can happen even when a home is ' +
+      'on municipal water and no one ever contacts the soil — which is why being close ' +
+      'to a petroleum release is a concern beyond just drinking water.',
+    'PAH':
+      'Polycyclic aromatic hydrocarbons — a family of chemicals formed when fuel and ' +
+      'other organic material burn or, in this context, present in heavier petroleum. ' +
+      'Naphthalene is the most common one seen at fuel-tank releases. Several PAHs are ' +
+      'considered probable human carcinogens.',
     'RIDE':
       'EGLE\'s Remediation Information Data Exchange — the state\'s public mapping ' +
       'system for contaminated sites, including leaking-tank releases, with per-site ' +

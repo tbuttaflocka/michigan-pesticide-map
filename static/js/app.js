@@ -2713,8 +2713,89 @@
       : 'loading…';
   }
   function _ustProgramLabel(pg) {
-    return pg === 213 ? 'Part 213 — leaking UST (EGLE corrective action)'
-      : pg === 211 ? 'Part 211 — licensed UST (LARA)' : '';
+    return pg === 213
+      ? 'Part 213 — a confirmed leaking tank under state cleanup oversight'
+      : pg === 211
+      ? 'Part 211 — a licensed (registered) tank, not a reported leak'
+      : '';
+  }
+
+  // ----- plain-language UST helpers (shared by the popup and the report) -----
+
+  // A one/two-sentence explanation of what this actually is, by category. Visible
+  // by default so a skimmer immediately gets "buried fuel tank leaked here".
+  function _ustPlainLead(cat) {
+    if (cat === 'leaking_open') {
+      return 'A buried fuel tank at this site <b>leaked</b>, and the contamination is '
+        + 'still being investigated or cleaned up. Underground storage tanks sit at gas '
+        + 'stations, truck stops, auto shops, and industrial sites — when a tank or its '
+        + 'underground piping corrodes or fails, fuel escapes into the soil and can reach '
+        + 'groundwater.';
+    }
+    if (cat === 'leaking_closed') {
+      return 'A buried fuel tank here <b>leaked in the past</b>, and the state has since '
+        + 'determined the site met its cleanup criteria and closed the case. Note: '
+        + '"closed" does <b>not</b> always mean all contamination was removed — some sites '
+        + 'close with residual contamination left in place under land-use restrictions.';
+    }
+    return 'This is a <b>registered fuel tank with no reported leak</b> — most gas stations '
+      + 'have these. It is <b>not</b> a documented contamination site.';
+  }
+
+  // EGLE Class 1–5 -> plain meaning. EGLE-sourced: the class maps 1:1 to the
+  // dataset's own risk_condition text (Class 1 = immediate … Class 5 = closed),
+  // confirmed against EGLE policy RRD-21. We show the code + a plain phrase.
+  const UST_CLASS_PLAIN = {
+    'Class 1': 'the state considers the risk present and immediate',
+    'Class 2': 'risks are present and need action in the short term',
+    'Class 3': 'risks are present and need action in the long term',
+    'Class 4': 'risks are being controlled (interim / long-term state-funded action)',
+    'Class 5': 'cleanup criteria were met — closure report approved',
+    'No Longer A Facility': 'no longer an active facility',
+    'Unknown': 'not yet determined',
+  };
+  function _ustClassPlain(cc) {
+    if (!cc) return '';
+    return UST_CLASS_PLAIN[cc] || '';
+  }
+
+  // "What typically leaks" — labeled explicitly as what petroleum releases usually
+  // involve, NOT a site-specific measurement (EGLE carries no per-site chemical
+  // list). Same honesty pattern as the golf-course turf chemicals. Chemical names
+  // link through to the shared PubChem chemical popups.
+  function _ustContaminantsHtml() {
+    const c = (n) => chemLink(n);
+    return `<p class="ust-sub">What typically leaks from a petroleum tank</p>`
+      + `<p class="ust-fine">These tanks usually hold gasoline, diesel, used/waste oil, or `
+      + `heating oil. When petroleum leaks, the substances of concern are usually the ones `
+      + `below — this is <b>what such releases typically involve, not a measurement at this `
+      + `specific site</b> (EGLE's dataset carries no per-site chemical list):</p>`
+      + `<ul class="ust-chem-list">`
+      + `<li>${c('Benzene')} — the biggest concern; a known human carcinogen linked to leukemia</li>`
+      + `<li>${c('Toluene')}, ${c('Ethylbenzene')}, and ${c('Xylenes')} — with benzene these are `
+      + `<span data-gloss="BTEX">BTEX</span>, the standard petroleum-contamination markers</li>`
+      + `<li>${c('MTBE')} — a fuel additive used from the late 1970s into the early 2000s; `
+      + `extremely mobile in groundwater and detectable by taste and odor at very low levels</li>`
+      + `<li>${c('Naphthalene')} and other <span data-gloss="PAH">PAHs</span></li>`
+      + `<li>${c('Lead')} — at sites with releases from the leaded-gasoline era (phased out `
+      + `for on-road fuel by 1996)</li>`
+      + `<li>Used-oil tanks may also involve heavy metals and sometimes chlorinated solvents</li>`
+      + `</ul>`;
+  }
+
+  // The three exposure pathways in plain language — vapor intrusion is the one
+  // people don't know about, so it's spelled out.
+  function _ustPathwaysHtml() {
+    return `<p class="ust-sub">How a leak could actually reach people</p>`
+      + `<ul class="ust-path-list">`
+      + `<li><b>Drinking water</b> — contamination migrating into groundwater used by private `
+      + `wells, or (less commonly) affecting a public water supply.</li>`
+      + `<li><b>Vapor intrusion</b> — petroleum <span data-gloss="vapor intrusion">vapors</span> `
+      + `rising up through soil into the basements and crawlspaces of nearby buildings, `
+      + `affecting indoor air. This can happen <b>even if you're on municipal water and never `
+      + `touch the soil</b> — which is why being close to a release matters beyond just water.</li>`
+      + `<li><b>Direct soil contact</b> — mainly on, or immediately next to, the site itself.</li>`
+      + `</ul>`;
   }
   function _ustAccuracyNote(f) {
     if (f.am) return 'This point was located by address matching, not GPS — its position is approximate (may be off by a parcel or block).';
@@ -2728,16 +2809,35 @@
     const isOpen = f.c === 'leaking_open';
     const prog = _ustProgramLabel(f.pg);
     const acc = _ustAccuracyNote(f);
+
+    // Regulatory detail, now with short inline explanations of the jargon.
     let body = '';
     if (isLeaking) {
       const bits = [];
-      if (f.rs) bits.push(`<div><span class="k">Release status:</span> <b>${esc(f.rs)}</b>`
-        + `${isOpen && f.orl ? ` · ${f.orl} open` : ''}${f.cr ? ` · ${f.cr} closed` : ''}</div>`);
-      if (f.cc) bits.push(`<div><span class="k">EGLE classification:</span> ${esc(f.cc)}`
-        + `${f.rk ? ` · ${esc(f.rk)}` : ''}</div>`);
+      if (f.rs) {
+        const relGloss = /open/i.test(f.rs)
+          ? ' <span class="ust-gloss">— cleanup is not yet finished</span>'
+          : /closed/i.test(f.rs)
+          ? ' <span class="ust-gloss">— the state agreed cleanup criteria were met</span>' : '';
+        bits.push(`<div><span class="k">Release status:</span> <b>${esc(f.rs)}</b>`
+          + `${isOpen && f.orl ? ` · ${f.orl} open` : ''}${f.cr ? ` · ${f.cr} closed` : ''}${relGloss}</div>`);
+      }
+      if (f.cc) {
+        const plain = _ustClassPlain(f.cc);
+        const egle = f.rk ? ` <span class="ust-gloss">(EGLE: ${esc(f.rk)})</span>` : '';
+        bits.push(`<div><span class="k">Site classification:</span> <b>${esc(f.cc)}</b>`
+          + `${plain ? ` — ${esc(plain)}` : ''}${egle}</div>`);
+      }
+      // "corrective action" gloss where the process is named.
+      if (isOpen) {
+        bits.push('<div class="ust-gloss">The site is in <b>corrective action</b> — the '
+          + 'required investigation and cleanup the responsible party must carry out until '
+          + 'the release meets closure criteria.</div>');
+      }
       body = bits.join('');
     } else {
-      body = '<div class="ust-note">A <b>licensed</b> tank with <b>no reported release</b> — this is a registered storage tank, <b>not</b> a documented contaminated site.</div>';
+      // Licensed: the plain lead above already explains it — don't repeat.
+      body = '';
     }
     const tanks = (f.tt != null || f.at != null)
       ? `<div><span class="k">Tanks:</span> ${f.tt != null ? f.tt + ' total' : ''}${f.at != null ? ` · ${f.at} active` : ''}</div>` : '';
@@ -2747,12 +2847,20 @@
       ? `<button type="button" class="ust-xlink" data-lf-focus="contam" data-lat="${f.lat}" data-lng="${f.lng}">☣ Also a contamination / Superfund site · show on map →</button>` : '';
     const ride = (state.ust.legend && state.ust.legend.ride_url)
       ? `<a class="ust-cta" href="${esc(state.ust.legend.ride_url)}" target="_blank" rel="noopener">EGLE RIDE Mapper${f.id ? ` (facility ${esc(f.id)})` : ''} →</a>` : '';
+    // Deep detail (contaminants + pathways) tucked behind progressive disclosure —
+    // only for leaking sites, where "what could reach me" actually matters.
+    const more = isLeaking
+      ? `<details class="ust-more"><summary>What leaks from a fuel tank, and how it could reach you</summary>`
+        + `<div class="ust-more-body">${_ustContaminantsHtml()}${_ustPathwaysHtml()}</div></details>`
+      : '';
     return `<div class="ust-popup">
       <div class="ust-type ${f.c}" style="background:${meta.color}">${meta.glyph} ${esc(meta.short || meta.label)}</div>
       <h4>${esc(f.n)}</h4>
+      <div class="ust-plain">${_ustPlainLead(f.c)}</div>
       ${prog ? `<div class="ust-meta">${esc(prog)}</div>` : ''}
       ${loc ? `<div class="ust-meta">${esc(loc)}${f.co ? ' · ' + esc(f.co) + ' Co.' : ''}</div>` : (f.co ? `<div class="ust-meta">${esc(f.co)} County</div>` : '')}
       <div class="ust-body">${body}${tanks}${pm}${dist}</div>
+      ${more}
       ${xlink ? `<div class="ust-xlinks">${xlink}</div>` : ''}
       ${acc ? `<div class="ust-accuracy">📍 ${esc(acc)}</div>` : ''}
       ${ride}
@@ -4191,7 +4299,9 @@
         + `${it.sample_date ? ` <span class="muted">(${_rEsc(it.sample_date)})</span>` : ''}`;
     }
     if (layer === 'ust_open') {
-      const cls = it.classification ? ` · ${_rEsc(it.classification)}` : '';
+      const plain = _ustClassPlain(it.classification);
+      const cls = it.classification
+        ? ` · <b>${_rEsc(it.classification)}</b>${plain ? ` <span class="muted">(${_rEsc(plain)})</span>` : ''}` : '';
       const rel = it.open_release ? ` · ${it.open_release} open release${it.open_release > 1 ? 's' : ''}` : '';
       const approx = it.address_matched ? ' <span class="muted">(approx. location)</span>' : '';
       return `<span class="rpt-tag" style="background:#e5484d;color:#fff">Open leaking release</span>`
@@ -4227,6 +4337,48 @@
     }
     return `<div class="rpt-layer"><div class="rpt-layer-h"><span>${icon} ${label}</span>`
       + `${_ringChips(block.rings)}</div>${body}</div>`;
+  }
+
+  // Plain-language explainer for the UST section of the report: what a leaking
+  // release nearby actually means, the vapor-intrusion pathway (the one people
+  // don't know about), and concrete next steps — framed as "what this is and what
+  // to ask about", not alarmist. Expanded by default when an OPEN release is
+  // mapped nearby; collapsed context otherwise.
+  function _ustReportNote(near) {
+    const open = near && near.ust_open;
+    const other = near && near.ust_other;
+    const hasOpen = !!(open && open.within && open.within.length);
+    const hasAny = hasOpen || (open && open.nearest)
+      || (other && ((other.within && other.within.length) || other.nearest));
+    if (!hasAny) return '';
+    const head = hasOpen
+      ? 'A leaking storage-tank release is mapped near this address — here’s what that means'
+      : 'About the storage tanks near this address';
+    return `<details class="rpt-ustnote"${hasOpen ? ' open' : ''}>
+      <summary><span class="rpt-ustnote-tag">${hasOpen ? 'Worth understanding' : 'Context'}</span> ${head}</summary>
+      <div class="rpt-ustnote-body">
+        <p>${hasOpen
+          ? 'An <b>open</b> release means a buried fuel tank leaked and cleanup is <b>not finished</b>. '
+            + 'Underground tanks are common at gas stations, auto shops, and industrial sites — when one '
+            + 'leaks, petroleum enters the soil and can spread through groundwater.'
+          : 'These are buried fuel tanks. A <b>closed</b> release leaked in the past and the state agreed '
+            + 'cleanup criteria were met (though some sites close with residual contamination left under '
+            + 'restrictions); a <b>licensed</b> tank has no reported leak.'}</p>
+        <p><b>Why proximity matters — vapor intrusion.</b> Beyond drinking water, petroleum `
+      + `<span data-gloss="vapor intrusion">vapors</span> can rise through soil into the basements and `
+      + `crawlspaces of nearby buildings and affect indoor air — <b>even if the home is on municipal `
+      + `water and no one touches the soil</b>. That is why a leaking release close to a property is worth `
+      + `understanding, not just a private-well concern.</p>
+        ${_ustContaminantsHtml()}
+        <p class="rpt-ustnote-do"><b>What you can do:</b></p>
+        <ul class="rpt-ustnote-actions">
+          <li>Ask whether a <b>vapor intrusion</b> assessment has been done for the property or the release site.</li>
+          <li>If the home is on a <b>private well</b>, ask about — or arrange — water testing for petroleum compounds like ${chemLink('Benzene')} and ${chemLink('MTBE')}.</li>
+          <li>Consult an <b>environmental professional</b> for a property-specific evaluation — this map shows the release location, not the conditions at any one house.</li>
+        </ul>
+        <p class="rpt-note muted small">Source: Michigan EGLE. Distances are straight-line from the geocoded point; the actual plume direction and extent depend on site-specific geology and groundwater flow.</p>
+      </div>
+    </details>`;
   }
 
   // Prominent blind-spot caveat for the UST section: EGLE's tank data covers
@@ -4413,6 +4565,7 @@
         'No open leaking underground storage-tank releases within 5 miles.')
       + _nearBlock('ust_other', 'Other storage tanks (closed releases & licensed)', '⛽', near.ust_other,
         'No closed-release or licensed storage tanks within 5 miles.')
+      + _ustReportNote(near)
       + _heatingOilTankNote()
       + _nearBlock('pfas', 'PFAS sites & Areas of Interest', '⚠', near.pfas,
         'No PFAS sites or Areas of Interest within 5 miles — but investigation is ongoing, so this does not mean absence of PFAS.')
