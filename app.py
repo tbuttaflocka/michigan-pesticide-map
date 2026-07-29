@@ -31,6 +31,7 @@ from app import ust_data
 from app import spraying_programs
 from app import coal_ash_data
 from app import tri_reference
+from app import pfas_chem
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
@@ -3238,9 +3239,36 @@ def api_chemical():
     if not cas and chem and chem["cas"]:
         cas = chem["cas"]
 
+    # --- PFAS reference (code-side; app/pfas_chem.py) --------------------- #
+    # PFAS are labelled by abbreviation (PFOS, GenX, …) that the PubChem cache
+    # doesn't hold. Resolve the abbreviation to a full identity + drinking-water
+    # limits so the shared popup can explain it — no DB republish required.
+    display_name = name.title()
+    regulatory = None
+    pref = pfas_chem.lookup(name)
+    if pref:
+        pfas = True
+        display_name = pref["display"]
+        cas = cas or pref.get("cas")
+        regulatory = pref.get("regulatory")
+        if not pubchem:
+            cid = pref.get("cid")
+            pubchem = {
+                "cid": cid,
+                "description": pref.get("description"),
+                "description_source": "EPA / EGLE",
+                "molecular_formula": pref.get("formula"),
+                "molecular_weight": None,
+                "iupac_name": pref.get("name"),
+                "synonyms": [],
+                # None when no CID — the frontend then omits the PubChem link but
+                # still shows the name, CAS, description and limits (graceful).
+                "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}" if cid else None,
+            }
+
     return jsonify({
         "found": True,
-        "name": name.title(),
+        "name": display_name,
         "cas": cas,
         "carcinogen": carcinogen,
         "pfas": pfas,
@@ -3250,6 +3278,7 @@ def api_chemical():
         "tri": tri,
         "water": water,
         "pubchem": pubchem,
+        "regulatory": regulatory,
         "profile": profile,
     })
 

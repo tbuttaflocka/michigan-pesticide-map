@@ -2578,7 +2578,14 @@
     }
     if (f.kind === 'surface_water') {
       const det = p.detected || {};
-      const chips = Object.keys(det).map((k) => `<span class="pfas-chip">${esc(k)} ${det[k]} ppt</span>`).join(' ');
+      // Each compound chip is a clickable chem-link → the shared chemical-info
+      // popup (PubChem-enriched; PFAS abbreviations resolved server-side via
+      // app/pfas_chem.py). The delegated .chem-link handler stops propagation, so
+      // opening it never disturbs this surface-water popup's own state.
+      const chips = Object.keys(det).map((k) =>
+        `<span class="pfas-chip chem-link" role="button" tabindex="0" `
+        + `data-chem="${encodeURIComponent(k)}" title="What is ${esc(k)}? — tap for details">`
+        + `${esc(k)} ${det[k]} ppt</span>`).join(' ');
       return `<div class="pfas-popup">
         <div class="pfas-type" style="background:${f.color}">${f.glyph} ${esc(f.kind_label)}</div>
         <h4>${esc(f.name)}</h4>
@@ -3655,8 +3662,33 @@
     // Prefer PubChem's real plain-language description; fall back to the curated
     // hazard blurb if PubChem had none.
     const descText = (pc && pc.description) ? pc.description : (p.what || '');
-    const pubLink = pc
+    const pubLink = (pc && pc.cid && pc.url)
       ? `<a href="${pc.url}" target="_blank" rel="noopener">Full profile on PubChem — CID ${pc.cid} ↗</a>` : '';
+
+    // PFAS drinking-water limits (2024 EPA rule + Michigan). Labelled honestly as
+    // a DRINKING-WATER standard — a surface-water detection is shown for context,
+    // not as a violation of a drinking-water limit (different medium).
+    let regBlock = '';
+    const reg = d.regulatory;
+    if (reg) {
+      const bits = [];
+      if (reg.epa_mcl_ppt != null) {
+        bits.push(`U.S. EPA drinking-water limit (MCL): <b>${reg.epa_mcl_ppt} ppt</b> (2024)`
+          + (reg.hazard_index ? ', and part of EPA’s Hazard Index for mixtures' : ''));
+      } else if (reg.hazard_index) {
+        bits.push('No individual EPA drinking-water limit; included in EPA’s 2024 <b>Hazard Index</b> for PFAS mixtures');
+      } else {
+        bits.push('No individual U.S. EPA drinking-water limit under the 2024 PFAS rule');
+      }
+      if (reg.mi_mcl_ppt != null) {
+        bits.push(`Michigan limit: <b>${Number(reg.mi_mcl_ppt).toLocaleString()} ppt</b>`);
+      }
+      regBlock =
+        '<div class="tci-sub2">Drinking-water limits</div>'
+        + `<div class="tci-reg">${bits.join(' · ')}</div>`
+        + '<div class="tci-reg-note">These are <b>drinking-water</b> standards (ppt = parts per trillion). '
+        + 'A surface-water detection is shown for context — it is not a drinking-water violation.</div>';
+    }
     const srcBits = ['Hazard classes: EPA / IARC', 'Pesticide use: USGS', 'Industrial releases: EPA TRI'];
     if (d.water) srcBits.push('Water monitoring: Water Quality Portal (USGS/EPA)');
     if (pc) srcBits.unshift('Description &amp; properties: PubChem (NCBI)'
@@ -3670,6 +3702,7 @@
       ${chipRow}
       ${syn}
       ${descText ? `<p class="tci-what">${descText}</p>` : ''}
+      ${regBlock}
       ${line('Used for', p.uses)}
       ${line('Health', p.health)}
       ${p.carcinogen ? `<div class="tci-carc">⚠ ${p.carcinogen}</div>` : ''}

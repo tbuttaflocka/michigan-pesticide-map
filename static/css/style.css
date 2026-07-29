@@ -1992,6 +1992,12 @@ a:hover { text-decoration: underline; }
   display: inline-block; background: rgba(59,130,196,.16); color: #9ecbf0;
   border-radius: 9px; padding: 1px 8px; margin: 2px 3px 0 0; font-size: 11px; font-weight: 600;
 }
+/* clickable compound chip: keep the chip look + the dotted-underline "tap me" cue */
+.pfas-popup .pfas-chip.chem-link { color: #9ecbf0; text-underline-offset: 2px; }
+.pfas-popup .pfas-chip.chem-link:hover,
+.pfas-popup .pfas-chip.chem-link:focus-visible {
+  background: rgba(59,130,196,.32); color: #d3ebff;
+}
 .pfas-popup .pfas-xlinks { display: flex; flex-direction: column; gap: 5px; margin: 7px 0; }
 .pfas-popup .pfas-xlink {
   text-align: left; width: 100%; cursor: pointer; font: inherit; font-size: 11.5px;
@@ -2502,6 +2508,13 @@ a:hover { text-decoration: underline; }
 .tci-head h3 { margin: 0 0 3px; font-size: 17px; color: var(--text); }
 .tci-sub { color: var(--muted); font-size: 12px; }
 .tci-what { margin: 8px 0; line-height: 1.55; font-size: 13px; }
+/* PFAS drinking-water limits block in the chemical-info popup */
+.tci-reg {
+  font-size: 12.5px; line-height: 1.5; color: var(--text);
+  background: rgba(59,130,196,.10); border: 1px solid rgba(59,130,196,.28);
+  border-left: 3px solid var(--link); border-radius: 8px; padding: 7px 10px; margin: 2px 0;
+}
+.tci-reg-note { font-size: 10.8px; color: var(--muted); line-height: 1.4; margin: 4px 0 2px; }
 .tci-row { display: flex; gap: 8px; margin: 5px 0; font-size: 12.5px; line-height: 1.5; }
 .tci-k { flex: none; width: 110px; color: var(--muted); font-weight: 600; }
 .tci-v { color: var(--text); }
