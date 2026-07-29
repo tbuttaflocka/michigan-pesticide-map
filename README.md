@@ -177,6 +177,20 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
   showing the PFAS markers). Uses short parameter keys so links stay short
   (~55–75 chars), works on desktop and mobile, and encodes **view state only**
   (layers / location / zoom) — never any address entered in the homebuyer report.
+- **Statewide overview** — the summary panel opens with a scannable grid of
+  headline counts across **every** pollution type the app tracks — pesticide
+  pounds applied, TRI facilities + pounds released, Superfund/contamination
+  sites, open leaking storage-tank releases (~6,400), landfills, PFAS sites,
+  coal-ash sites, golf courses, water-monitoring sites (with detection/exceedance
+  counts), and average air-toxics cancer risk. Every number is computed live from
+  the loaded data (so it never goes stale or contradicts a layer), labelled with
+  its unit/year, carries a source tooltip, and is **tap-to-navigate** (turns on
+  that layer or selects that choropleth). A few honest, sourced cross-layer
+  highlights (most open leaking-tank releases by county, highest PFAS in surface
+  water, largest single TRI releaser) give a sense of scale, with medium/standard
+  labelled correctly. Known undercounts (TRI self-reporting, LUST excluding
+  unregistered tanks, the growing PFAS list) are flagged. The pesticide detail
+  (top counties, top compounds, trends) is still here, just demoted below.
 - **Heat-map view** — county choropleth, layer toggles (category / specific compound),
   Low/Avg/High estimate switch, total-vs-kg/mi² normalization, time slider
   (1992–2012) with play animation, click-for-county-detail with charts.

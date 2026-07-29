@@ -759,6 +759,186 @@ def api_statewide():
     })
 
 
+def _ov_scalar(cur, sql, params=(), default=None):
+    """Run a scalar query, tolerating a missing table/column (older DB) by
+    returning `default` — so the overview never 500s on a partial database."""
+    try:
+        row = cur.execute(sql, params).fetchone()
+    except sqlite3.OperationalError:
+        return default
+    return row[0] if row and row[0] is not None else default
+
+
+def _ov_row(cur, sql, params=()):
+    try:
+        return cur.execute(sql, params).fetchone()
+    except sqlite3.OperationalError:
+        return None
+
+
+def _compact_lbs(n) -> str | None:
+    """Compact pounds label matching the app's fmtLbs style (37.9M lbs)."""
+    if n is None:
+        return None
+    n = float(n)
+    if abs(n) >= 1e9:
+        return f"{n/1e9:.1f}B lbs"
+    if abs(n) >= 1e6:
+        return f"{n/1e6:.1f}M lbs"
+    if abs(n) >= 1e3:
+        return f"{n/1e3:.1f}K lbs"
+    return f"{n:,.0f} lbs"
+
+
+@app.route("/api/overview")
+def api_overview():
+    """Statewide snapshot across EVERY pollution layer the app tracks — computed
+    live from the loaded data so the headline counts never go stale or contradict
+    the layers. Powers the statewide overview grid + a few honest cross-layer
+    callouts. Year-independent (except the pesticide/TRI snapshots, which use the
+    latest available year and say so)."""
+    conn = db()
+    cur = conn.cursor()
+
+    tri_year = _tri_latest_year(conn)
+    tri_ct = _ov_scalar(cur, "SELECT COUNT(*) FROM tri_facility", (), 0)
+    tri_lbs = _ov_scalar(cur, "SELECT SUM(total_lbs) FROM tri_release WHERE year = ?",
+                         (tri_year,), 0) if tri_year else 0
+
+    contam_ct = _ov_scalar(cur, "SELECT COUNT(*) FROM contamination_sites", (), 0)
+    ust_open = _ov_scalar(cur, "SELECT COUNT(*) FROM ust_sites WHERE category='leaking_open'", (), 0)
+    landfill_ct = _ov_scalar(cur, "SELECT COUNT(*) FROM landfill_sites", (), 0)
+    pfas_ct = _ov_scalar(cur, "SELECT COUNT(*) FROM pfas_features WHERE kind IN ('site','aoi')", (), 0)
+    golf_ct = _ov_scalar(cur, "SELECT COUNT(*) FROM golf_courses", (), 0)
+    coal_ct = len(coal_ash_data.COAL_ASH_SITES)
+
+    water_ct = _ov_scalar(cur, "SELECT COUNT(*) FROM water_quality_sites", (), 0)
+    water_det = _ov_scalar(cur, "SELECT COUNT(DISTINCT site_id) FROM water_quality_results WHERE detected=1", (), 0)
+    water_exc = _ov_scalar(cur, "SELECT COUNT(DISTINCT site_id) FROM water_quality_results WHERE exceeds_mcl=1", (), 0)
+
+    atx_avg = _ov_scalar(cur, "SELECT value FROM airtoxics_stats WHERE key='mi_avg'")
+    atx_top = _ov_row(cur, "SELECT total_risk, county_name FROM airtoxics_tracts "
+                           "ORDER BY total_risk DESC LIMIT 1")
+
+    col = estimate_column("avg")
+    pest_year = _ov_scalar(cur, "SELECT MAX(year) FROM pesticide_use")
+    pest_kg = _ov_scalar(cur, f"SELECT SUM({col}) FROM pesticide_use WHERE year = ?",
+                         (pest_year,), 0) if pest_year else 0
+    pest_lbs = (pest_kg or 0) * KG_TO_LB
+
+    def _num(n):
+        return f"{int(n):,}" if n is not None else "—"
+
+    def _compact(n):
+        if n is None:
+            return "—"
+        n = float(n)
+        if abs(n) >= 1e6:
+            return f"{n/1e6:.1f}M"
+        if abs(n) >= 1e4:
+            return f"{n/1e3:.0f}K"
+        return f"{int(round(n)):,}"
+
+    def card(key, value, value_display, label, sub, tip, action, undercount=None, year=None):
+        return {"key": key, "value": value, "value_display": value_display,
+                "label": label, "sub": sub, "tip": tip, "action": action,
+                "undercount": undercount, "year": year}
+
+    totals = [
+        card("pesticides", round(pest_lbs), _compact(pest_lbs),
+             "lbs pesticide applied", (str(pest_year) if pest_year else None),
+             "Agricultural pesticide applied statewide (USGS NAWQA EPest, latest year). "
+             "A modeled estimate of crop-protection use only — excludes lawn, golf and aquatic use.",
+             {"type": "choropleth", "value": "pesticide"}, year=pest_year),
+        card("tri", tri_ct, _num(tri_ct), "TRI industrial facilities",
+             (f"{_compact_lbs(tri_lbs)} released · {tri_year}" if tri_lbs else None),
+             "Facilities that self-report toxic chemical releases under EPA's Toxics "
+             "Release Inventory, and total pounds released on-site in the latest year.",
+             {"type": "layer", "cb": "tri-sites"},
+             undercount="Self-reported; small emitters and non-covered industries are excluded.",
+             year=tri_year),
+        card("contamination", contam_ct, _num(contam_ct), "Superfund / contamination sites", None,
+             "Federal Superfund (NPL) sites plus compiled major contaminated sites (EPA SEMS + curated).",
+             {"type": "layer", "cb": "contam-sites"},
+             undercount="A curated subset, not every contaminated site in Michigan."),
+        card("ust_open", ust_open, _num(ust_open), "leaking storage-tank sites (open releases)", None,
+             "Underground storage tank sites with an OPEN confirmed release still under "
+             "corrective action (EGLE Part 213). Excludes closed and merely-licensed tanks.",
+             {"type": "layer", "cb": "ust-sites"},
+             undercount="Regulated tanks only — unregistered residential/home heating-oil tanks are not included."),
+        card("landfills", landfill_ct, _num(landfill_ct), "landfills & waste facilities", None,
+             "Active/accepting licensed solid-waste landfills + disposal hazardous-waste "
+             "facilities (Michigan EGLE Part 115 / Part 111).",
+             {"type": "layer", "cb": "landfill-sites"},
+             undercount="Active-only — closed/pre-regulation landfills are not in this layer."),
+        card("pfas", pfas_ct, _num(pfas_ct), "PFAS sites & areas of interest", None,
+             "Confirmed PFAS sites and areas of interest under investigation (Michigan MPART / EGLE).",
+             {"type": "layer", "cb": "pfas-sites"},
+             undercount="The PFAS list keeps growing as investigation continues."),
+        card("coal_ash", coal_ct, _num(coal_ct), "coal ash (CCR) sites", None,
+             "Michigan coal combustion residuals facilities (curated directory mirroring EPA's CCR list).",
+             {"type": "layer", "cb": "coal-ash-sites"}),
+        card("golf", golf_ct, _num(golf_ct), "golf courses", None,
+             "Golf-course locations (OpenStreetMap) — an intensive-turf land use the "
+             "agricultural pesticide layer excludes. Amounts applied are not public and never shown.",
+             {"type": "layer", "cb": "golf-sites"}),
+        card("water", water_ct, _num(water_ct), "water monitoring sites",
+             (f"{water_det:,} with a detection · {water_exc:,} over an MCL" if water_ct else None),
+             "Surface- and ground-water pesticide monitoring stations (USGS/EPA Water "
+             "Quality Portal), and how many have any detection or an MCL exceedance.",
+             {"type": "layer", "cb": "wq-sites"},
+             undercount="Sampling is uneven — absence of detections can reflect a lack of sampling."),
+        card("air_toxics", round(atx_avg, 1) if atx_avg is not None else None,
+             (f"{atx_avg:.1f}" if atx_avg is not None else "—"),
+             "avg air-toxics cancer risk (per million)",
+             (f"highest tract {round(atx_top['total_risk'])} · {atx_top['county_name']} Co."
+              if atx_top else None),
+             "Modeled lifetime cancer risk from air toxics, chance-in-a-million, averaged "
+             "over Michigan census tracts, with the single highest-risk tract (EPA AirToxScreen). "
+             "A screening estimate, not measured risk at any address.",
+             {"type": "choropleth", "value": "air_toxics"}),
+    ]
+
+    # ---- honest cross-layer callouts (factual, sourced; medium/standard labelled) ----
+    notable = []
+    r = _ov_row(cur, "SELECT co.name, COUNT(*) c FROM ust_sites u "
+                     "JOIN counties co ON co.fips = u.county_fips "
+                     "WHERE u.category='leaking_open' GROUP BY u.county_fips "
+                     "ORDER BY c DESC LIMIT 1")
+    if r:
+        notable.append({
+            "label": "Most open leaking-tank releases",
+            "value": f"{r['name']} County — {r['c']:,}",
+            "source": "Michigan EGLE RRD (Part 213)"})
+    r = _ov_row(cur, "SELECT name, site_type, county, max_ppt FROM pfas_features "
+                     "WHERE kind='surface_water' AND max_ppt IS NOT NULL "
+                     "ORDER BY max_ppt DESC LIMIT 1")
+    if r and r["max_ppt"]:
+        wb = (r["site_type"] or "").strip()
+        cty = f"{r['county']} Co." if r["county"] else None
+        where = " · ".join(x for x in (wb or None, cty) if x) or "a monitored water body"
+        notable.append({
+            "label": "Highest PFAS in surface water",
+            "value": f"{round(r['max_ppt']):,} ppt — {where}",
+            "note": "single PFAS analyte in a surface-water sample — surface water, not drinking water",
+            "source": "Michigan EGLE surface-water PFAS sampling"})
+    if tri_year:
+        r = _ov_row(cur, "SELECT f.facility_name, f.county, SUM(r.total_lbs) t "
+                         "FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id "
+                         "WHERE r.year = ? GROUP BY r.facility_id ORDER BY t DESC LIMIT 1",
+                    (tri_year,))
+        if r and r["t"]:
+            loc = f" ({r['county']} Co.)" if r["county"] else ""
+            notable.append({
+                "label": f"Largest single TRI releaser ({tri_year})",
+                "value": f"{r['facility_name']}{loc} — {_compact_lbs(r['t'])}",
+                "source": "EPA Toxics Release Inventory (self-reported)"})
+
+    conn.close()
+    return jsonify({"totals": totals, "notable": notable,
+                    "as_of_years": {"tri": tri_year, "pesticides": pest_year}})
+
+
 _TREND_CATS = [
     ("herbicide", "Herbicides"),
     ("insecticide", "Insecticides"),

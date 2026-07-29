@@ -1549,9 +1549,70 @@
   }
 
   // ---------- statewide panel ----------
+  // Cross-layer statewide overview grid + highlights. Counts are year-independent,
+  // so fetch once and cache; the pesticide detail below still tracks the slider.
+  const OV_NUM = (v) => (v == null ? '—' : Number(v).toLocaleString());
+  async function renderOverview() {
+    const grid = $('overview-grid');
+    if (!grid || state._overview) return;   // already rendered
+    let d;
+    try { d = await api('/api/overview'); } catch (e) { return; }
+    state._overview = d;
+    grid.innerHTML = '';
+    for (const t of d.totals) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ov-card';
+      if (t.tip) btn.setAttribute('data-tip', t.tip + (t.undercount ? ' — ' + t.undercount : ''));
+      btn.innerHTML =
+        `<span class="ov-val">${esc(t.value_display != null ? t.value_display : OV_NUM(t.value))}</span>`
+        + `<span class="ov-label">${esc(t.label)}</span>`
+        + (t.sub ? `<span class="ov-sub">${esc(t.sub)}</span>` : '')
+        + (t.undercount ? '<span class="ov-flag" aria-hidden="true">†</span>' : '');
+      btn.addEventListener('click', () => runOverviewAction(t.action));
+      grid.appendChild(btn);
+    }
+    // highlights
+    const wrap = $('overview-notable-wrap');
+    const ul = $('overview-notable');
+    if (ul && (d.notable || []).length) {
+      ul.innerHTML = '';
+      for (const n of d.notable) {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="nt-k">${esc(n.label)}</span>`
+          + `<span class="nt-v">${esc(n.value)}</span>`
+          + (n.note ? `<span class="nt-note">${esc(n.note)}</span>` : '')
+          + (n.source ? `<span class="nt-src">Source: ${esc(n.source)}</span>` : '');
+        ul.appendChild(li);
+      }
+      if (wrap) show(wrap);
+    }
+    // Tooltips use document-level delegation, so the new [data-tip] cards are
+    // already covered — no re-scan needed.
+  }
+
+  // A stat card either turns on a marker layer or selects a choropleth, turning
+  // the overview into a navigation hub. Reuses the existing controls' handlers.
+  function runOverviewAction(action) {
+    if (!action) return;
+    if (isMobile()) document.body.classList.remove('m-detail-open');  // reveal the map
+    if (action.type === 'layer') {
+      const cb = $(action.cb);
+      if (cb) {
+        if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+        else { /* already on — flash it so the user sees where it is */ }
+      }
+    } else if (action.type === 'choropleth') {
+      setActiveChoropleth(action.value);
+      const radio = document.querySelector(`input[name="choropleth"][value="${action.value}"]`);
+      if (radio) radio.checked = true;
+    }
+  }
+
   async function refreshStatewide() {
+    renderOverview();   // cross-layer grid (cached; independent of the year slider)
     const data = await api('/api/statewide', { year: state.year, estimate: state.estimate });
-    $('state-heading').textContent = `Statewide summary · ${data.year}`;
+    $('state-heading').textContent = 'Statewide overview';
     $('stat-total').textContent      = fmtLbs(data.total_lbs);
     $('stat-compounds').textContent  = data.distinct_compounds.toLocaleString();
     $('stat-counties').textContent   = data.top_counties.length ? '83' : '0';
@@ -4170,6 +4231,8 @@
     const shareBtn = $('share-view');
     if (shareBtn) shareBtn.addEventListener('click', shareCurrentView);
     $('open-sources').addEventListener('click', openSources);
+    const ovSrc = $('overview-sources-link');
+    if (ovSrc) ovSrc.addEventListener('click', (e) => { e.preventDefault(); openSources(); });
     $('sources-close').addEventListener('click', () => hide($('sources-modal')));
     $('sources-modal').addEventListener('click', (e) => {
       if (e.target.id === 'sources-modal') hide($('sources-modal'));

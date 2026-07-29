@@ -310,18 +310,35 @@
 
   <aside class="sidebar right">
     <section class="panel statewide" id="statewide-panel">
-      <h2 id="state-heading">Statewide summary</h2>
-      <div class="big-stats">
-        <div><strong id="stat-total">—</strong><span>total lbs pesticide applied</span></div>
-        <div><strong id="stat-compounds">—</strong><span>active pesticide compounds</span></div>
-        <div><strong id="stat-counties">—</strong><span>counties with data</span></div>
+      <h2 id="state-heading">Statewide overview</h2>
+      <p class="overview-intro">A snapshot across <strong>every pollution type this map tracks</strong> in
+        Michigan's 83 counties, built from public data with the usual limitations
+        (see <a href="#" id="overview-sources-link">Data sources</a>). Tap a tile to turn on that layer.</p>
+
+      <div class="overview-grid" id="overview-grid" aria-label="Statewide totals"></div>
+      <p class="overview-foot muted small"><span class="ov-flag-legend">†</span> known undercount — hover a tile for why.</p>
+
+      <div class="overview-notable hidden" id="overview-notable-wrap">
+        <h3>Statewide highlights
+          <span class="info-i" data-tip="A few factual, sourced figures that give a sense of scale. Each is computed from the loaded data; medium and standard are labelled honestly.">?</span>
+        </h3>
+        <ul id="overview-notable" class="notable-list"></ul>
       </div>
 
-      <h3>Top counties</h3>
-      <ol id="top-counties" class="top-list"></ol>
+      <details class="pesticide-detail" id="pesticide-detail" open>
+        <summary>Pesticide detail — top counties &amp; compounds</summary>
+        <div class="big-stats">
+          <div><strong id="stat-total">—</strong><span>total lbs pesticide applied</span></div>
+          <div><strong id="stat-compounds">—</strong><span>active pesticide compounds</span></div>
+          <div><strong id="stat-counties">—</strong><span>counties with data</span></div>
+        </div>
 
-      <h3>Top compounds</h3>
-      <ol id="top-compounds" class="top-list"></ol>
+        <h3>Top counties</h3>
+        <ol id="top-counties" class="top-list"></ol>
+
+        <h3>Top compounds</h3>
+        <ol id="top-compounds" class="top-list"></ol>
+      </details>
 
       <h3>Pesticide mix over time
         <span class="scope-tag" id="trend-scope-sw">Statewide</span>
