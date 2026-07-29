@@ -248,6 +248,34 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
   instead; capacity/volume and monitoring results are absent from the feed and
   are never guessed. Glossary adds Type II/III landfill, leachate, post-closure
   care, RCRA, TSDF, landfill gas, and FOIA.
+- **Coal ash (CCR) sites overlay** — a curated, essentially-complete directory of
+  Michigan's 17 coal combustion residuals facilities (mirroring EPA's list of
+  publicly accessible CCR compliance sites): DTE's Monroe, Belle River, St. Clair,
+  Trenton Channel and River Rouge; Consumers Energy's Campbell, Karn, Weadock,
+  Whiting and B.C. Cobb (the last now closed by Charah/MERG); Lansing BWL's
+  Erickson; plus Holland (De Young), Grand Haven (Sims), Marquette (Shiras),
+  We Energies' Presque Isle, and the Harbor Beach & Morrow legacy impoundments.
+  Because the federal **CCR rule is self-implementing** — each utility posts its
+  own monitoring data on its own website, with no central database — this layer is
+  a directory that **links to those official CCR pages** rather than aggregating
+  live results. Rounded-square markers are colored by closure status (active /
+  cap-in-place / closure-by-removal / retired / legacy), lettered by unit type
+  (P = ash pond/impoundment, L = landfill), and **⚠-ringed when a unit is
+  confirmed unlined** — the higher-risk kind. Popups carry the operator, units,
+  lined/unlined status, closure method, and groundwater contaminants **attributed
+  to the third parties that reported them** (Earthjustice / the Environmental
+  Integrity Project, from utilities' own disclosures) with the utilities' dispute
+  noted — never stated as established fact. They also surface a real **data gap**
+  (DTE stopped posting post-2017 heavy-metal data for several impoundments,
+  arguing clay walls prevent leaching; DTE contests the characterization),
+  precision-first **cross-links** to the TRI / landfill / contamination layers
+  (name-token overlap **plus** proximity, so city-named plants don't mislink), and
+  clickable contaminant names → the PubChem chemical popup. Coal ash also appears
+  in the "Check an Address" report and the Data Sources modal (EPA CCR rule, the
+  2024 Legacy CCR Rule, EGLE, the utility CCR pages, and the EIP/Earthjustice
+  Ashtracker database). Glossary adds coal combustion residuals, fly/bottom ash,
+  boiler slag, flue-gas desulfurization material, surface impoundment,
+  cap-in-place vs closure-by-removal, the CCR rule, and legacy impoundment.
 - **Wind & pesticide-drift overlay** — three stackable overlays under Map
   layers → Overlays, built from real growing-season (Apr–Sep) hourly wind at 14
   Michigan ASOS airport stations (Iowa Environmental Mesonet). *Wind roses* plot
@@ -288,6 +316,8 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 | Michigan EGLE Materials Management Division (solid-waste disposal areas) | 🔗 reference link | Searchable list + interactive map of Type II / Type III disposal areas and annual solid-waste reports; source of the Part 115 layer. |
 | EPA Landfill Methane Outreach Program (LMOP) | 🔗 reference link | National landfill methane generation / gas-collection & energy-project database, published as a bulk file (no per-facility API); referenced for landfill-gas context, not joined per facility. |
 | EPA RCRAInfo / Envirofacts (RCRA Subtitle C) | 🔗 reference link | Federal hazardous-waste facility system behind the Part 111 TSDFs; the mapped disposal facilities come from EGLE's state layer. |
+| **Coal ash (CCR) sites** — Michigan's 17 coal combustion residuals facilities | ✅ embedded reference | Curated directory in `app/coal_ash_data.py`, web-verified against EPA's list of publicly accessible CCR compliance sites, each operator's CCR page (DTE, Consumers, LBWL, Holland BPW, Grand Haven BLP, Marquette BLP, We Energies, Charah/MERG, ccrsites.com), Earthjustice/EIP Ashtracker, and utility retirement notices. Coordinates from plant infoboxes or geocoded street addresses (a few flagged approximate). The CCR rule is self-implementing (no central feed), so this links to each utility's official page rather than aggregating live results; contaminant findings are attributed to Earthjustice/EIP with the utilities' dispute noted, and the DTE post-2017 data gap is surfaced. Precision-first cross-links (name-token + proximity) to TRI/landfill/contamination. Powers the "Coal ash sites" overlay and its entries in the address report + Data Sources modal. |
+| EPA Coal Combustion Residuals (CCR) rule, 2024 Legacy CCR Rule, Michigan EGLE coal-ash program, EIP/Earthjustice Ashtracker | 🔗 reference link | The federal self-implementing rule (each utility posts its own data), the 2024 rule extending to legacy impoundments, Michigan's Part 115 oversight, and the watchdog groundwater database behind the (attributed, disputed) contaminant findings. |
 | **EPA Toxics Release Inventory (TRI)** — active industrial releases, 2013–2024 | ✅ live download | ~1,090 Michigan facilities and ~37k facility-chemical-year release records from the Envirofacts `mv_tri_basic_download` view (filtered `st=MI`, one CSV per year). Each record carries county, lat/lng, NAICS + plain-language industry sector, PFAS/carcinogen flags, and pounds released per pathway (air = fugitive + stack, water, underground, land). Complements the legacy Superfund layer by showing what facilities are *actively* releasing now. Self-reported annually under EPCRA. Powers factory markers, the "TRI toxic releases" choropleth (with air/water/land/PFAS sub-options), correlation X-variables, and a year-over-year trend. No API key required. |
 | **PubChem (NCBI)** chemical descriptions & properties | ✅ live download (cached) | Real plain-language descriptions, molecular formula/weight, CAS, common synonyms and PubChem CID for every chemical/compound in the data (pesticides, TRI chemicals, water detections). Pre-fetched once via the re-runnable `enrich_chemicals.py` (PUG REST, no API key, rate-limited) into the `chemical_reference` table, so the chemical-info popups read locally with no live call on click. Complements — does not replace — the EPA/IARC hazard classifications. |
 | **CDC EPHT Tracking Network** asthma + COPD rates | ✅ live download | 2,822 county-year-condition rows pulled from `getCoreHolder` measures 437/103/652/649 with exponential-backoff retry. |

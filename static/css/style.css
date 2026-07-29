@@ -1538,6 +1538,72 @@ a:hover { text-decoration: underline; }
   font-size: 11px; font-style: italic; color: var(--muted);
 }
 
+/* ---------- Coal ash (CCR) sites directory ---------- */
+.coalash-divicon { background: transparent; border: 0; }
+.coalash-marker {
+  width: 100%; height: 100%; border-radius: 6px;   /* square = industrial site */
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #fff; box-shadow: 0 2px 7px rgba(0,0,0,.65);
+  position: relative; color: #0d1117; font-weight: 800;
+}
+.coalash-marker .ca-let { font-size: 12px; line-height: 1; letter-spacing: -.3px; }
+/* Unlined units are the higher-risk kind — flag them with a warning ring + badge. */
+.coalash-marker.unlined { border-color: #f85149; box-shadow: 0 0 0 2px rgba(248,81,73,.55), 0 2px 7px rgba(0,0,0,.65); }
+.coalash-marker .ca-warn {
+  position: absolute; top: -9px; right: -9px; font-size: 12px; line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.7));
+}
+
+.coalash-popup-wrap .leaflet-popup-content-wrapper {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+}
+.coalash-popup-wrap .leaflet-popup-tip { background: var(--bg-2); }
+.coalash-popup { max-width: 340px; font-size: 12.5px; }
+.coalash-popup .ca-status {
+  display: inline-block; color: #0d1117; font-weight: 700; font-size: 10.5px;
+  padding: 1px 8px; border-radius: 10px; margin-bottom: 6px;
+}
+.coalash-popup h4 { margin: 2px 0 3px; font-size: 14px; color: var(--text); }
+.coalash-popup .ca-meta { color: var(--muted); font-size: 11.5px; }
+.coalash-popup .ca-desc { margin: 7px 0; line-height: 1.5; }
+.coalash-popup .ca-h { font-weight: 700; font-size: 11.5px; margin: 8px 0 3px; color: var(--text); }
+.coalash-popup .ca-units { margin: 2px 0 4px; padding-left: 16px; line-height: 1.4; }
+.coalash-popup .ca-units li { margin: 1px 0; }
+.coalash-popup .row { margin: 4px 0; line-height: 1.45; }
+.coalash-popup .row .k { color: var(--muted); }
+.coalash-popup .ca-unlined {
+  margin: 6px 0; padding: 5px 8px; border-radius: 5px; line-height: 1.4;
+  background: rgba(248,81,73,.14); border: 1px solid rgba(248,81,73,.45); color: #ff9d97;
+}
+.coalash-popup .ca-contam { margin: 8px 0; }
+.coalash-popup .ca-disputed { color: var(--muted); font-weight: 400; font-style: italic; }
+.coalash-popup .ca-chips { line-height: 1.9; }
+.coalash-popup .ca-src {
+  margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--muted);
+  max-height: 130px; overflow-y: auto;
+}
+.coalash-popup .ca-gap {
+  margin: 8px 0; padding: 6px 8px; border-radius: 5px; line-height: 1.45;
+  background: rgba(227,160,8,.12); border: 1px solid rgba(227,160,8,.4); color: #e3b341;
+}
+.coalash-popup .ca-gap-i { font-weight: 800; }
+.coalash-popup .ca-xl {
+  margin: 8px 0; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 11.5px;
+}
+.coalash-popup .ca-xl-h { color: var(--muted); margin-bottom: 2px; }
+.coalash-popup .ca-xl-row { line-height: 1.5; }
+.coalash-popup .ca-xl-k { color: var(--muted); font-weight: 600; }
+.coalash-popup .ca-official {
+  display: block; margin: 9px 0 4px; padding: 6px 8px;
+  background: rgba(88,166,255,.14); border: 1px solid rgba(88,166,255,.4);
+  border-radius: 5px; color: #79c0ff; font-weight: 600; text-align: center;
+}
+.coalash-popup .ca-official:hover { background: rgba(88,166,255,.24); }
+.coalash-popup .ca-source {
+  margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 11px; font-style: italic; color: var(--muted); line-height: 1.4;
+}
+
 /* ---------- EPA Toxics Release Inventory (TRI) ---------- */
 .lr-dot.tri { background: #2f8783; }
 .lr-dot.landfill { background: #b5762e; }

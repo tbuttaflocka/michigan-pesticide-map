@@ -29,6 +29,7 @@ from app import pfas_data
 from app import airtoxics_data
 from app import ust_data
 from app import spraying_programs
+from app import coal_ash_data
 from app import tri_reference
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
@@ -259,6 +260,56 @@ def api_geojson():
     return send_from_directory(GEOJSON_PATH.parent, GEOJSON_PATH.name, mimetype="application/geo+json")
 
 
+def _ccr_source(source_id, title, url, notes, rows=None):
+    """One reference-source row for the coal-ash layer, shaped like a data_sources
+    row so it renders in the Data Sources modal (no DB backing — curated)."""
+    return {"source_id": source_id, "title": title, "url": url, "status": "reference",
+            "rows_loaded": rows, "notes": notes, "last_updated": None,
+            "coverage_start": None, "coverage_end": None, "refresh_status": None,
+            "refresh_interval_months": None, "last_success": None, "last_attempt": None}
+
+
+# Sources behind the "Coal ash sites" layer. The CCR rule is self-implementing —
+# each utility posts its own data — so these are the authoritative rule pages plus
+# the watchdog database; the per-utility CCR pages are linked from each popup.
+_CCR_DATA_SOURCES = [
+    _ccr_source(
+        "coal_ash_directory",
+        "Michigan coal ash (CCR) sites — curated directory",
+        "https://www.epa.gov/coal-combustion-residuals",
+        "Curated from EPA's 'List of Publicly Accessible Internet Sites Hosting CCR "
+        "Compliance Data' (17 Michigan facilities), each operator's CCR page, and "
+        "Earthjustice/EIP. Links to sources rather than aggregating live results.",
+        rows=len(coal_ash_data.COAL_ASH_SITES)),
+    _ccr_source(
+        "epa_ccr_rule", "EPA — Coal Combustion Residuals (CCR) Rule",
+        "https://www.epa.gov/coal-combustion-residuals/coal-ash-rule",
+        "The federal rule requiring each utility to publicly post coal-ash "
+        "groundwater monitoring, closure and structural-integrity data."),
+    _ccr_source(
+        "epa_ccr_legacy", "EPA — 2024 Legacy CCR Surface Impoundments Rule",
+        "https://www.epa.gov/coal-combustion-residuals/final-rule-legacy-coal-combustion-residuals-surface-impoundments-and-ccr",
+        "May 2024 rule extending CCR requirements to previously unregulated "
+        "inactive/legacy impoundments and CCR management units."),
+    _ccr_source(
+        "egle_coal_ash", "Michigan EGLE — Coal Ash Facilities",
+        "https://www.michigan.gov/egle/about/organization/materials-management/solid-waste/solid-waste-disposal-areas/coal-ash-facilities-license-review-process",
+        "Michigan's state oversight of coal-ash disposal (Part 115; PA 640 of 2018)."),
+    _ccr_source(
+        "utility_ccr_pages", "Utility CCR compliance pages (DTE, Consumers Energy, LBWL, others)",
+        "https://www.dteenergy.com/us/en/residential/community-and-news/environment/Coal-Combustion-Residual-Rule-Compliance-Data-and-Information.html",
+        "Where the legally-required monitoring data actually lives — each operator "
+        "hosts its own. Direct links are in each coal-ash site's popup."),
+    _ccr_source(
+        "eip_ashtracker", "Environmental Integrity Project / Earthjustice — Ashtracker",
+        "https://ashtracker.org/",
+        "Watchdog database of CCR groundwater-monitoring results compiled from "
+        "utilities' own disclosures. Basis for the contaminant findings shown "
+        "(attributed; disputed by the utilities). Michigan feature: "
+        "earthjustice.org/feature/coal-ash-states/michigan"),
+]
+
+
 def _annotate_source_freshness(sources: list[dict]) -> None:
     """Add a `stale` flag and `age_days` to each data_sources row in place.
 
@@ -310,6 +361,7 @@ def api_meta():
         "last_success, last_attempt FROM data_sources"
     )]
     conn.close()
+    sources.extend(_CCR_DATA_SOURCES)   # curated coal-ash reference sources
     _annotate_source_freshness(sources)
     data_current_as_of = max(
         (s["last_success"] for s in sources if s.get("last_success")),
@@ -3209,6 +3261,90 @@ def api_spraying_programs():
     return jsonify(spraying_programs.programs_payload())
 
 
+# Generic words that must NOT drive a cross-link match — they collide across
+# unrelated facilities ("power plant", "energy company", county/utility words).
+_COAL_LINK_STOP = {
+    "power", "plant", "station", "generating", "generation", "energy", "electric",
+    "company", "the", "and", "facility", "steam", "complex", "development",
+    "acquisition", "solutions", "board", "light", "water", "municipal", "city",
+    "county", "michigan", "coal", "ash", "former", "site", "unit", "pond",
+    "impoundment", "landfill", "legacy", "dte", "consumers",
+}
+
+
+def _link_tokens(name: str) -> set:
+    """Distinctive lowercase tokens (len>=4, not a generic word) from a name."""
+    cleaned = "".join(c if c.isalnum() else " " for c in (name or "").lower())
+    return {t for t in cleaned.split() if len(t) >= 4 and t not in _COAL_LINK_STOP}
+
+
+def _coal_ash_crosslinks(conn, site: dict) -> dict:
+    """Precision-first cross-links from a coal-ash site to the app's TRI, landfill,
+    and contamination layers — linking a site to ITS OWN appearance in another
+    layer, not to unrelated neighbours. Coordinates alone won't do (dense
+    industrial waterfronts) and a name token alone won't either (city-named plants
+    like Monroe/River Rouge would match every facility in town). So:
+
+      * If the plant has a DISTINCTIVE name token (Campbell, Karn, Channel, Sims…),
+        require that token in common AND proximity <= 1.5 mi (covers the plant's
+        own ash landfill/impoundment listed separately).
+      * If the plant is named only after its city/county (Monroe, River Rouge,
+        St. Clair), there is no distinctive token, so require same-site proximity
+        (<= 0.5 mi) — i.e. the co-located facility, not a cross-town namesake.
+    """
+    out = {"tri": [], "landfill": [], "contamination": []}
+    lat, lon = site.get("lat"), site.get("lon")
+    if lat is None or lon is None:
+        return out
+    geo = _link_tokens(site.get("city", "")) | _link_tokens(site.get("county", ""))
+    distinctive = _link_tokens(site.get("name", "")) - geo
+    if distinctive:
+        match_toks, MAX_MI, limit = distinctive, 1.5, 4
+    else:
+        # City-named plant: no distinctive token, so only the single nearest
+        # co-located facility counts (avoid pulling in adjacent-waterfront namesakes).
+        match_toks, MAX_MI, limit = _link_tokens(site.get("name", "")), 0.5, 1
+    if not match_toks:
+        return out
+
+    def scan(sql, id_col, name_col, layer):
+        hits = []
+        for r in conn.execute(sql):
+            rla, rlo = r["latitude"], r["longitude"]
+            if rla is None or rlo is None:
+                continue
+            if not (_link_tokens(r[name_col]) & match_toks):
+                continue
+            d = haversine_mi(lat, lon, rla, rlo)
+            if d <= MAX_MI:
+                hits.append({"id": r[id_col], "name": r[name_col],
+                             "distance_mi": round(d, 1)})
+        hits.sort(key=lambda x: x["distance_mi"])
+        out[layer] = hits[:limit]
+
+    scan("SELECT facility_id, facility_name, latitude, longitude FROM tri_facility",
+         "facility_id", "facility_name", "tri")
+    scan("SELECT site_key, name, latitude, longitude FROM landfill_sites",
+         "site_key", "name", "landfill")
+    scan("SELECT site_key, site_name, latitude, longitude FROM contamination_sites",
+         "site_key", "site_name", "contamination")
+    return out
+
+
+@app.route("/api/coal-ash/sites")
+def api_coal_ash_sites():
+    """Curated directory of Michigan's coal combustion residuals (coal ash) sites.
+    The federal CCR rule is self-implementing — each utility posts its own
+    monitoring data on its own site — so this is a directory that links to those
+    official pages, enriched with precision-first cross-links to the app's TRI,
+    landfill and contamination layers. See app/coal_ash_data.py for the sources."""
+    payload = coal_ash_data.sites_payload()
+    conn = db()
+    for s in payload["sites"]:
+        s["crosslinks"] = _coal_ash_crosslinks(conn, s)
+    return jsonify(payload)
+
+
 @app.route("/api/contamination/county/<fips>")
 def api_contamination_county(fips: str):
     conn = db()
@@ -3739,6 +3875,7 @@ _REPORT_SOURCES = [
     "EPA Superfund (SEMS/NPL) — contamination sites",
     "EPA Toxics Release Inventory (TRI) — industrial releases",
     "Michigan EGLE Materials Management — landfills & hazardous-waste facilities",
+    "EPA CCR rule / operator CCR pages / EGLE / Earthjustice-EIP Ashtracker — coal ash sites",
     "USGS/EPA Water Quality Portal — water monitoring & pesticide detections",
     "OpenStreetMap — golf courses (locations only)",
     "USGS NAWQA EPest — county agricultural pesticide use (excludes non-agricultural use)",
@@ -3902,6 +4039,35 @@ def _report_spraying(alat, alng, fips, locate):
             out.append(item)
     out.sort(key=lambda x: (x.get("scope") != "statewide", x.get("distance_mi") or 0))
     return out
+
+
+def _report_coal_ash(alat, alng):
+    """Coal ash (CCR) sites near this address. These curated sites carry real
+    per-facility coordinates, so this is a genuine distance section. Several sit
+    on populated waterfronts, so we surface any within ~10 miles (with the 5-mile
+    ring count feeding the same 'nearby concerns' framing as the other layers)."""
+    pairs = []
+    for s in coal_ash_data.sites_payload()["sites"]:
+        la, lo = s.get("lat"), s.get("lon")
+        if la is None or lo is None:
+            continue
+        pairs.append((haversine_mi(alat, alng, la, lo), s))
+    pairs.sort(key=lambda x: x[0])
+
+    def mk(dist, s):
+        return {"layer": "coal_ash", "id": s["id"], "name": s["name"],
+                "operator": s["operator"], "county": s["county"],
+                "status": s["status"], "status_label": s["status_label"],
+                "unlined": s["unlined"], "unit_type_label": s["unit_type_label"],
+                "url": s["ccr_url"], "distance_mi": round(dist, 1),
+                "direction": deg_to_dir16(_bearing_deg(alat, alng, s["lat"], s["lon"])),
+                "lat": s["lat"], "lng": s["lon"]}
+
+    within = [mk(d, s) for d, s in pairs if d <= 10][:8]
+    nearest = mk(pairs[0][0], pairs[0][1]) if pairs else None
+    rings = {str(k): sum(1 for d, _ in pairs if d <= k) for k in _RINGS_MI}
+    return {"within": within, "nearest": nearest, "rings": rings,
+            "count_5mi": rings["5"]}
 
 
 def _report_county_context(conn, fips):
@@ -4103,6 +4269,7 @@ def api_address_report():
     try:
         near = _report_near(conn, lat, lng)
         near["spraying"] = _report_spraying(lat, lng, fips, locate)
+        near["coal_ash"] = _report_coal_ash(lat, lng)
         ctx = _report_county_context(conn, fips)
 
         # --- Monitoring coverage (the "no data != clean" safeguard) ---

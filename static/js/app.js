@@ -167,6 +167,14 @@
       showMarkers: false,
       markers: null,               // L.markerClusterGroup / layerGroup
     },
+    coalAsh: {
+      loaded: false,
+      sites: [],                   // from /api/coal-ash/sites
+      statuses: [],                // status legend (key/color/label)
+      unitTypes: [],               // unit-type legend (key/letter/label)
+      showMarkers: false,
+      markers: null,               // L.markerClusterGroup / layerGroup
+    },
     tri: {
       loaded: false,
       facilities: [],              // /api/tri/sites facilities
@@ -781,6 +789,7 @@
     { on: () => state.contam.showSites,      c: '#f85149', t: 'Contamination sites' },
     { on: () => state.contam.showZones,      c: '#e8873c', t: 'Contamination impact zones' },
     { on: () => state.spraying.showMarkers,  c: '#5dbb63', t: 'Spraying programs (directory)' },
+    { on: () => state.coalAsh.showMarkers,   c: '#e3a008', t: 'Coal ash sites (color = closure status; ⚠ = unlined)' },
     { on: () => state.tri.showSites,         c: '#d9772f', t: 'TRI facilities (size/red = more released)' },
     { on: () => state.landfill.showSites,    c: '#d96b35', t: 'Landfills & waste facilities (by type)' },
     { on: () => state.wind.showRoses,        c: '#3fb950', t: 'Wind roses (Apr–Sep)' },
@@ -3058,6 +3067,117 @@
     </div>`;
   }
 
+  // ---------- Coal ash (CCR) sites directory overlay ----------
+  // A curated, essentially-complete directory of Michigan's coal combustion
+  // residuals sites. The CCR rule is self-implementing (each utility posts its
+  // own monitoring data), so each marker links to that operator's official CCR
+  // page rather than showing live results. Color = closure status; the letter
+  // = unit type (P/L/P+L); a ⚠ ring flags sites with a confirmed UNLINED unit.
+  function coalAshPane() {
+    if (!state.map.getPane('coalash')) {
+      state.map.createPane('coalash').style.zIndex = 653;  // among the marker panes
+    }
+    return 'coalash';
+  }
+
+  function newCoalAshClusterLayer() {
+    if (typeof L.markerClusterGroup === 'function') {
+      // Only 17 sites statewide, so keep it simple and deterministic: no chunked
+      // loading and no removeOutsideVisibleBounds. The latter matters because the
+      // address report's "Show on map" flies to a site and opens its popup — with
+      // markers culled off-screen mid-flight, that deep-link could miss its target
+      // (seen on mobile). Keeping all markers rendered makes the deep-link reliable.
+      return L.markerClusterGroup({
+        clusterPane: 'coalash', maxClusterRadius: 44, chunkedLoading: false,
+        showCoverageOnHover: false, spiderfyOnMaxZoom: true,
+        removeOutsideVisibleBounds: false,
+      });
+    }
+    return L.layerGroup();
+  }
+
+  async function loadCoalAsh() {
+    if (state.coalAsh.loaded) return;
+    const d = await api('/api/coal-ash/sites');
+    state.coalAsh.sites = d.sites || [];
+    state.coalAsh.statuses = d.statuses || [];
+    state.coalAsh.unitTypes = d.unit_types || [];
+    state.coalAsh.loaded = true;
+  }
+
+  function renderCoalAshMarkers() {
+    if (state.coalAsh.markers) { state.coalAsh.markers.remove(); state.coalAsh.markers = null; }
+    if (!state.coalAsh.showMarkers) { renderMarkerKeys(); return; }
+    const pane = coalAshPane();
+    const grp = newCoalAshClusterLayer();
+    for (const s of state.coalAsh.sites) {
+      if (s.lat == null || s.lon == null) continue;
+      const size = 30;
+      const cls = 'coalash-marker' + (s.unlined ? ' unlined' : '');
+      const m = L.marker([s.lat, s.lon], {
+        pane,
+        icon: L.divIcon({
+          className: 'coalash-divicon',
+          html: `<div class="${cls}" style="background:${s.color}" title="${_rEsc(s.name)}">`
+            + `<span class="ca-let">${s.unit_letter}</span>`
+            + (s.unlined ? '<span class="ca-warn">⚠</span>' : '') + '</div>',
+          iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+        }),
+      });
+      m.bindPopup(coalAshPopupHtml(s), { maxWidth: 360, className: 'coalash-popup-wrap' });
+      grp.addLayer(m);
+    }
+    grp.addTo(state.map);
+    state.coalAsh.markers = grp;
+    renderMarkerKeys();
+  }
+
+  function _coalAshCrosslinks(xl) {
+    if (!xl) return '';
+    const seg = (arr, label) => (arr && arr.length)
+      ? `<div class="ca-xl-row"><span class="ca-xl-k">${label}:</span> `
+        + arr.map((x) => `${_rEsc(x.name)}`).join(' · ') + '</div>' : '';
+    const body = seg(xl.tri, 'TRI') + seg(xl.landfill, 'Landfill') + seg(xl.contamination, 'Contamination');
+    if (!body) return '';
+    return `<div class="ca-xl"><div class="ca-xl-h">Also mapped in this app (same site):</div>${body}</div>`;
+  }
+
+  function coalAshPopupHtml(s) {
+    const row = (k, v) => v ? `<div class="row"><span class="k">${k}</span> ${v}</div>` : '';
+    // Contaminant names are clickable → the shared PubChem chemical-info popup.
+    const chems = (s.contaminants || []).length
+      ? (s.contaminants).map((c) => chemLink(c)).join(', ')
+      : '<span class="muted">no third-party groundwater findings compiled for this site</span>';
+    const units = (s.units || []).length
+      ? '<ul class="ca-units">' + s.units.map((u) => `<li>${_rEsc(u)}</li>`).join('') + '</ul>' : '';
+    const unlinedFlag = s.unlined
+      ? '<div class="ca-unlined">⚠ Includes a confirmed UNLINED unit — the higher-risk kind the CCR rule most concerns.</div>' : '';
+    const contamBlock = (s.contaminants || []).length
+      ? `<div class="ca-contam"><div class="ca-h">Groundwater contaminants identified <span class="ca-disputed">(third-party — disputed)</span></div>`
+        + `<div class="ca-chips">${chems}</div>`
+        + (s.contaminant_source ? `<div class="ca-src">${_rEsc(s.contaminant_source)}</div>` : '')
+        + '</div>'
+      : `<div class="ca-contam"><div class="ca-chips">${chems}</div></div>`;
+    const gap = s.data_gap
+      ? `<div class="ca-gap"><span class="ca-gap-i">ⓘ</span> ${_rEsc(s.data_gap)}</div>` : '';
+    const approx = s.approx ? ' <span class="muted small">(location approximate)</span>' : '';
+    return `<div class="coalash-popup">
+      <div class="ca-status" style="background:${s.color}">${s.status_label} · ${_rEsc(s.unit_type_label)}</div>
+      <h4>${_rEsc(s.name)}</h4>
+      <div class="ca-meta">${_rEsc(s.operator)}</div>
+      <div class="ca-meta">${_rEsc(s.city)}, ${_rEsc(s.county)} County${approx}</div>
+      ${s.plant_status ? `<p class="ca-desc">${_rEsc(s.plant_status)}</p>` : ''}
+      ${units ? `<div class="ca-h">Coal-ash units</div>${units}` : ''}
+      ${unlinedFlag}
+      ${row('Closure:', s.closure ? _rEsc(s.closure) : '')}
+      ${contamBlock}
+      ${gap}
+      ${_coalAshCrosslinks(s.crosslinks)}
+      <a class="ca-official" href="${_rEsc(s.ccr_url)}" target="_blank" rel="noopener">View ${_rEsc(s.ccr_host)} CCR compliance page →</a>
+      <div class="ca-source">Source: ${_rEsc(s.source)}. Directory entry — the legally-required monitoring data lives on the operator's CCR page.</div>
+    </div>`;
+  }
+
   function renderCountyContamination(c) {
     const el = $('county-contam-list');
     const count = $('county-contam-count');
@@ -3845,6 +3965,16 @@
       });
     }
 
+    // Coal ash (CCR) sites directory (independent overlay).
+    const coalAshToggle = $('coal-ash-sites');
+    if (coalAshToggle) {
+      coalAshToggle.addEventListener('change', async (e) => {
+        state.coalAsh.showMarkers = e.target.checked;
+        if (e.target.checked) await loadCoalAsh();
+        renderCoalAshMarkers();
+      });
+    }
+
     // TRI industrial-facility markers (independent overlay).
     $('tri-sites').addEventListener('change', async (e) => {
       state.tri.showSites = e.target.checked;
@@ -4257,6 +4387,7 @@
     water: { cb: 'wq-sites', grp: () => state.water.sitesLayer },
     golf: { cb: 'golf-sites', grp: () => state.golf.markers },
     spraying: { cb: 'spraying-programs', grp: () => state.spraying.markers },
+    coal_ash: { cb: 'coal-ash-sites', grp: () => state.coalAsh.markers },
     pfas: { cb: 'pfas-sites', grp: () => state.pfas.markers },
     pfas_water: { cb: 'pfas-sites', grp: () => state.pfas.markers },
     // UST: enabling the layer loads open-leaking; ust_other needs the closed &
@@ -4347,6 +4478,11 @@
     }
     if (layer === 'landfill') {
       return `${_rEsc(it.type_label || it.category || '')}${it.status ? ` · ${_rEsc(it.status)}` : ''}`;
+    }
+    if (layer === 'coal_ash') {
+      const unlined = it.unlined ? ' <span class="rpt-tag" style="background:#f85149;color:#0d1117">⚠ unlined unit</span>' : '';
+      return `${_rEsc(it.status_label || '')} · ${_rEsc(it.unit_type_label || '')}`
+        + `${it.operator ? ` · ${_rEsc(it.operator)}` : ''}${unlined}`;
     }
     if (layer === 'water') {
       const comps = (it.top_compounds || []).map((c) => chemLink(c)).join(', ');
@@ -4639,6 +4775,8 @@
         'No TRI facilities within 5 miles.')
       + _nearBlock('landfill', 'Landfills & waste facilities', '🗑', near.landfill,
         'No active landfills within 5 miles.')
+      + _nearBlock('coal_ash', 'Coal ash (CCR) sites', '⚫', near.coal_ash,
+        'No coal ash (coal combustion residuals) sites within 5 miles.')
       + _nearBlock('water', 'Water monitoring sites', '💧', near.water,
         'No water-monitoring sites within 5 miles.')
       + _nearBlock('ust_open', 'Leaking storage tanks — OPEN releases', '⚠', near.ust_open,

@@ -4,6 +4,51 @@
 (function () {
   // ---------- glossary: technical term -> plain-language definition ----------
   const GLOSSARY = {
+    // ---- Coal combustion residuals (coal ash) ----
+    'coal combustion residuals':
+      'The waste left over from burning coal to make electricity — commonly called ' +
+      '"coal ash." It includes fly ash, bottom ash, boiler slag, and flue-gas ' +
+      'desulfurization material, and contains toxic metals such as arsenic, lead, ' +
+      'lithium, boron, and selenium. Abbreviated CCR.',
+    'CCR': 'Coal combustion residuals — "coal ash," the waste from burning coal. It ' +
+      'contains toxic metals (arsenic, lead, lithium, boron, and more).',
+    'coal ash': 'The everyday name for coal combustion residuals (CCR) — the ash and ' +
+      'other waste left from burning coal. Contains arsenic, lead, lithium and other toxics.',
+    'fly ash':
+      'The fine, powdery ash carried up with the flue gases when coal is burned and ' +
+      'captured by pollution controls. The most voluminous type of coal ash.',
+    'bottom ash':
+      'The coarser, heavier ash that falls to the bottom of a coal furnace (as opposed ' +
+      'to the fine fly ash carried up the stack).',
+    'boiler slag':
+      'A glassy, granular coal-ash material formed when molten bottom ash is cooled ' +
+      'quickly with water in certain (wet-bottom) boilers.',
+    'flue gas desulfurization material':
+      'The residue from "scrubbers" that remove sulfur dioxide from coal-plant exhaust — ' +
+      'a type of coal combustion residual (often a gypsum-like sludge).',
+    'surface impoundment':
+      'An "ash pond" — a diked basin where coal ash is mixed with water and stored. ' +
+      'Older ones are often UNLINED, letting contaminants seep into groundwater; these ' +
+      'are the higher-risk units the CCR rule most concerns.',
+    'closure by removal':
+      'Closing a coal-ash unit by DIGGING OUT the ash and hauling it to a lined landfill, ' +
+      'then restoring the site. More protective than cap-in-place, because the ash no ' +
+      'longer sits in contact with groundwater.',
+    'cap-in-place':
+      'Closing a coal-ash unit by leaving the ash where it is and covering it with a cap. ' +
+      'Cheaper than removal, but the buried ash can keep contacting groundwater — a common ' +
+      'point of dispute between utilities and watchdog groups.',
+    'CCR rule':
+      "EPA's 2015 federal Coal Combustion Residuals rule. It is SELF-IMPLEMENTING: each " +
+      'utility must post its own groundwater monitoring, closure plans, and structural-' +
+      'integrity data on its own public website (there is no central database).',
+    'Legacy CCR Rule':
+      "EPA's 2024 rule extending federal coal-ash requirements to previously unregulated " +
+      'INACTIVE ("legacy") surface impoundments at retired plants, plus older CCR ' +
+      'landfills and units that closed before the 2015 rule.',
+    'legacy impoundment':
+      'An inactive coal-ash pond at a retired plant that was exempt from the 2015 CCR rule ' +
+      "but is now regulated under EPA's 2024 Legacy CCR Rule.",
     'age-adjusted':
       'Adjusted so places with older or younger populations can be compared fairly. ' +
       'Without this, a county full of retirees would look "sicker" just because ' +
