@@ -1347,6 +1347,15 @@ a:hover { text-decoration: underline; }
 }
 .intro-about strong { color: var(--text); }
 
+.intro-contact {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.intro-contact strong { color: var(--text); }
+.intro-contact a { color: var(--link); }
+
 .intro-disclaimer {
   font-size: 12.5px;
   line-height: 1.6;
