@@ -2469,6 +2469,42 @@
     return out ? `<div class="pfas-xlinks">${out}</div>` : '';
   }
 
+  // Curated narrative block (app/pfas_narratives.py) for notable PFAS sites —
+  // history + severity context on top of the live MPART fields. Every peak states
+  // its medium AND the standard that applies to that medium (never a groundwater
+  // reading against the drinking-water MCL), and every figure/advisory is sourced.
+  function _pfasNum(v) {
+    return (v == null || isNaN(v)) ? '' : Number(v).toLocaleString();
+  }
+  function _pfasPeakLi(pk) {
+    const head = pk.value != null
+      ? `<b>${_pfasNum(pk.value)} ${esc(pk.unit || 'ppt')}</b> ${esc(pk.analyte || '')}`
+      : `<b>${esc(pk.text || pk.analyte || '')}</b>`;
+    const loc = pk.location ? ` — ${esc(pk.location)}` : '';
+    const sub = [];
+    if (pk.medium) sub.push(`<span class="k">Medium:</span> ${esc(pk.medium)}`);
+    if (pk.standard) sub.push(`<span class="k">Compared to:</span> ${esc(pk.standard)}`);
+    if (pk.source) sub.push(`<span class="k">Source:</span> ${esc(pk.source)}`);
+    return `<li>${head}${loc}${sub.map((s) => `<div class="pfas-narr-sub">${s}</div>`).join('')}</li>`;
+  }
+  function pfasNarrativeHtml(f) {
+    if (!f.narrative) return '';
+    const nf = f.narrative_facts || {};
+    const peaks = (nf.peaks || []).map(_pfasPeakLi).join('');
+    const adv = (nf.advisories || []).map((a) =>
+      `<li>⚠ ${esc(a.text)}${a.source ? ` <span class="pfas-narr-sub"><span class="k">Source:</span> ${esc(a.source)}</span>` : ''}</li>`).join('');
+    const refs = (f.narrative_refs || []).map((r) =>
+      r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.label)}</a>` : esc(r.label)).join(' · ');
+    return `<div class="pfas-narrative">
+      ${f.narrative_title ? `<div class="pfas-narr-title">📋 ${esc(f.narrative_title)}</div>` : ''}
+      <p class="pfas-narr-text">${esc(f.narrative)}</p>
+      ${peaks ? `<div class="pfas-narr-h">Documented peak levels</div><ul class="pfas-narr-list">${peaks}</ul>` : ''}
+      ${adv ? `<div class="pfas-narr-h">Advisories</div><ul class="pfas-narr-list adv">${adv}</ul>` : ''}
+      ${nf.status ? `<div class="pfas-narr-status"><span class="k">Status:</span> ${esc(nf.status)}</div>` : ''}
+      ${refs ? `<div class="pfas-narr-refs">Sources: ${refs}</div>` : ''}
+    </div>`;
+  }
+
   function pfasPopupHtml(f) {
     const p = f.props || {};
     const loc = [f.city, f.county ? f.county + ' Co.' : ''].filter(Boolean).join(', ');
@@ -2489,6 +2525,7 @@
         <h4>${esc(f.name)}</h4>
         ${f.site_type ? `<div class="pfas-meta">${esc(f.site_type)}${loc ? ' · ' + esc(loc) : ''}</div>` : (loc ? `<div class="pfas-meta">${esc(loc)}</div>` : '')}
         ${f.kind === 'aoi' ? '<div class="pfas-aoi-note">An Area of Interest is under investigation — the PFAS source has not yet been determined, and residential wells in the area may be affected.</div>' : ''}
+        ${pfasNarrativeHtml(f)}
         ${wellsHtml}
         ${lead}
         ${_pfasXlinks(f)}

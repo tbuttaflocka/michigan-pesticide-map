@@ -3393,6 +3393,16 @@ def load_pfas(conn: sqlite3.Connection) -> int:
              r.get("tri_facility_id"), r.get("landfill_site_key"), "EGLE_MPART"))
     conn.commit()
 
+    # Attach the curated narratives (history + severity context) to the matching
+    # live MPART records. The live feed stays the source of truth for location/
+    # status/contact; this only adds context on top.
+    try:
+        n_narr = apply_pfas_narratives(conn)
+        if n_narr:
+            log(f"  applied {n_narr} curated PFAS narratives", level="ok")
+    except Exception as e:                    # noqa: BLE001 — enrichment is optional
+        log(f"  PFAS narrative apply failed: {e}", level="warn")
+
     total = len(rows)
     sites = counts.get("sites_aois", 0)
     status = "ok" if sites else ("partial" if total else "unavailable")
@@ -3419,6 +3429,39 @@ def load_pfas(conn: sqlite3.Connection) -> int:
         "Live EGLE ArcGIS feeds behind the PFAS layer (sites/AOIs, surface water, "
         "public water supply, fish, treatment plants).")
     return total
+
+
+def apply_pfas_narratives(conn: sqlite3.Connection) -> int:
+    """Attach the hand-researched narratives in app/pfas_narratives.py to the
+    matching live MPART site/AOI records (county + name-token match). Re-applied on
+    every full loader run so a reload never loses the curated context. Only touches
+    site/AOI rows; the live feed remains the source of truth for location/status.
+    """
+    from . import pfas_narratives
+
+    cur = conn.cursor()
+    applied = 0
+    for r in cur.execute(
+        "SELECT feature_key, name, county_fips FROM pfas_features "
+        "WHERE kind IN ('site','aoi')").fetchall():
+        rec = pfas_narratives.narrative_for(r["name"], r["county_fips"])
+        if not rec:
+            continue
+        facts = {
+            "peaks": rec.get("peaks") or [],
+            "advisories": rec.get("advisories") or [],
+            "status": rec.get("status") or None,
+        }
+        conn.execute(
+            """UPDATE pfas_features
+                  SET narrative = ?, narrative_title = ?, narrative_facts = ?,
+                      narrative_refs = ?, narrative_source = 'curated'
+                WHERE feature_key = ?""",
+            (rec.get("narrative"), rec.get("title"), json.dumps(facts),
+             json.dumps(rec.get("refs") or []), r["feature_key"]))
+        applied += 1
+    conn.commit()
+    return applied
 
 
 # ---------- Underground Storage Tanks (EGLE RRD) ----------
@@ -3908,6 +3951,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         log("schema migration: adding landfill_sites.alt_id / alt_id_label", level="warn")
         conn.execute("ALTER TABLE landfill_sites ADD COLUMN alt_id TEXT")
         conn.execute("ALTER TABLE landfill_sites ADD COLUMN alt_id_label TEXT")
+        conn.commit()
+
+    # pfas_features: add curated-narrative columns (rows are rebuilt each run, so
+    # a non-destructive ALTER is enough to make the new INSERT/UPDATE columns valid).
+    pcols = {r[1] for r in conn.execute("PRAGMA table_info(pfas_features)")}
+    if pcols and "narrative" not in pcols:
+        log("schema migration: adding pfas_features narrative columns", level="warn")
+        for col in ("narrative TEXT", "narrative_title TEXT", "narrative_facts TEXT",
+                    "narrative_refs TEXT", "narrative_source TEXT"):
+            conn.execute(f"ALTER TABLE pfas_features ADD COLUMN {col}")
         conn.commit()
 
     # data_sources: add provenance/freshness columns used by refresh_data.py.

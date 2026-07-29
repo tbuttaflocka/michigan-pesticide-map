@@ -410,6 +410,14 @@ CREATE TABLE IF NOT EXISTS pfas_features (
     contam_site_key   TEXT,                   -- cross-link: contamination_sites.site_key
     tri_facility_id   TEXT,                   -- cross-link: tri_facility.facility_id
     landfill_site_key TEXT,                   -- cross-link: landfill_sites.site_key
+    -- optional curated narrative layer (app/pfas_narratives.py), attached to the
+    -- matching live MPART site/AOI record at load time; adds history + severity
+    -- context on top of the terse live feed. NULL for records with no narrative.
+    narrative         TEXT,                   -- researched prose (history + source)
+    narrative_title   TEXT,                   -- short heading for the narrative block
+    narrative_facts   TEXT,                   -- JSON {peaks:[], advisories:[], status}
+    narrative_refs    TEXT,                   -- JSON [{label,url}] source attribution
+    narrative_source  TEXT,                   -- 'curated' | NULL
     source            TEXT DEFAULT 'EGLE_MPART'
 );
 CREATE INDEX IF NOT EXISTS ix_pfas_kind   ON pfas_features(kind);
