@@ -331,6 +331,17 @@
     badge.addTo(state.map);
   }
 
+  // Detach a dedicated L.canvas RENDERER from the map. Vector layers that use a
+  // private canvas renderer (air toxics, PFAS hexbins) must call this when hidden:
+  // removing the vector layer alone leaves the renderer — and thus a blank,
+  // full-map <canvas> — sitting in its pane. Because those panes sit above the
+  // county overlay pane with pointer-events:auto, the leftover canvas silently
+  // intercepts every county click until a full page refresh. Leaflet re-attaches
+  // the renderer automatically when the layer is shown again, so this is safe.
+  function removeCanvasRenderer(renderer) {
+    if (renderer && state.map && state.map.hasLayer(renderer)) renderer.remove();
+  }
+
   // Fill color for a county under whichever choropleth is currently active.
   // Only one choropleth ever paints the base layer, so scales never blend.
   const NO_DATA = '#26303f';
@@ -2397,6 +2408,10 @@
     const wantPolys = state.pfas.showSites && state.pfas.filters.pws !== false;
     if (!wantPolys && state.pfas._polyLayer && state.map.hasLayer(state.pfas._polyLayer)) {
       state.pfas._polyLayer.remove();
+      // Also drop the dedicated canvas renderer — otherwise its blank full-map
+      // <canvas> (pane 'pfaspoly', pointer-events:auto, z416, above the county
+      // overlay pane) lingers and swallows county clicks. See hideAirToxicsLayer.
+      removeCanvasRenderer(state.pfas._canvas);
     }
     if (!state.pfas.showSites) { updatePfasStats(); renderMarkerKeys(); return; }
     const pane = pfasPane();
@@ -2592,6 +2607,14 @@
     if (state.airToxics._polyLayer && state.map.hasLayer(state.airToxics._polyLayer)) {
       state.airToxics._polyLayer.remove();
     }
+    // CRITICAL: removing the polygon layer does NOT remove its dedicated canvas
+    // RENDERER — Leaflet keeps a layer's custom renderer on the map after the
+    // layer itself is gone. That leaves a blank, full-map <canvas> in the
+    // 'airtox' pane (pointer-events:auto, z-index 417, ABOVE the county overlay
+    // pane at z400) which silently swallows every county click until a page
+    // refresh. Remove the renderer too. Re-showing re-adds it automatically when
+    // the polygon layer is added back (Leaflet re-attaches the layer's renderer).
+    removeCanvasRenderer(state.airToxics._canvas);
   }
   function updateAirToxicsStats() {
     const el = $('airtox-stats');
