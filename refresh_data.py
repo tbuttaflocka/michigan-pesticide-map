@@ -439,8 +439,20 @@ def _swap(src: Source, staging_path: Path, live_path: Path, log: RunLogger) -> N
         live.execute("BEGIN IMMEDIATE")
         try:
             for t in src.targets:
+                # Copy by EXPLICIT shared column names, not `SELECT *`. The live and
+                # staging tables can have the same columns in a DIFFERENT physical
+                # order — e.g. when a column was added to the live table via ALTER
+                # (appended at the end) but the staging table was created fresh from
+                # the current schema (new column in its declared position). A
+                # positional `SELECT *` would then silently shift every value one
+                # column over (this is exactly what mangled the PFAS narrative
+                # columns). Naming the columns makes the copy order-independent.
+                live_cols = [r[1] for r in live.execute(f"PRAGMA table_info({t})")]
+                stg_cols = {r[1] for r in live.execute(f"PRAGMA stg.table_info({t})")}
+                shared = [c for c in live_cols if c in stg_cols]
+                collist = ", ".join(f'"{c}"' for c in shared)
                 live.execute(f"DELETE FROM {t}")
-                live.execute(f"INSERT INTO {t} SELECT * FROM stg.{t}")
+                live.execute(f"INSERT INTO {t} ({collist}) SELECT {collist} FROM stg.{t}")
             live.execute("COMMIT")
         except Exception:
             live.execute("ROLLBACK")

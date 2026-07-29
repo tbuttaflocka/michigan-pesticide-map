@@ -2487,21 +2487,64 @@
     if (pk.source) sub.push(`<span class="k">Source:</span> ${esc(pk.source)}`);
     return `<li>${head}${loc}${sub.map((s) => `<div class="pfas-narr-sub">${s}</div>`).join('')}</li>`;
   }
+  // Parse a value that may already be an object/array or a JSON string; returns
+  // null (never throws, never leaks the raw string) if it isn't parseable JSON.
+  function _pfasMaybeParse(v) {
+    if (v && typeof v === 'object') return v;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (s && (s[0] === '{' || s[0] === '[')) {
+        try { return JSON.parse(s); } catch (e) { return null; }
+      }
+    }
+    return null;
+  }
+  const _pfasIsFacts = (o) => o && typeof o === 'object' && !Array.isArray(o) &&
+    (Array.isArray(o.peaks) || Array.isArray(o.advisories) || typeof o.status === 'string');
+  const _pfasIsRefs = (a) => Array.isArray(a) && a.length > 0 &&
+    a.every((x) => x && typeof x === 'object' && ('label' in x || 'url' in x));
+  // A plain, human-readable string — NOT a JSON blob (so a raw '{"peaks":…}' is
+  // never shown as text if the DB columns are mis-aligned).
+  const _pfasPlain = (v) => (typeof v === 'string' && !/^\s*[[{]/.test(v)) ? v.trim() : '';
+
+  // Resolve the narrative parts by SHAPE, not by field name. The curated data is
+  // {title, prose, facts:{peaks,advisories,status}, refs:[{label,url}]}, but a
+  // legacy database whose columns were copied out of order could put the facts
+  // JSON in the title field, etc. Resolving by shape renders those correctly and,
+  // crucially, never dumps a raw JSON string into the popup.
+  function resolvePfasNarrative(f) {
+    let facts = null; let refs = null;
+    for (const c of [f.narrative_facts, f.narrative_title, f.narrative, f.narrative_refs]) {
+      const parsed = _pfasMaybeParse(c);
+      if (!facts && _pfasIsFacts(parsed)) facts = parsed;
+      if (!refs && _pfasIsRefs(parsed)) refs = parsed;
+    }
+    let title = _pfasPlain(f.narrative_title);
+    let prose = _pfasPlain(f.narrative);
+    if (title && prose && title === prose) prose = '';          // avoid duplication
+    if (!title && prose && prose.length < 90) { title = prose; prose = ''; }
+    return { title, prose, facts: facts || {}, refs: refs || [] };
+  }
+
   function pfasNarrativeHtml(f) {
-    if (!f.narrative) return '';
-    const nf = f.narrative_facts || {};
-    const peaks = (nf.peaks || []).map(_pfasPeakLi).join('');
-    const adv = (nf.advisories || []).map((a) =>
+    if (!f) return '';
+    const { title, prose, facts, refs } = resolvePfasNarrative(f);
+    const peaks = (facts.peaks || []).map(_pfasPeakLi).join('');
+    const adv = (facts.advisories || []).map((a) =>
       `<li>⚠ ${esc(a.text)}${a.source ? ` <span class="pfas-narr-sub"><span class="k">Source:</span> ${esc(a.source)}</span>` : ''}</li>`).join('');
-    const refs = (f.narrative_refs || []).map((r) =>
-      r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.label)}</a>` : esc(r.label)).join(' · ');
+    const status = typeof facts.status === 'string' ? facts.status : '';
+    const refsHtml = refs.map((r) =>
+      r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.label || r.url)}</a>`
+            : esc(r.label || '')).filter(Boolean).join(' · ');
+    // Nothing usable (missing/empty/unparseable) → skip the block entirely.
+    if (!title && !prose && !peaks && !adv && !status && !refsHtml) return '';
     return `<div class="pfas-narrative">
-      ${f.narrative_title ? `<div class="pfas-narr-title">📋 ${esc(f.narrative_title)}</div>` : ''}
-      <p class="pfas-narr-text">${esc(f.narrative)}</p>
+      ${title ? `<div class="pfas-narr-title">📋 ${esc(title)}</div>` : ''}
+      ${prose ? `<p class="pfas-narr-text">${esc(prose)}</p>` : ''}
       ${peaks ? `<div class="pfas-narr-h">Documented peak levels</div><ul class="pfas-narr-list">${peaks}</ul>` : ''}
       ${adv ? `<div class="pfas-narr-h">Advisories</div><ul class="pfas-narr-list adv">${adv}</ul>` : ''}
-      ${nf.status ? `<div class="pfas-narr-status"><span class="k">Status:</span> ${esc(nf.status)}</div>` : ''}
-      ${refs ? `<div class="pfas-narr-refs">Sources: ${refs}</div>` : ''}
+      ${status ? `<div class="pfas-narr-status"><span class="k">Status:</span> ${esc(status)}</div>` : ''}
+      ${refsHtml ? `<div class="pfas-narr-refs">Sources: ${refsHtml}</div>` : ''}
     </div>`;
   }
 
