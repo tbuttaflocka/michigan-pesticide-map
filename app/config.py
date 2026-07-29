@@ -76,6 +76,24 @@ COUNTIES_GEOJSON_URL = (
     "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 )
 
+# ---- US Census TIGER Gazetteer (places / county subdivisions / ZCTAs) ----
+# Tiny, stable, pipe-delimited text tables of every place, county subdivision
+# (township), and ZIP-code tabulation area, each with a name, an internal point
+# (lat/lng guaranteed inside the polygon), and land area. No API key. These
+# power the search box's city / village / township / CDP / ZIP lookup — loaded
+# once into the `places` table, never queried live per keystroke. Michigan is
+# state FIPS 26: the place + cousub files are per-state; ZCTAs are national only
+# (filtered to MI at load time). Cousub GEOIDs embed the county FIPS (chars 0-4),
+# so a township's parent county is exact; place/ZCTA counties are resolved by
+# point-in-polygon against the county boundaries.
+CENSUS_GAZ_YEAR = 2025
+CENSUS_GAZ_BASE = ("https://www2.census.gov/geo/docs/maps-data/data/gazetteer/"
+                   f"{CENSUS_GAZ_YEAR}_Gazetteer")
+CENSUS_GAZ_PLACE_URL = f"{CENSUS_GAZ_BASE}/{CENSUS_GAZ_YEAR}_gaz_place_26.txt"
+CENSUS_GAZ_COUSUB_URL = f"{CENSUS_GAZ_BASE}/{CENSUS_GAZ_YEAR}_gaz_cousubs_26.txt"
+CENSUS_GAZ_ZCTA_URL = f"{CENSUS_GAZ_BASE}/{CENSUS_GAZ_YEAR}_Gaz_zcta_national.zip"
+CENSUS_GAZ_CACHE_DIR = DATA_DIR / "gazetteer"
+
 # Optional USDA NASS Quick Stats — set NASS_API_KEY env var to enable
 NASS_API_KEY = os.environ.get("NASS_API_KEY", "").strip()
 NASS_API_URL = "https://quickstats.nass.usda.gov/api/api_GET/"

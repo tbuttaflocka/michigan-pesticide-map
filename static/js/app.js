@@ -530,6 +530,8 @@
     document.body.classList.remove('m-detail-open');   // close the mobile sheet
     clearSelectedCounty();
     clearDriftZone();
+    clearPlacePin();                                    // remove any place-search pin
+    hide($('place-context'));
   }
 
   // Clicking the map polygon toggles selection; search/list clicks call
@@ -1719,6 +1721,7 @@
 
   async function openCounty(fips) {
     showCountyPanel();     // county panel becomes the primary view, brought into view
+    renderPlaceContext(fips);  // show/clear the "place is in X County" banner
     selectCounty(fips);    // persistent gold outline
     showDriftZone(fips);   // no-op unless the drift-zone toggle is on
     const data = await api(`/api/county/${fips}`, { year: state.year, estimate: state.estimate });
@@ -4137,58 +4140,214 @@
   }
 
   // ---------- search ----------
+  // Grouped, keyboard-navigable search over Places (city/village/township/CDP/
+  // ZIP), Counties, Facilities (named sites across the overlays) and Chemicals.
+  // Michigan has many duplicate place names (Oscoda County inland vs Oscoda
+  // Township on the Lake Huron shore), so every place row shows its type and
+  // parent county. Selecting a place zooms to it, drops a pin, opens the parent
+  // county's panel, and explains that county-level data covers the whole county.
+  let _pendingPlaceContext = null;    // place awaiting its county panel (banner)
+  let _placePinLayer = null;          // temporary pin for the selected place
+
+  const _KIND_LABEL = {
+    city: 'City', village: 'Village', township: 'Township', cdp: 'CDP', zcta: 'ZIP code',
+  };
+
+  function placeDisplayName(p) {
+    if (p.kind === 'zcta') return `ZIP ${p.name}`;
+    if (p.kind === 'township') return p.name_full || `${p.name} Township`;
+    return p.name;
+  }
+
+  function placeCountyLabel(p) {
+    if (p.counties && p.counties.length > 1) {
+      return p.counties.join(' & ') + ' Counties';
+    }
+    return p.county_name ? `${p.county_name} County` : 'Michigan';
+  }
+
+  function placeContextSentence(p) {
+    const label = placeDisplayName(p);
+    if (p.counties && p.counties.length > 1) {
+      return `${label} spans ${p.counties.join(' and ')} Counties. The county data ` +
+             `below describes each entire county — showing ${p.county_name} County.`;
+    }
+    const c = p.county_name;
+    if (p.kind === 'zcta') {
+      return `ZIP ${p.name} is in ${c} County. ZIP codes don't align to county ` +
+             `boundaries; the county data below describes all of ${c} County.`;
+    }
+    return `${label} is in ${c} County — the county data below describes all of ${c} County.`;
+  }
+
+  function clearPlacePin() {
+    if (_placePinLayer) { state.map.removeLayer(_placePinLayer); _placePinLayer = null; }
+  }
+
+  function dropPlacePin(p) {
+    clearPlacePin();
+    if (p.lat == null || p.lng == null) return;
+    _placePinLayer = L.layerGroup().addTo(state.map);
+    L.marker([p.lat, p.lng], {
+      icon: L.divIcon({
+        className: 'place-pin-icon',
+        html: '<div class="place-pin">📍</div>',
+        iconSize: [30, 30], iconAnchor: [15, 30],
+      }),
+      zIndexOffset: 1500,
+    }).addTo(_placePinLayer)
+      .bindPopup(
+        `<div class="place-popup"><strong>${esc(placeDisplayName(p))}</strong><br>` +
+        `<span class="muted">${esc(_KIND_LABEL[p.kind] || p.kind)} · ` +
+        `${esc(placeCountyLabel(p))}</span></div>`)
+      .openPopup();
+  }
+
+  // Show/refresh the county panel's "this place is in X County" banner. Called
+  // at the top of openCounty; consumes _pendingPlaceContext so a direct county
+  // click (no pending place) never shows a stale banner.
+  function renderPlaceContext(fips) {
+    const box = $('place-context');
+    const p = _pendingPlaceContext;
+    _pendingPlaceContext = null;
+    if (!box) return;
+    if (!p || p.county_fips !== fips) { hide(box); return; }
+    box.querySelector('.place-context-text').textContent = placeContextSentence(p);
+    const btn = box.querySelector('.place-context-addr');
+    const label = placeDisplayName(p);
+    btn.textContent = `Check a specific address in ${label} →`;
+    btn.onclick = () => openAddressModal(`${label}, MI`);
+    show(box);
+  }
+
+  function selectPlace(p) {
+    const b = p.bbox;
+    if (b && b[0] != null) {
+      state.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: [40, 40], maxZoom: 13 });
+    } else if (p.lat != null) {
+      state.map.setView([p.lat, p.lng], 12);
+    }
+    dropPlacePin(p);
+    if (p.county_fips) { _pendingPlaceContext = p; openCounty(p.county_fips); }
+  }
+
+  function selectFacility(f) {
+    if (f.lat == null || f.lng == null) return;
+    // focusFinding enables the site's layer, flies to it, and opens its popup.
+    focusFinding(f.layer, f.id, Number(f.lat), Number(f.lng));
+  }
+
+  function selectCompound(name) {
+    state.compound = name;
+    $('filter-compound').value = name;
+    markFeatured(name);
+    refreshAll();
+  }
+
   function bindSearch() {
     const input = $('search');
     const out = $('search-results');
+    let items = [];        // [{el, onSelect}]
+    let active = -1;
     let t = null;
+
+    function openList() { show(out); input.setAttribute('aria-expanded', 'true'); }
+    function closeList() { hide(out); input.setAttribute('aria-expanded', 'false'); }
+
+    function setActive(i) {
+      if (active >= 0 && items[active]) items[active].el.classList.remove('active');
+      active = i;
+      if (active >= 0 && items[active]) {
+        items[active].el.classList.add('active');
+        items[active].el.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    function choose(i) {
+      const it = items[i];
+      if (!it) return;
+      closeList(); input.value = ''; setActive(-1);
+      it.onSelect();
+    }
+
+    function render(r) {
+      out.innerHTML = ''; items = []; active = -1;
+      const addGroup = (title, arr, make, onSelect) => {
+        if (!arr || !arr.length) return;
+        const h = document.createElement('div');
+        h.className = 'group-title'; h.textContent = title;
+        out.appendChild(h);
+        arr.forEach((d) => {
+          const el = make(d);
+          el.className = 'item';
+          el.setAttribute('role', 'option');
+          const idx = items.length;
+          el.addEventListener('mousemove', () => setActive(idx));
+          el.addEventListener('click', () => choose(idx));
+          items.push({ el, onSelect: () => onSelect(d) });
+          out.appendChild(el);
+        });
+      };
+
+      addGroup('Places', r.places, (p) => {
+        const el = document.createElement('div');
+        const title = p.kind === 'zcta' ? `ZIP ${esc(p.name)}` : esc(p.name);
+        el.innerHTML = `<span class="s-name">${title}</span>` +
+          `<span class="s-tag">${esc(_KIND_LABEL[p.kind] || p.kind)}</span>` +
+          `<span class="s-sub">${esc(placeCountyLabel(p))}</span>`;
+        return el;
+      }, selectPlace);
+
+      addGroup('Counties', r.counties, (c) => {
+        const el = document.createElement('div');
+        el.innerHTML = `<span class="s-name">${esc(c.name)} County</span>` +
+          `<span class="s-tag">County</span>`;
+        return el;
+      }, (c) => openCounty(c.fips));
+
+      addGroup('Facilities', r.facilities, (f) => {
+        const el = document.createElement('div');
+        const sub = [f.type_label, f.county ? `${f.county} County` : null]
+          .filter(Boolean).join(' · ');
+        el.innerHTML = `<span class="s-name">${esc(f.name)}</span>` +
+          `<span class="s-sub">${esc(sub)}</span>`;
+        return el;
+      }, selectFacility);
+
+      addGroup('Chemicals', r.compounds, (name) => {
+        const el = document.createElement('div');
+        el.innerHTML = `<span class="s-name">${esc(name)}</span>` +
+          `<span class="s-tag">Chemical</span>`;
+        return el;
+      }, selectCompound);
+
+      if (!items.length) {
+        out.innerHTML = '<div class="item muted">No matches</div>';
+      }
+      openList();
+    }
+
     input.addEventListener('input', () => {
       clearTimeout(t);
       const q = input.value.trim();
-      if (!q) { hide(out); return; }
+      if (!q) { closeList(); return; }
       t = setTimeout(async () => {
-        const r = await api('/api/search', { q });
-        out.innerHTML = '';
-        if (r.counties.length) {
-          const h = document.createElement('div');
-          h.className = 'group-title'; h.textContent = 'Counties';
-          out.appendChild(h);
-          r.counties.forEach((c) => {
-            const it = document.createElement('div');
-            it.className = 'item';
-            it.textContent = `${c.name} County`;
-            it.addEventListener('click', () => {
-              hide(out); input.value = '';
-              openCounty(c.fips);
-            });
-            out.appendChild(it);
-          });
-        }
-        if (r.compounds.length) {
-          const h = document.createElement('div');
-          h.className = 'group-title'; h.textContent = 'Compounds';
-          out.appendChild(h);
-          r.compounds.forEach((c) => {
-            const it = document.createElement('div');
-            it.className = 'item';
-            it.textContent = c;
-            it.addEventListener('click', () => {
-              hide(out); input.value = '';
-              state.compound = c;
-              $('filter-compound').value = c;
-              markFeatured(c);
-              refreshAll();
-            });
-            out.appendChild(it);
-          });
-        }
-        if (!r.counties.length && !r.compounds.length) {
-          out.innerHTML = '<div class="item muted">No matches</div>';
-        }
-        show(out);
+        try {
+          const r = await api('/api/search', { q });
+          render(r);
+        } catch (e) { /* transient network error — leave prior results */ }
       }, 180);
     });
+
+    input.addEventListener('keydown', (e) => {
+      if (out.classList.contains('hidden')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(active + 1, items.length - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(active - 1, 0)); }
+      else if (e.key === 'Enter') { if (active >= 0) { e.preventDefault(); choose(active); } }
+      else if (e.key === 'Escape') { closeList(); }
+    });
+
     document.addEventListener('click', (e) => {
-      if (!out.contains(e.target) && e.target !== input) hide(out);
+      if (!out.contains(e.target) && e.target !== input) closeList();
     });
   }
 
@@ -4220,19 +4379,30 @@
   const _rEsc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  function openAddressModal() {
+  // `prefill` seeds the address box (used by the place-search context banner's
+  // "Check a specific address in <place>" action). It's a string prefix the user
+  // then completes; a click event (from a plain button listener) is ignored.
+  function openAddressModal(prefill) {
     hide($('report-modal'));
     hide($('report-reopen'));
     show($('address-modal'));
     const inp = $('address-input');
-    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 30); }
+    const seed = typeof prefill === 'string' ? prefill : '';
+    if (inp) {
+      inp.value = seed;
+      setTimeout(() => {
+        inp.focus();
+        // put the caret at the front so the user types their street number first
+        if (seed) { try { inp.setSelectionRange(0, 0); } catch (e) { /* noop */ } }
+      }, 30);
+    }
     hide($('address-error'));
   }
 
   function setupAddressReport() {
-    $('open-address').addEventListener('click', openAddressModal);
+    $('open-address').addEventListener('click', () => openAddressModal());
     const countyBtn = $('county-check-address');
-    if (countyBtn) countyBtn.addEventListener('click', openAddressModal);
+    if (countyBtn) countyBtn.addEventListener('click', () => openAddressModal());
     $('address-close').addEventListener('click', () => hide($('address-modal')));
     $('address-modal').addEventListener('click', (e) => {
       if (e.target.id === 'address-modal') hide($('address-modal'));

@@ -93,11 +93,56 @@ a:hover { text-decoration: underline; }
   color: var(--muted);
   background: var(--bg-3);
 }
+.search-dropdown {
+  max-height: 62vh;
+  overflow-y: auto;
+}
 .search-dropdown .item {
   padding: 8px 12px;
   cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
 }
-.search-dropdown .item:hover { background: var(--bg-3); }
+.search-dropdown .item:hover,
+.search-dropdown .item.active { background: var(--bg-3); }
+.search-dropdown .item.active { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* result row: primary name + a small type tag + a muted parent-county subline */
+.search-dropdown .s-name { color: var(--text); font-weight: 600; }
+.search-dropdown .s-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.search-dropdown .s-sub {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* place -> county context banner inside the county panel */
+.place-context {
+  background: rgba(88, 166, 255, .08);
+  border: 1px solid rgba(88, 166, 255, .28);
+  border-left: 3px solid var(--link);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin: 4px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.place-context .place-context-text { color: var(--text); }
+.place-context .place-context-addr {
+  display: inline-block;
+  margin-top: 5px;
+  color: var(--link);
+  cursor: pointer;
+}
 
 .btn-ghost {
   background: transparent;
@@ -2213,6 +2258,11 @@ a:hover { text-decoration: underline; }
 
 .report-pin-icon { background: transparent; border: 0; }
 .report-pin { font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+
+/* pin dropped when a city/township/ZIP is chosen from search */
+.place-pin-icon { background: transparent; border: 0; }
+.place-pin { font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+.place-popup { font-size: 12px; line-height: 1.4; }
 
 @media (max-width: 640px) {
   .report-card { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }

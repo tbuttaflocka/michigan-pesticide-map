@@ -153,6 +153,21 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 
 ## Features
 
+- **Search** — one box over four grouped result types: **Places** (cities, villages,
+  townships, CDPs and ZIP codes — because most people don't think in counties, and
+  Michigan township identity is strong), **Counties**, **Facilities** (named sites
+  across TRI, Superfund/contamination, landfills, PFAS, storage tanks and coal ash —
+  so someone who heard "Wurtsmith", "Velsicol", "Wolverine" or "Wayne Disposal" in
+  the news can find it), and **Chemicals**. Every place shows its **type + parent
+  county** so Michigan's many duplicate names disambiguate at a glance (the canonical
+  trap: *Oscoda County* inland vs *Oscoda Township* in Iosco County, on the Lake
+  Huron shore by the former Wurtsmith AFB / PFAS site; *Grant* is a township in 10+
+  counties). Multi-county places list all their counties. Selecting a place zooms to
+  its bounds, drops a pin, opens its **parent county's** detail panel, and shows a
+  banner explaining that county-level data covers the whole county — with a one-click
+  path into the address-level report. Keyboard-navigable (↑/↓/Enter/Esc) and
+  mobile-friendly. Data is the Census TIGER gazetteer loaded locally (no per-keystroke
+  API call).
 - **Heat-map view** — county choropleth, layer toggles (category / specific compound),
   Low/Avg/High estimate switch, total-vs-kg/mi² normalization, time slider
   (1992–2012) with play animation, click-for-county-detail with charts.
@@ -304,6 +319,7 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 |---|---|---|
 | **USGS NAWQA EPest** county-level pesticide use, 1992–2019 | ✅ live download | Primary heat-map dataset. ~388 active ingredients × 83 MI counties × 28 years. 1992–2012 from the legacy per-year files; 2013–2017 from the finalized v2.0 ScienceBase release (DOI 10.5066/P9F2SRYH); 2018 + 2019 from the preliminary ScienceBase releases (DOIs 10.5066/P920L09S and 10.5066/P9EDTHQL). USGS plans 2020–2022 final estimates for publication in 2026. |
 | **US Census TIGER** county boundaries (plotly mirror) | ✅ live download | Filtered to STATE FIPS 26. |
+| **US Census TIGER Gazetteer** places, county subdivisions & ZCTAs | ✅ live download | Powers the search box's city / village / township / CDP / ZIP lookup. Tiny, stable, pipe-delimited text tables (no shapefile/API-key dependency) parsed into the `places` table: 745 cities/villages/CDPs, 1,240 townships, ~990 Michigan ZIP areas. Each row carries a type + parent county so duplicate names disambiguate (Oscoda County inland vs Oscoda Township in Iosco, on the Lake Huron shore). Township parent county is exact (embedded in the cousub GEOID); places/ZIPs are located by point-in-polygon against the county boundaries. Centroid = Census internal point; bbox derived from land area for zoom-to-place. |
 | **Pesticide categories** (herbicide / insecticide / fungicide / etc.) | ✅ embedded reference | Curated mapping built from EPA labels and university extension publications; see `app/categories.py`. |
 | **USDA NASS Quick Stats** crop acreage | ⚙️ optional | Set `NASS_API_KEY=...` (free at quickstats.nass.usda.gov/api) before running the loader. |
 | **NCI / CDC State Cancer Profiles** county cancer incidence & mortality, 2018–2022 | ✅ live download | County age-adjusted rates for 11 cancer types (incidence + mortality + late-stage). The site's `?…&output=1` export returns the empty HTML form to a browser but real CSV to the loader's `urllib` client; parsed rows land in `data/cancer/` and SQLite. Falls back to the Michigan statewide baseline in `app/cancer_data.py` if a fetch yields no county rows. |
@@ -440,6 +456,7 @@ or truncated download **fails the build** rather than shipping a broken app.
 | `water_quality` (WQP samples) | **Quarterly** | New samples posted continuously |
 | `superfund` (EPA NPL) | **Quarterly** | Site statuses change through the year |
 | `landfills` (EGLE Part 115 / Part 111) | **Quarterly** | Facility licensing/status changes through the year; EGLE refreshes the open-data layers periodically. |
+| `places` (Census TIGER gazetteer) | **Annual** | The gazetteer is republished yearly; the search index rarely needs updating. |
 
 ### Scheduling on Windows (Task Scheduler)
 
@@ -531,7 +548,7 @@ michigan-pesticide-map/
 | `GET /api/county/<fips>?year=&estimate=` | Detail for the county sidebar |
 | `GET /api/statewide?year=&estimate=` | Top-N counties + compounds + trend + categories |
 | `GET /api/compound/<name>?estimate=` | Statewide trend + per-county breakdown for one compound |
-| `GET /api/search?q=` | Type-ahead search over counties & compounds |
+| `GET /api/search?q=` | Grouped type-ahead search over **places** (city/village/township/CDP/ZIP, each with its type + parent county for disambiguation), counties, **facilities** (named sites across TRI/Superfund/landfills/PFAS/UST/coal-ash), and chemicals |
 | `GET /api/respiratory/counties?metric=` | Per-county asthma/COPD ED + hosp rates for the choropleth |
 | `GET /api/respiratory/trends?metric=&fips=` | Yearly trend, statewide or county |
 | `GET /api/respiratory/seasonal` | Statewide season-of-year asthma ED index |

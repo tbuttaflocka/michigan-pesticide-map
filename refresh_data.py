@@ -318,6 +318,18 @@ SOURCES: list[Source] = [
         coverage=lambda conn: ("2017", "2017"),
     ),
     Source(
+        id="places",
+        label="US Census TIGER Gazetteer — places, townships & ZIP areas",
+        loaders=[dl.load_places],
+        targets=["places"],
+        primary_target="places", primary_source_id="census_gazetteer",
+        # The gazetteer changes only when the Census republishes it (annually);
+        # the search index rarely needs updating. load_places rebuilds the table
+        # wholesale from the county boundaries, so it only needs counties seeded.
+        interval_months=12, min_abs=1000, floor_frac=0.8,
+        coverage=lambda conn: (None, None),
+    ),
+    Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
         loaders=[chem_ref.load_chemical_reference],
         targets=["chemical_reference"],

@@ -921,25 +921,164 @@ def api_compound(compound: str):
     })
 
 
+# Facility layers searchable by name. Each tuple:
+#   (table, name_col, alt_name_col, id_col, county_col, layer, type_label)
+# `layer` maps to the frontend's _FOCUS config so selecting a result flies to
+# the site and opens its popup. UST is handled specially (its category picks the
+# focus layer); coal-ash lives in a Python module, not the DB (handled below).
+_FACILITY_TABLES = [
+    ("tri_facility",        "facility_name", "parent_company", "facility_id", "county",
+     "tri",           "TRI toxic-release facility"),
+    ("contamination_sites", "site_name",     "company",        "site_key",    "county",
+     "contamination", "Contamination / Superfund site"),
+    ("landfill_sites",      "name",          "operator",       "site_key",    "county",
+     "landfill",      "Landfill / waste facility"),
+    ("pfas_features",       "name",          None,             "feature_key", "county",
+     "pfas",          "PFAS site"),
+]
+
+
+def _table_exists(cur, name: str) -> bool:
+    return cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _search_places(cur, q: str, limit: int = 12) -> list[dict]:
+    """Cities, villages, townships, CDPs and ZIP areas matching `q`, each with its
+    type and parent county so the UI can disambiguate duplicate names."""
+    if not _table_exists(cur, "places"):
+        return []
+    qu = q.upper()
+    rows = cur.execute(
+        """
+        SELECT place_id, name, name_full, kind, county_fips, county_name, counties,
+               lat, lng, min_lat, min_lng, max_lat, max_lng
+          FROM places
+         WHERE UPPER(name) LIKE :contains OR UPPER(name_full) LIKE :contains
+         ORDER BY
+           CASE WHEN UPPER(name) = :exact THEN 0
+                WHEN UPPER(name) LIKE :starts THEN 1
+                ELSE 2 END,
+           CASE kind WHEN 'city' THEN 0 WHEN 'township' THEN 1
+                     WHEN 'village' THEN 2 WHEN 'cdp' THEN 3 ELSE 4 END,
+           length(name), name
+         LIMIT :lim
+        """,
+        {"contains": f"%{qu}%", "exact": qu, "starts": f"{qu}%", "lim": limit},
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "place_id": r["place_id"],
+            "name": r["name"],
+            "name_full": r["name_full"],
+            "kind": r["kind"],
+            "county_fips": r["county_fips"],
+            "county_name": r["county_name"],
+            "counties": json.loads(r["counties"]) if r["counties"] else None,
+            "lat": r["lat"], "lng": r["lng"],
+            "bbox": [r["min_lat"], r["min_lng"], r["max_lat"], r["max_lng"]],
+        })
+    return out
+
+
+def _search_facilities(cur, q: str, limit: int = 10) -> list[dict]:
+    """Named sites across TRI, Superfund/contamination, landfills, PFAS, UST and
+    coal ash — so people who heard about Wurtsmith, Velsicol, Wolverine or Wayne
+    Disposal in the news can find them by name."""
+    qu = q.upper()
+    contains = f"%{qu}%"
+    found: list[dict] = []
+
+    def _rank(name: str) -> int:
+        n = (name or "").upper()
+        return 0 if n == qu else (1 if n.startswith(qu) else 2)
+
+    for table, name_col, alt_col, id_col, county_col, layer, type_label in _FACILITY_TABLES:
+        if not _table_exists(cur, table):
+            continue
+        where = f"UPPER({name_col}) LIKE ?"
+        params = [contains]
+        if alt_col:
+            where += f" OR UPPER({alt_col}) LIKE ?"
+            params.append(contains)
+        sql = (f"SELECT {name_col} AS name, {id_col} AS id, {county_col} AS county, "
+               f"latitude AS lat, longitude AS lng FROM {table} "
+               f"WHERE ({where}) AND latitude IS NOT NULL LIMIT 6")
+        for r in cur.execute(sql, params).fetchall():
+            found.append({
+                "name": r["name"], "id": r["id"], "county": r["county"],
+                "lat": r["lat"], "lng": r["lng"],
+                "layer": layer, "type_label": type_label,
+            })
+
+    # UST: category decides which focus layer (open leak vs other) to fly to.
+    if _table_exists(cur, "ust_sites"):
+        for r in cur.execute(
+            "SELECT facility_name AS name, site_key AS id, county, latitude AS lat, "
+            "longitude AS lng, category FROM ust_sites "
+            "WHERE UPPER(facility_name) LIKE ? AND latitude IS NOT NULL LIMIT 6",
+            (contains,),
+        ).fetchall():
+            found.append({
+                "name": r["name"], "id": r["id"], "county": r["county"],
+                "lat": r["lat"], "lng": r["lng"],
+                "layer": "ust_open" if r["category"] == "leaking_open" else "ust_other",
+                "type_label": "Storage-tank site",
+            })
+
+    # Coal ash lives in a curated Python module, not the DB.
+    for s in coal_ash_data.COAL_ASH_SITES:
+        nm = s.get("name", "")
+        if qu in nm.upper():
+            found.append({
+                "name": nm, "id": None, "county": s.get("county"),
+                "lat": s.get("lat"), "lng": s.get("lon"),
+                "layer": "coal_ash", "type_label": "Coal ash (CCR) site",
+            })
+
+    found.sort(key=lambda f: (_rank(f["name"]), len(f["name"] or "")))
+    # de-dupe identical name+layer collisions, keep first (best-ranked)
+    seen = set()
+    deduped = []
+    for f in found:
+        key = (f["name"], f["layer"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+    return deduped[:limit]
+
+
 @app.route("/api/search")
 def api_search():
-    """Free-text search over counties and compounds."""
+    """Free-text search over places, counties, facilities and chemicals.
+
+    Grouped so a mixed result set stays readable: Places (city/village/township/
+    CDP/ZIP, each with its parent county for disambiguation), Counties, Facilities
+    (named sites across the overlays), and Chemicals (pesticide compounds).
+    """
     q = (request.args.get("q") or "").strip()
     if not q:
-        return lb_jsonify({"counties": [], "compounds": []})
+        return lb_jsonify({"places": [], "counties": [],
+                           "facilities": [], "compounds": []})
     like = f"%{q.upper()}%"
     conn = db()
     cur = conn.cursor()
     counties = [dict(r) for r in cur.execute(
-        "SELECT fips, name FROM counties WHERE UPPER(name) LIKE ? ORDER BY name LIMIT 10",
+        "SELECT fips, name FROM counties WHERE UPPER(name) LIKE ? ORDER BY name LIMIT 8",
         (like,),
     )]
     compounds = [r[0] for r in cur.execute(
-        "SELECT DISTINCT compound FROM pesticide_use WHERE compound LIKE ? ORDER BY compound LIMIT 15",
+        "SELECT DISTINCT compound FROM pesticide_use WHERE compound LIKE ? ORDER BY compound LIMIT 12",
         (like,),
     )]
+    places = _search_places(cur, q)
+    facilities = _search_facilities(cur, q)
     conn.close()
-    return lb_jsonify({"counties": counties, "compounds": compounds})
+    return lb_jsonify({"places": places, "counties": counties,
+                       "facilities": facilities, "compounds": compounds})
 
 
 # ---------- Respiratory endpoints ----------

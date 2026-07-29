@@ -24,7 +24,9 @@
       <button data-view="respiratory">Respiratory</button>
       <button data-view="cancer">Cancer</button>
     </div>
-    <input id="search" type="search" placeholder="Search county or compound…" autocomplete="off" />
+    <input id="search" type="search" placeholder="Search a city, county, facility, or chemical…"
+      autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
+      aria-controls="search-results" />
     <div id="search-results" class="search-dropdown hidden"></div>
     <button id="open-address" class="btn-primary address-btn" title="Check environmental hazards near an address">🏠 Check an address</button>
     <button id="open-intro" class="btn-ghost help-btn" title="What is this? (intro & how to use)" aria-label="Open the intro and help">?</button>
@@ -353,6 +355,14 @@
       <button class="close" id="county-close" aria-label="Close county panel">×</button>
       <h2 id="county-name">—</h2>
       <p class="county-meta"><span id="county-fips"></span> · <span id="county-area"></span></p>
+
+      <!-- Shown when the county panel was opened by choosing a city/township/ZIP
+           from search: explains the place→county relationship + offers an
+           address check. Populated + toggled by app.js (renderPlaceContext). -->
+      <div id="place-context" class="place-context hidden">
+        <span class="place-context-text"></span>
+        <button type="button" class="place-context-addr link-btn"></button>
+      </div>
 
       <button id="county-check-address" class="btn-primary county-address-btn" type="button"
         data-tip="Check the documented environmental hazards near a specific address in this county.">🏠 Check an address in this county</button>

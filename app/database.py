@@ -570,6 +570,36 @@ CREATE TABLE IF NOT EXISTS chemical_reference (
     source             TEXT,               -- 'pubchem' | 'none'
     fetched_at         TEXT                -- ISO timestamp of the fetch
 );
+
+-- ===== Searchable places (US Census TIGER gazetteer) =====
+-- Cities, villages, townships, CDPs and ZIP-code areas so the search box can
+-- find a location the way people actually think of it (most don't think in
+-- counties, and Michigan township identity is strong). Every row carries its
+-- `kind` and parent county so the UI can disambiguate Michigan's many duplicate
+-- names — the canonical trap being Oscoda County (inland, NE Lower Peninsula)
+-- vs Oscoda Township (Iosco County, on the Lake Huron shore; Wurtsmith/PFAS).
+-- `lat`/`lng` is the Census internal point (guaranteed inside the polygon); the
+-- bbox is derived from land area purely to frame a zoom-to-place. `counties` is
+-- a JSON name array only when a place spans more than one county. Loaded once
+-- from the tiny, stable gazetteer text files — no live API call per keystroke.
+CREATE TABLE IF NOT EXISTS places (
+    place_id     TEXT PRIMARY KEY,   -- 'place:2661320' | 'cousub:2606961340' | 'zcta:48750'
+    name         TEXT NOT NULL,      -- display name, type suffix stripped ('Oscoda')
+    name_full    TEXT,               -- original gazetteer name ('Oscoda charter township')
+    kind         TEXT NOT NULL,      -- city | village | township | cdp | zcta
+    county_fips  TEXT,               -- primary (containing) county FIPS
+    county_name  TEXT,               -- primary county name
+    counties     TEXT,               -- JSON [names] when the place spans >1 county, else NULL
+    lat          REAL NOT NULL,      -- Census internal point (inside the polygon)
+    lng          REAL NOT NULL,
+    min_lat      REAL,               -- approx bbox (from land area) for zoom-to-place
+    min_lng      REAL,
+    max_lat      REAL,
+    max_lng      REAL,
+    area_sq_mi   REAL
+);
+CREATE INDEX IF NOT EXISTS ix_places_name ON places(name);
+CREATE INDEX IF NOT EXISTS ix_places_kind ON places(kind);
 """
 
 

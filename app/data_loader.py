@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 import sqlite3
@@ -16,6 +17,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -25,6 +27,12 @@ from . import spraying_programs
 from . import stats
 from .categories import categorize
 from .config import (
+    CENSUS_GAZ_BASE,
+    CENSUS_GAZ_CACHE_DIR,
+    CENSUS_GAZ_COUSUB_URL,
+    CENSUS_GAZ_PLACE_URL,
+    CENSUS_GAZ_YEAR,
+    CENSUS_GAZ_ZCTA_URL,
     COUNTIES_GEOJSON_URL,
     DATA_DIR,
     GEOJSON_PATH,
@@ -2469,6 +2477,202 @@ def _build_county_locator():
     return locate
 
 
+# ---------- searchable places (Census TIGER gazetteer) ----------
+#
+# Cities, villages, townships, CDPs and ZIP areas for the search box. The
+# gazetteer files are tiny, stable, pipe-delimited text tables; we cache them and
+# parse with the stdlib (no shapefile/geopandas dependency). Type is read from the
+# name suffix ("Oscoda charter township" -> township). Township parent county is
+# EXACT (embedded in the 10-digit cousub GEOID); places and ZIP areas are located
+# by point-in-polygon of their internal point against the county boundaries.
+
+# Name suffix -> our `kind`. Order matters: "charter township" before "township".
+_GAZ_SUFFIX_KIND = [
+    ("charter township", "township"),
+    ("township", "township"),
+    ("city", "city"),
+    ("village", "village"),
+    ("CDP", "cdp"),
+]
+
+
+def _gaz_split_name(name: str) -> tuple[str, str | None]:
+    """'Oscoda charter township' -> ('Oscoda', 'township'). Unknown suffix -> (name, None)."""
+    for suffix, kind in _GAZ_SUFFIX_KIND:
+        if name.endswith(" " + suffix):
+            return name[: -(len(suffix) + 1)].strip(), kind
+    return name.strip(), None
+
+
+def _parse_gaz(text: str):
+    """Yield dict rows from a pipe-delimited Census gazetteer table (header row 1)."""
+    lines = text.splitlines()
+    if not lines:
+        return
+    header = [h.strip() for h in lines[0].split("|")]
+    for ln in lines[1:]:
+        parts = ln.split("|")
+        if len(parts) != len(header):
+            continue
+        yield {h: v.strip() for h, v in zip(header, parts)}
+
+
+def _gaz_bbox(lat: float, lng: float, aland_m2: float, pad: float = 1.35):
+    """Approximate (min_lat, min_lng, max_lat, max_lng) from a centroid + land
+    area, treating the footprint as an equal-area circle. Used ONLY to frame a
+    zoom-to-place — never for analysis, so the circle approximation is fine."""
+    r = math.sqrt(max(aland_m2, 1.0) / math.pi) * pad          # metres
+    dlat = r / 111_320.0
+    dlng = r / (111_320.0 * max(math.cos(math.radians(lat)), 0.2))
+    return (lat - dlat, lng - dlng, lat + dlat, lng + dlng)
+
+
+def _gaz_cache(url: str) -> Path:
+    """Download a gazetteer file into the cache (once) and return its path."""
+    CENSUS_GAZ_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = CENSUS_GAZ_CACHE_DIR / url.rsplit("/", 1)[-1]
+    if _need_download(path, 1000, force=FORCE_REFRESH):
+        size = download_to(url, path, timeout=180)
+        log(f"  fetched {size/1024:.0f} KB -> {path.name}", level="ok")
+    return path
+
+
+def load_places(conn: sqlite3.Connection) -> int:
+    """Load searchable Michigan places from the US Census TIGER gazetteer:
+    incorporated cities & villages and CDPs (place file), townships (county-
+    subdivision file), and ZIP-code areas (national ZCTA file, filtered to MI).
+
+    Every row keeps a `kind` and parent county so the search UI can disambiguate
+    Michigan's duplicate names (Oscoda County vs Oscoda Township in Iosco). The
+    centroid is the Census internal point; the bbox is derived from land area for
+    zoom-to-place. Townships get their exact county from the cousub GEOID; places
+    and ZIP areas are located by point-in-polygon against the county boundaries.
+    """
+    log("Loading Census TIGER gazetteer places (cities/villages/townships/CDPs/ZIPs)...")
+    conn.execute("DELETE FROM places")
+    locate = _build_county_locator()
+    name_by_fips = {r["fips"]: r["name"]
+                    for r in conn.execute("SELECT fips, name FROM counties")}
+
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def resolve_counties(lat, lng, aland):
+        """(primary_fips, primary_name, counties_json|None) for a place/ZIP by
+        point-in-polygon. Samples 8 compass points at the equal-area radius so a
+        place that genuinely spans counties lists them all; a compact place stays
+        single-county. The internal point's county is always the primary."""
+        pf, pn = locate(lng, lat)
+        found: dict[str, str] = {}
+        if pf:
+            found[pf] = pn
+        r = math.sqrt(max(aland, 1.0) / math.pi)               # metres (unpadded)
+        for ang in range(0, 360, 45):
+            dlat = (r * math.cos(math.radians(ang))) / 111_320.0
+            dlng = (r * math.sin(math.radians(ang))) / (
+                111_320.0 * max(math.cos(math.radians(lat)), 0.2))
+            f, n = locate(lng + dlng, lat + dlat)
+            if f:
+                found.setdefault(f, n)
+        if not pf and found:
+            pf, pn = next(iter(found.items()))
+        names = sorted({n for n in found.values() if n})
+        counties_json = json.dumps(names) if len(names) > 1 else None
+        return pf, pn, counties_json
+
+    rows: list[tuple] = []
+    n_place = n_twp = n_zip = 0
+
+    def add(place_id, name, name_full, kind, cfips, cname, counties, lat, lng, aland):
+        bb = _gaz_bbox(lat, lng, aland)
+        rows.append((place_id, name, name_full, kind, cfips, cname, counties,
+                     lat, lng, bb[0], bb[1], bb[2], bb[3],
+                     round(aland / 2_589_988.11, 3) if aland else None))
+
+    # --- places: cities / villages / CDPs ---
+    try:
+        text = _gaz_cache(CENSUS_GAZ_PLACE_URL).read_text(encoding="latin-1")
+        for row in _parse_gaz(text):
+            lat, lng, aland = _num(row.get("INTPTLAT")), _num(row.get("INTPTLONG")), _num(row.get("ALAND")) or 0.0
+            if lat is None or lng is None:
+                continue
+            disp, kind = _gaz_split_name(row.get("NAME", ""))
+            if kind not in ("city", "village", "cdp"):
+                continue
+            cfips, cname, counties = resolve_counties(lat, lng, aland)
+            add(f"place:{row.get('GEOID')}", disp, row.get("NAME"), kind,
+                cfips, cname, counties, lat, lng, aland)
+            n_place += 1
+    except Exception as e:                                       # noqa: BLE001
+        log(f"  place file failed: {e}", level="warn")
+
+    # --- county subdivisions: townships (exact county from GEOID) ---
+    try:
+        text = _gaz_cache(CENSUS_GAZ_COUSUB_URL).read_text(encoding="latin-1")
+        for row in _parse_gaz(text):
+            disp, kind = _gaz_split_name(row.get("NAME", ""))
+            if kind != "township":                              # cities here duplicate the place file
+                continue
+            lat, lng, aland = _num(row.get("INTPTLAT")), _num(row.get("INTPTLONG")), _num(row.get("ALAND")) or 0.0
+            if lat is None or lng is None:
+                continue
+            geoid = row.get("GEOID", "")
+            cfips = geoid[:5] if len(geoid) >= 5 else None       # state(2)+county(3)
+            cname = name_by_fips.get(cfips)
+            add(f"cousub:{geoid}", disp, row.get("NAME"), kind,
+                cfips, cname, None, lat, lng, aland)
+            n_twp += 1
+    except Exception as e:                                       # noqa: BLE001
+        log(f"  cousub file failed: {e}", level="warn")
+
+    # --- ZCTAs: ZIP areas (national file, filter to MI by prefix + county) ---
+    try:
+        zpath = _gaz_cache(CENSUS_GAZ_ZCTA_URL)
+        with zipfile.ZipFile(zpath) as zf:
+            member = next(n for n in zf.namelist() if n.lower().endswith(".txt"))
+            text = zf.read(member).decode("latin-1")
+        for row in _parse_gaz(text):
+            zcta = row.get("GEOID", "")
+            if zcta[:2] not in ("48", "49"):                    # Michigan ZIP prefixes
+                continue
+            lat, lng, aland = _num(row.get("INTPTLAT")), _num(row.get("INTPTLONG")), _num(row.get("ALAND")) or 0.0
+            if lat is None or lng is None:
+                continue
+            cfips, cname, counties = resolve_counties(lat, lng, aland)
+            if not cfips:                                        # centroid not in any MI county — skip
+                continue
+            add(f"zcta:{zcta}", zcta, f"ZIP {zcta}", "zcta",
+                cfips, cname, counties, lat, lng, aland)
+            n_zip += 1
+    except Exception as e:                                       # noqa: BLE001
+        log(f"  ZCTA file failed: {e}", level="warn")
+
+    conn.executemany(
+        """INSERT OR REPLACE INTO places(
+             place_id, name, name_full, kind, county_fips, county_name, counties,
+             lat, lng, min_lat, min_lng, max_lat, max_lng, area_sq_mi)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
+    conn.commit()
+
+    total = len(rows)
+    status = "ok" if total else "unavailable"
+    record_source(
+        conn, "census_gazetteer",
+        "US Census TIGER Gazetteer — places, townships & ZIP areas (Michigan)",
+        CENSUS_GAZ_BASE, status, total,
+        f"{n_place} cities/villages/CDPs, {n_twp} townships, {n_zip} ZIP areas "
+        f"({CENSUS_GAZ_YEAR} gazetteer, state FIPS 26). Powers the search box's "
+        f"place/township/ZIP lookup and disambiguation.",
+        coverage_start=str(CENSUS_GAZ_YEAR), coverage_end=str(CENSUS_GAZ_YEAR),
+    )
+    log(f"  places loaded: {n_place} places + {n_twp} townships + {n_zip} ZIPs "
+        f"= {total}", level="ok")
+    return total
+
+
 def overpass_fetch(query: str, *, timeout: int = 180) -> dict:
     """POST an Overpass QL query, trying each mirror in turn. Raises if all fail."""
     data = query.encode("utf-8")
@@ -3732,6 +3936,9 @@ def run() -> int:
     counties = load_counties_geojson(conn)
     log(f"counties loaded: {counties}", level="ok")
 
+    places = load_places(conn)
+    log(f"searchable places loaded: {places}", level="ok")
+
     rows, ok_years, failed_years = load_usgs_pesticide_use(conn)
     log(f"USGS pesticide_use rows: {rows:,} across {len(ok_years)} years", level="ok")
 
@@ -3763,7 +3970,7 @@ def run() -> int:
 
     # Summary
     cur = conn.cursor()
-    for t in ("counties", "pesticide_use", "pesticide_categories",
+    for t in ("counties", "places", "pesticide_use", "pesticide_categories",
               "crop_acreage", "data_sources",
               "respiratory_ed_visits", "respiratory_hospitalizations",
               "respiratory_prevalence", "respiratory_mortality",
