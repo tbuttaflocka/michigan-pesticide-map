@@ -3686,13 +3686,19 @@ def _pfas_row(r) -> dict:
         "landfill_site_key": r["landfill_site_key"],
     }
     # Optional curated narrative layer (app/pfas_narratives.py) — guarded so an
-    # older DB without the columns still serves fine.
+    # older DB without the columns, or a malformed value, still serves fine (a bad
+    # JSON blob degrades that one field, never 500s the whole feed).
+    def _safe_json(v, default):
+        try:
+            return json.loads(v) if v else default
+        except (TypeError, ValueError):
+            return default
     keys = r.keys()
     if "narrative" in keys and r["narrative"]:
         row["narrative"] = r["narrative"]
         row["narrative_title"] = r["narrative_title"] if "narrative_title" in keys else None
-        row["narrative_facts"] = json.loads(r["narrative_facts"]) if r["narrative_facts"] else {}
-        row["narrative_refs"] = json.loads(r["narrative_refs"]) if r["narrative_refs"] else []
+        row["narrative_facts"] = _safe_json(r["narrative_facts"], {})
+        row["narrative_refs"] = _safe_json(r["narrative_refs"], [])
     # Drop null columns before serializing. Most fields are kind-specific (a pws
     # hexbin has no address/site_lead/hyperlink, etc.), and 1,449 hexbins each
     # carrying a dozen "key": null pairs is pure payload weight. The client reads

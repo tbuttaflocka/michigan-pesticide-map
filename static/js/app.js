@@ -4091,6 +4091,8 @@
 
     $('county-close').addEventListener('click', closeCountyPanel);
     $('county-back').addEventListener('click', closeCountyPanel);
+    const shareBtn = $('share-view');
+    if (shareBtn) shareBtn.addEventListener('click', shareCurrentView);
     $('open-sources').addEventListener('click', openSources);
     $('sources-close').addEventListener('click', () => hide($('sources-modal')));
     $('sources-modal').addEventListener('click', (e) => {
@@ -5655,35 +5657,226 @@
     }
   }
 
-  // Apply shareable map-state query params (?normalize=&year=&category=&compound=)
-  // so a specific map view can be linked or bookmarked. Controls are synced to
-  // match. Called after the UI is populated, before the first refresh.
-  function applyUrlParams() {
-    const p = new URLSearchParams(location.search);
-    const norm = p.get('normalize');
-    if (norm && ['total', 'per_sq_mile', 'per_acre'].includes(norm)) {
-      state.normalize = norm;
-      document.querySelectorAll('#seg-normalize button').forEach((b) =>
-        b.classList.toggle('active', b.dataset.val === norm));
+  // ===================== Shareable "view state" deep links =====================
+  // "Share this view" captures the current map view — the active choropleth, which
+  // overlays (and sub-layers, e.g. PFAS Sites vs hexbins) are on, the map center +
+  // zoom, and the active layer's compound / metric / year — as a compact URL with
+  // short keys, and copies it to the clipboard. Opening that URL reproduces the
+  // view. It encodes VIEW STATE ONLY (layers / location / zoom); it never includes
+  // any address typed into the homebuyer report — that is POSTed and never put in a
+  // URL (see submitAddress), and this code reads no address input.
+  //
+  // Each layer: { c: short code, cb: checkbox id, def?: default-on sub letters,
+  //               subs?: [[letter, checkbox id], ...] }. A layer with sub-filters
+  // encodes them as "code-<onLetters>" only when they deviate from `def` (keeps the
+  // URL short). Codes are 2-3 chars so a full multi-layer link stays compact.
+  const SHARE_LAYERS = [
+    { c: 'wqs', cb: 'wq-sites' },
+    { c: 'wqh', cb: 'wq-heat' },
+    { c: 'wqw', cb: 'wq-watersheds' },
+    { c: 'ct',  cb: 'contam-sites', def: 'ns',
+      subs: [['n', 'contam-f-npl'], ['s', 'contam-f-state'], ['d', 'contam-f-deleted']] },
+    { c: 'ctz', cb: 'contam-zones' },
+    { c: 'tri', cb: 'tri-sites' },
+    { c: 'lf',  cb: 'landfill-sites', def: 'mich',
+      subs: [['m', 'landfill-f-msw'], ['i', 'landfill-f-industrial'],
+             ['c', 'landfill-f-coal_ash'], ['h', 'landfill-f-hazardous']] },
+    { c: 'gf',  cb: 'golf-sites', def: 'mpu',
+      subs: [['m', 'golf-f-municipal'], ['p', 'golf-f-private'], ['u', 'golf-f-unknown']] },
+    { c: 'pf',  cb: 'pfas-sites', def: 'saw',
+      subs: [['s', 'pfas-f-site'], ['a', 'pfas-f-aoi'], ['w', 'pfas-f-surface_water'],
+             ['p', 'pfas-f-pws'], ['f', 'pfas-f-fish'], ['t', 'pfas-f-potw']] },
+    { c: 'ust', cb: 'ust-sites', def: 'o',
+      subs: [['o', 'ust-f-leaking_open'], ['c', 'ust-f-leaking_closed'], ['l', 'ust-f-licensed']] },
+    { c: 'sp',  cb: 'spraying-programs' },
+    { c: 'ca',  cb: 'coal-ash-sites' },
+    { c: 'wr',  cb: 'wind-roses' },
+    { c: 'wd',  cb: 'wind-drift' },
+    { c: 'wz',  cb: 'wind-driftzone' },
+  ];
+  const SHARE_LAYER_BY_CODE = Object.fromEntries(SHARE_LAYERS.map((l) => [l.c, l]));
+
+  // Activate the button in whichever segmented control owns this value (data-vals
+  // are unique across the estimate / normalize / cancer-measure segments).
+  function activateSegByVal(v) {
+    const btn = document.querySelector(`.seg button[data-val="${v}"]`);
+    if (!btn) return;
+    const seg = btn.closest('.seg');
+    if (seg) seg.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+  }
+
+  // Build the compact query string encoding the current view.
+  function captureViewState() {
+    const q = new URLSearchParams();
+    const activeBtn = document.querySelector('#view-switch button.active');
+    const view = activeBtn ? activeBtn.dataset.view : 'map';
+    if (view && view !== 'map') q.set('v', view);
+    if (state.activeChoropleth && state.activeChoropleth !== 'pesticide') q.set('ch', state.activeChoropleth);
+
+    const latest = state.years[state.years.length - 1];
+    if (state.year && state.year !== latest) q.set('yr', String(state.year));
+    if (state.estimate && state.estimate !== 'avg') q.set('est', state.estimate);
+    if (state.normalize && state.normalize !== 'total') q.set('nm', state.normalize);
+    if (state.category && state.category !== 'all') q.set('cat', state.category);
+    if (state.compound) q.set('cmp', state.compound);
+
+    if (state.resp.metric && state.resp.metric !== 'combined') q.set('rm', state.resp.metric);
+    if (state.cancer.type && state.cancer.type !== 'nhl') q.set('ck', state.cancer.type);
+    if (state.cancer.dataType && state.cancer.dataType !== 'incidence') q.set('cd', state.cancer.dataType);
+    if (state.tri.metric && state.tri.metric !== 'total') q.set('tm', state.tri.metric);
+    if (state.water.compound) q.set('wc', state.water.compound);
+    const atx = document.querySelector('input[name="airtox-metric"]:checked');
+    if (atx && atx.value !== 'cancer') q.set('am', atx.value);
+
+    const ly = [];
+    for (const L of SHARE_LAYERS) {
+      const cb = $(L.cb);
+      if (!cb || !cb.checked) continue;
+      let code = L.c;
+      if (L.subs) {
+        const on = L.subs.filter(([, id]) => { const e = $(id); return e && e.checked; })
+          .map(([ltr]) => ltr).join('');
+        if (on !== (L.def || '')) code += '-' + on;   // only when it deviates from default
+      }
+      ly.push(code);
     }
-    const yr = parseInt(p.get('year'), 10);
+    if (ly.length) q.set('ly', ly.join(','));
+
+    if (state.map) {
+      const c = state.map.getCenter();
+      q.set('ll', `${c.lat.toFixed(5)},${c.lng.toFixed(5)}`);
+      q.set('z', String(state.map.getZoom()));
+    }
+    return q.toString();
+  }
+
+  function buildShareUrl() {
+    const qs = captureViewState();
+    return location.origin + location.pathname + (qs ? '?' + qs : '');
+  }
+
+  async function shareCurrentView() {
+    const url = buildShareUrl();
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url); ok = true;
+      }
+    } catch (e) { ok = false; }
+    if (!ok) {                                     // older browsers / non-secure context
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        ok = document.execCommand('copy'); document.body.removeChild(ta);
+      } catch (e) { ok = false; }
+    }
+    showShareToast(ok, url);
+  }
+
+  // Small confirmation toast anchored under the Share button. On copy failure it
+  // shows the URL in a selectable field so the link is never lost.
+  let _shareToastT = null;
+  function showShareToast(ok, url) {
+    const t = $('share-toast');
+    if (!t) { return; }
+    clearTimeout(_shareToastT);
+    if (ok) {
+      t.innerHTML = '<span class="ok">✓ Link copied</span>';
+      t.classList.remove('hidden', 'fail');
+      _shareToastT = setTimeout(() => t.classList.add('hidden'), 2200);
+    } else {
+      t.innerHTML = '<span class="fail-msg">Press Ctrl/⌘+C to copy:</span>';
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.readOnly = true; inp.value = url; inp.className = 'share-toast-url';
+      t.appendChild(inp);
+      t.classList.remove('hidden'); t.classList.add('fail');
+      inp.focus(); inp.select();
+    }
+  }
+
+  // Apply the main pesticide filters + per-layer metrics + view tab from the URL,
+  // BEFORE the first choropleth render/refresh. Reads the short keys and (for
+  // backward compatibility) the older long keys. Layer toggles + map center/zoom
+  // are applied afterwards in applyViewLayers() (they need the layers loaded).
+  function applyViewState() {
+    const p = new URLSearchParams(location.search);
+    const v = p.get('v');
+    if (v && VIEWS.includes(v) && v !== 'map') state._pendingViewTab = v;
+
+    const norm = p.get('nm') || p.get('normalize');
+    if (norm && ['total', 'per_sq_mile', 'per_acre'].includes(norm)) {
+      state.normalize = norm; activateSegByVal(norm);
+    }
+    const est = p.get('est');
+    if (est && ['low', 'avg', 'high'].includes(est)) { state.estimate = est; activateSegByVal(est); }
+    const yr = parseInt(p.get('yr') || p.get('year'), 10);
     if (yr && state.years.includes(yr)) {
       state.year = yr;
       $('year-slider').value = state.years.indexOf(yr);
       $('year-label').textContent = yr;
     }
-    const cat = p.get('category');
+    const cat = p.get('cat') || p.get('category');
     const catEl = $('filter-category');
-    if (cat && [...catEl.options].some((o) => o.value === cat)) {
-      state.category = cat; catEl.value = cat;
-    }
-    const cmp = p.get('compound');
+    if (cat && [...catEl.options].some((o) => o.value === cat)) { state.category = cat; catEl.value = cat; }
+    const cmp = p.get('cmp') || p.get('compound');
     const cmpEl = $('filter-compound');
     if (cmp && [...cmpEl.options].some((o) => o.value === cmp)) {
-      state.compound = cmp; cmpEl.value = cmp;
+      state.compound = cmp; cmpEl.value = cmp; markFeatured(cmp);
     }
+
+    // per-active-layer metrics — set now so setActiveChoropleth() uses them
+    const rm = p.get('rm'); if (rm) { state.resp.metric = rm; const e = $('resp-metric'); if (e) e.value = rm; }
+    const ck = p.get('ck'); if (ck) { state.cancer.type = ck; const e = $('cancer-type'); if (e) e.value = ck; }
+    const cd = p.get('cd');
+    if (cd && ['incidence', 'mortality'].includes(cd)) { state.cancer.dataType = cd; activateSegByVal(cd); }
+    const tm = p.get('tm'); if (tm) { state.tri.metric = tm; const e = $('tri-metric'); if (e) e.value = tm; }
+    const wc = p.get('wc'); if (wc) { state.water.compound = wc; const e = $('wq-compound'); if (e) e.value = wc; }
+    const am = p.get('am');
+    if (am) { const r = document.querySelector(`input[name="airtox-metric"][value="${am}"]`); if (r) r.checked = true; }
+
+    const ch = p.get('ch'); if (ch) state._pendingChoro = ch;
     const cty = p.get('county');
     if (cty && /^\d{5}$/.test(cty)) state._pendingCounty = cty;
+  }
+
+  // Apply the choropleth selection, overlay toggles (incl sub-filters), and map
+  // center/zoom from the URL. Runs AFTER the first refresh so layer data can load;
+  // the map view is set LAST so it wins over any fit-to-bounds during startup.
+  async function applyViewLayers() {
+    const p = new URLSearchParams(location.search);
+    if (state._pendingChoro) {
+      try { await setActiveChoropleth(state._pendingChoro); } catch (e) { /* ignore */ }
+      state._pendingChoro = null;
+    }
+    const ly = (p.get('ly') || '').split(',').filter(Boolean);
+    for (const item of ly) {
+      const dash = item.indexOf('-');
+      const code = dash === -1 ? item : item.slice(0, dash);
+      const subletters = dash === -1 ? undefined : item.slice(dash + 1);
+      const L = SHARE_LAYER_BY_CODE[code];
+      if (!L) continue;
+      if (L.subs && subletters !== undefined) {     // apply sub-filters before enabling the parent
+        for (const [ltr, id] of L.subs) {
+          const e = $(id); if (!e) continue;
+          const want = subletters.includes(ltr);
+          if (e.checked !== want) { e.checked = want; e.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+      }
+      const cb = $(L.cb);
+      if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+
+    const ll = p.get('ll');
+    const z = parseInt(p.get('z'), 10);
+    if (ll && state.map) {
+      const m = ll.split(',').map(Number);
+      if (m.length === 2 && !m.some(Number.isNaN)) {
+        const zoom = Number.isNaN(z) ? state.map.getZoom() : z;
+        // slight delay so any startup fitBounds has settled first
+        setTimeout(() => { try { state.map.setView([m[0], m[1]], zoom); } catch (e) { /* ignore */ } }, 60);
+      }
+    }
   }
 
   async function boot() {
@@ -5714,14 +5907,15 @@
       $('year-slider').value = state.years.length - 1;
       $('year-label').textContent = state.year;
 
-      applyUrlParams();
+      applyViewState();
 
-      // Honor a shareable deep link like /#explore as soon as the UI is ready,
-      // without waiting for the (slower) map layers to finish loading.
-      const initial = (location.hash || '').replace('#', '');
+      // Honor a shareable view tab (?v=explore) or legacy /#explore as soon as the
+      // UI is ready, without waiting for the (slower) map layers to load.
+      const initial = state._pendingViewTab || (location.hash || '').replace('#', '');
       if (initial && VIEWS.includes(initial) && initial !== 'map') {
         switchView(initial, false);
       }
+      state._pendingViewTab = null;
 
       renderChoropleth();
       applyLayerFilterVisibility();   // hide non-active layers' filters at startup
@@ -5731,6 +5925,10 @@
 
       // Shareable deep link to a specific county (?county=26077) opens its panel.
       if (state._pendingCounty) { openCounty(state._pendingCounty); state._pendingCounty = null; }
+
+      // Reproduce a shared view: active choropleth, overlay toggles + sub-filters,
+      // and the map center/zoom (applied last so it wins over any startup fit).
+      await applyViewLayers();
     } catch (e) {
       console.error(e);
       alert('Failed to load app: ' + e.message +

@@ -168,6 +168,15 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
   path into the address-level report. Keyboard-navigable (↑/↓/Enter/Esc) and
   mobile-friendly. Data is the Census TIGER gazetteer loaded locally (no per-keystroke
   API call).
+- **Share this view** — a button in the top bar copies a compact link that
+  encodes the current map view: the active choropleth, which overlays are on
+  (including sub-layers, e.g. PFAS Sites vs. public-water hexbins), the map center
+  and zoom, and the active layer's compound / metric / year. Opening the link
+  reproduces the view — correct layers on, map centered and zoomed — with no
+  manual clicking (e.g. a PFAS-over-Oscoda link lands on the Lake Huron shore
+  showing the PFAS markers). Uses short parameter keys so links stay short
+  (~55–75 chars), works on desktop and mobile, and encodes **view state only**
+  (layers / location / zoom) — never any address entered in the homebuyer report.
 - **Heat-map view** — county choropleth, layer toggles (category / specific compound),
   Low/Avg/High estimate switch, total-vs-kg/mi² normalization, time slider
   (1992–2012) with play animation, click-for-county-detail with charts.

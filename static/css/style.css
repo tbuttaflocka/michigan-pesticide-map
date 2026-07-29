@@ -125,6 +125,34 @@ a:hover { text-decoration: underline; }
   color: var(--muted);
 }
 
+/* "Share this view" button + copy-confirmation toast */
+.share-btn { white-space: nowrap; }
+.share-toast {
+  position: absolute;
+  top: 110%;
+  right: 0;
+  z-index: 2100;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(90vw, 460px);
+}
+.share-toast .ok { color: var(--accent); font-weight: 600; }
+.share-toast.fail { border-color: var(--accent-2); }
+.share-toast .fail-msg { color: var(--text); white-space: nowrap; }
+.share-toast .share-toast-url {
+  flex: 1; min-width: 180px;
+  background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 7px; font: inherit; font-size: 12px;
+}
+
 /* place -> county context banner inside the county panel */
 .place-context {
   background: rgba(88, 166, 255, .08);
