@@ -4199,9 +4199,21 @@
     });
 
     // County-coloring radio group — exactly one choropleth at a time.
+    // `change` handles switching to a different option; `click` additionally lets
+    // you re-click the ACTIVE option to deselect it back to "None" (a plain radio
+    // can't uncheck itself). On a fresh selection the click fires before change,
+    // when state.activeChoropleth still holds the previous value, so this only
+    // triggers on a genuine re-click of the already-active choropleth.
     document.querySelectorAll('input[name="choropleth"]').forEach((r) => {
       r.addEventListener('change', (e) => {
         if (e.target.checked) setActiveChoropleth(e.target.value);
+      });
+      r.addEventListener('click', (e) => {
+        if (e.target.value !== 'none' && state.activeChoropleth === e.target.value) {
+          const none = document.querySelector('input[name="choropleth"][value="none"]');
+          if (none) none.checked = true;      // clears the re-clicked radio (radio group)
+          setActiveChoropleth('none');         // clears coloring, updates indicator + grid
+        }
       });
     });
 
