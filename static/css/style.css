@@ -490,6 +490,35 @@ a:hover { text-decoration: underline; }
   outline: none;
 }
 .ov-card:active { transform: translateY(1px); }
+/* a tile whose layer is currently ON — visibly selected */
+.ov-card.active {
+  border-color: var(--accent);
+  background: rgba(63, 185, 80, .12);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.ov-card .ov-on {
+  display: none;
+  position: absolute; top: 6px; right: 8px;
+  font-size: 8.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  color: #0a0f17; background: var(--accent); border-radius: 999px; padding: 1px 6px;
+}
+.ov-card.active .ov-on { display: inline-block; }
+.ov-card.active .ov-flag { display: none; }   /* the "on" pill takes the corner */
+
+.overview-gridfoot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.overview-clear {
+  flex: 0 0 auto;
+  background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 10px; font: inherit; font-size: 11.5px; cursor: pointer;
+  min-height: 32px;
+}
+.overview-clear:hover, .overview-clear:focus-visible {
+  border-color: var(--accent-2); color: var(--accent-2); outline: none;
+}
 .ov-val {
   font-size: 20px; font-weight: 700; line-height: 1.1;
   font-variant-numeric: tabular-nums; color: var(--text);

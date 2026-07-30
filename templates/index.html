@@ -317,7 +317,11 @@
         (see <a href="#" id="overview-sources-link">Data sources</a>). Tap a tile to turn on that layer.</p>
 
       <div class="overview-grid" id="overview-grid" aria-label="Statewide totals"></div>
-      <p class="overview-foot muted small"><span class="ov-flag-legend">†</span> known undercount — hover a tile for why.</p>
+      <div class="overview-gridfoot">
+        <p class="overview-foot muted small"><span class="ov-flag-legend">†</span> known undercount — hover a tile for why.</p>
+        <button id="overview-clear" class="overview-clear hidden" type="button"
+          title="Turn off all map overlays you've switched on">✕ Clear map layers</button>
+      </div>
 
       <div class="overview-notable hidden" id="overview-notable-wrap">
         <h3>Statewide highlights

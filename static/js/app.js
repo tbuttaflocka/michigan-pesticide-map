@@ -969,6 +969,7 @@
     // Reflect state in the radio group (covers programmatic calls).
     const radio = document.querySelector(`input[name="choropleth"][value="${which}"]`);
     if (radio) radio.checked = true;
+    refreshOverviewCardStates();   // keep the overview grid's on/off styling in sync
   }
 
   // ---------- choropleth refresh ----------
@@ -1686,20 +1687,38 @@
     let d;
     try { d = await api('/api/overview'); } catch (e) { return; }
     state._overview = d;
+    state._overviewCards = [];
     grid.innerHTML = '';
     for (const t of d.totals) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ov-card';
+      btn.setAttribute('aria-pressed', 'false');
       if (t.tip) btn.setAttribute('data-tip', t.tip + (t.undercount ? ' — ' + t.undercount : ''));
       btn.innerHTML =
         `<span class="ov-val">${esc(t.value_display != null ? t.value_display : OV_NUM(t.value))}</span>`
         + `<span class="ov-label">${esc(t.label)}</span>`
         + (t.sub ? `<span class="ov-sub">${esc(t.sub)}</span>` : '')
-        + (t.undercount ? '<span class="ov-flag" aria-hidden="true">†</span>' : '');
+        + (t.undercount ? '<span class="ov-flag" aria-hidden="true">†</span>' : '')
+        + '<span class="ov-on" aria-hidden="true">on</span>';
       btn.addEventListener('click', () => runOverviewAction(t.action));
       grid.appendChild(btn);
+      state._overviewCards.push({ el: btn, action: t.action });
     }
+    // The map's layer controls are the source of truth: whenever one changes
+    // (from the grid OR the layers panel), re-sync the grid's on/off styling.
+    if (!state._overviewSyncWired) {
+      state._overviewSyncWired = true;
+      document.addEventListener('change', (e) => {
+        const t = e.target;
+        if (t && (t.name === 'choropleth' || (t.type === 'checkbox' && t.id))) {
+          refreshOverviewCardStates();
+        }
+      });
+      const clearBtn = $('overview-clear');
+      if (clearBtn) clearBtn.addEventListener('click', clearOverviewLayers);
+    }
+    refreshOverviewCardStates();
     // highlights
     const wrap = $('overview-notable-wrap');
     const ul = $('overview-notable');
@@ -1719,22 +1738,58 @@
     // already covered — no re-scan needed.
   }
 
-  // A stat card either turns on a marker layer or selects a choropleth, turning
-  // the overview into a navigation hub. Reuses the existing controls' handlers.
+  // Is the layer/choropleth behind a grid card currently active on the map?
+  function overviewActionActive(action) {
+    if (!action) return false;
+    if (action.type === 'layer') { const cb = $(action.cb); return !!(cb && cb.checked); }
+    if (action.type === 'choropleth') return state.activeChoropleth === action.value;
+    return false;
+  }
+
+  // Sync each card's on/off styling to what's actually on the map (single source
+  // of truth = the layer controls), and show "Clear layers" when any stackable
+  // marker overlay is on. Called after every grid click, after a choropleth
+  // change, and on any layer-control change from the panel.
+  function refreshOverviewCardStates() {
+    for (const c of (state._overviewCards || [])) {
+      const on = overviewActionActive(c.action);
+      c.el.classList.toggle('active', on);
+      c.el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    const clearBtn = $('overview-clear');
+    if (clearBtn) {
+      const anyOverlay = (state._overviewCards || []).some(
+        (c) => c.action && c.action.type === 'layer' && $(c.action.cb) && $(c.action.cb).checked);
+      clearBtn.classList.toggle('hidden', !anyOverlay);
+    }
+  }
+
+  // A stat card is a proper toggle: a marker-overlay card flips its layer on/off
+  // (leaving others alone); a choropleth card selects that choropleth (replacing
+  // the active one), matching the "color the counties by — choose one" radios.
   function runOverviewAction(action) {
     if (!action) return;
     if (isMobile()) document.body.classList.remove('m-detail-open');  // reveal the map
     if (action.type === 'layer') {
       const cb = $(action.cb);
-      if (cb) {
-        if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
-        else { /* already on — flash it so the user sees where it is */ }
-      }
+      if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', { bubbles: true })); }
     } else if (action.type === 'choropleth') {
       setActiveChoropleth(action.value);
       const radio = document.querySelector(`input[name="choropleth"][value="${action.value}"]`);
       if (radio) radio.checked = true;
     }
+    refreshOverviewCardStates();
+  }
+
+  // Clear/reset: turn OFF every stackable marker overlay that's currently on
+  // (whether enabled from the grid or the layers panel), so the map can be
+  // decluttered in one tap. Leaves the base county choropleth as-is.
+  function clearOverviewLayers() {
+    for (const L of SHARE_LAYERS) {
+      const cb = $(L.cb);
+      if (cb && cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    refreshOverviewCardStates();
   }
 
   async function refreshStatewide() {
