@@ -510,6 +510,7 @@
       document.body.classList.remove('m-layers-open');
       document.body.classList.add('m-detail-open');
       p.scrollTop = 0;
+      if (window._mPushSheet) window._mPushSheet();   // back gesture closes the sheet
     } else if (window.innerWidth <= 900) {
       // Small stacked window: the right sidebar is below the map — scroll to it.
       try { p.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
@@ -6172,28 +6173,55 @@
   // ---------- mobile bottom-sheet controls ----------
   function setupMobileUI() {
     const body = document.body;
+    let sheetPushed = false;
+    const anySheetOpen = () =>
+      body.classList.contains('m-layers-open') || body.classList.contains('m-detail-open');
     const closeSheets = () => body.classList.remove('m-layers-open', 'm-detail-open');
+    // Push a history entry when a bottom sheet opens so the Android / browser back
+    // gesture closes it instead of leaving the page.
+    const pushSheetHistory = () => {
+      if (!sheetPushed) { try { history.pushState({ mSheet: 1 }, ''); } catch (e) {} sheetPushed = true; }
+    };
+    // Explicit close (×, backdrop, Done): hide the sheet and consume our history
+    // entry so a later back press doesn't do nothing.
+    const dismissSheets = () => {
+      closeSheets();
+      if (sheetPushed) { sheetPushed = false; try { history.back(); } catch (e) {} }
+    };
+    // Hardware / browser back with a sheet open simply closes it.
+    window.addEventListener('popstate', () => {
+      if (anySheetOpen()) { sheetPushed = false; closeSheets(); }
+    });
+    // showCountyPanel() (opened from a map tap) reuses these so back closes it too.
+    window._mPushSheet = pushSheetHistory;
 
     const fab = $('m-layers-fab');
     if (fab) fab.addEventListener('click', () => {
       body.classList.remove('m-detail-open');
       body.classList.add('m-layers-open');
+      pushSheetHistory();
     });
     const layersClose = $('m-layers-close');
-    if (layersClose) layersClose.addEventListener('click', () =>
-      body.classList.remove('m-layers-open'));
+    if (layersClose) layersClose.addEventListener('click', dismissSheets);
     const backdrop = $('m-backdrop');
-    if (backdrop) backdrop.addEventListener('click', closeSheets);
+    if (backdrop) backdrop.addEventListener('click', dismissSheets);
 
-    // "View statewide summary" opens the right-side sheet on the statewide panel.
-    const summaryBtn = $('m-summary-btn');
-    if (summaryBtn) summaryBtn.addEventListener('click', () => {
+    // Open the statewide summary as the right-side bottom sheet. Wired to both the
+    // prominent "Statewide overview" FAB and the inline button in the layers sheet.
+    const openSummary = () => {
       closeCountyPanel();                 // ensure the statewide panel is the one shown
       body.classList.remove('m-layers-open');
       body.classList.add('m-detail-open');
       const p = $('statewide-panel');
       if (p) p.scrollTop = 0;
-    });
+      pushSheetHistory();
+    };
+    const summaryBtn = $('m-summary-btn');
+    if (summaryBtn) summaryBtn.addEventListener('click', openSummary);
+    const summaryFab = $('m-summary-fab');
+    if (summaryFab) summaryFab.addEventListener('click', openSummary);
+    const summaryClose = $('summary-close');
+    if (summaryClose) summaryClose.addEventListener('click', dismissSheets);
 
     // First-time "how to use the map" hint (mobile only, dismissible + remembered).
     const HINT_KEY = 'pm_maphint_dismissed_v1';

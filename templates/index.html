@@ -310,6 +310,7 @@
 
   <aside class="sidebar right">
     <section class="panel statewide" id="statewide-panel">
+      <button id="summary-close" class="summary-close m-only" type="button" aria-label="Close statewide summary">×</button>
       <h2 id="state-heading">Statewide overview</h2>
       <p class="overview-intro">A snapshot across <strong>every pollution type this map tracks</strong> in
         Michigan's 83 counties, built from public data with the usual limitations
@@ -467,6 +468,9 @@
     <span id="map-hint-text">Tap a county for full details · press &amp; hold to see its value</span>
     <button id="map-hint-x" class="map-hint-x" type="button" aria-label="Dismiss this hint">×</button>
   </div>
+  <button id="m-summary-fab" class="m-fab m-fab-summary m-only" type="button" aria-label="View the statewide overview">
+    <span class="m-fab-ico">📊</span><span>Statewide overview</span>
+  </button>
   <button id="m-layers-fab" class="m-fab m-only" type="button" aria-label="Open layers and filters">
     <span class="m-fab-ico">☰</span><span id="m-fab-label">Layers &amp; filters</span>
   </button>
