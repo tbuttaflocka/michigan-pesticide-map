@@ -103,6 +103,44 @@ OTHER_OR_FUMIGANT = {
     "METHYL ISOTHIOCYANATE", "PETROLEUM OIL", "TETRABOROHYDRATE",
 }
 
+# ---- corrections: compounds that were falling through to "Other" ----
+# Each was VERIFIED as the class below against a real source — Wikipedia, the
+# BCPC Compendium of Pesticide Common Names, the University of Hertfordshire
+# Pesticide Properties DataBase (PPDB), EPA/EFSA/OEHHA assessments, or the USGS
+# NAWQA compound listing / peer-reviewed refs. Compounds whose class could not be
+# confidently verified (biologicals, oils, adjuvants/synergists, minerals,
+# molluscicides, nematicides, antibiotics, biostimulants, dual-use PGRs) are
+# deliberately LEFT in "Other" rather than guessed. Spellings match the USGS
+# EPest data. Applied in place so _ALL_BUCKETS / _KNOWN_BASES pick them up.
+HERBICIDES.update({
+    "CYANAZINE", "CHLORIDAZON", "BUTYLATE", "SULFOSATE", "DESMEDIPHAM",
+    "PHENMEDIPHAM", "CHLORAMBEN", "NAPTALAM", "DIETHATYL", "DINOSEB",
+    "BENFLURALIN", "DICHLORPROP", "DCPA", "DALAPON", "TRIDIPHANE", "TERBUTRYN",
+    "AMETRYN", "TEBUTHIURON", "FLUOMETURON", "TRIFLUSULFURON", "ISOPROPALIN",
+    "ISOXABEN", "PROPYZAMIDE", "MECOPROP", "DICLOFOP", "PYRIDATE", "TRI-ALLATE",
+    "MESOSULFURON", "AMITROLE", "ENDOTHAL", "BICYCLOPYRONE", "DIPHENAMID",
+    "FLUCARBAZONE", "IMAZAMETHABENZ", "PINOXADEN", "FLORASULAM", "IMAZOSULFURON",
+    "BENSULFURON", "HALAUXIFEN",
+})
+INSECTICIDES.update({
+    "FONOFOS", "PARATHION", "METHYL PARATHION", "CHLORETHOXYFOS", "PHOSPHAMIDON",
+    "DEMETON", "LINDANE", "METHOXYCHLOR", "FENVALERATE", "ALPHA CYPERMETHRIN",
+    "AMITRAZ", "CHLORFENAPYR", "TRIMETHACARB", "CRYOLITE", "BENDIOCARB",
+    "FORMETANATE", "FENBUTATIN OXIDE", "FENOXYCARB", "TRIAZAMATE", "ACEQUINOCYL",
+    "DIENOCHLOR",
+})
+FUNGICIDES.update({
+    "DIMETHOMORPH", "TRIFORINE", "CYPROCONAZOLE", "AMETOCTRADIN", "ANILAZINE",
+    "CHINOMETHIONAT", "OXATHIAPIPROLIN", "CYFLUFENAMID", "DINOCAP", "ZINEB",
+    "CAPTAFOL", "SEDAXANE", "IMAZALIL", "DICLORAN",
+    # copper fungicides, consistent with COPPER / COPPER SULFATE already classed here
+    "CUPROUS OXIDE", "COPPER SULF TRIBASIC",
+})
+GROWTH_REGULATORS.update({
+    "1-METHYL CYCLOPROPENE", "NAPHTHYLACETAMIDE", "INDOLYL-BUTYRIC ACID",
+})
+
+
 # High-profile compounds surfaced in the UI's quick-filter
 FEATURED_COMPOUNDS = [
     "GLYPHOSATE",
@@ -145,8 +183,9 @@ def _strip_isomer_suffix(name: str) -> str:
 # compound that can't be classified confidently is left UNLABELLED, not guessed.
 FUMIGANTS = {
     "1,3-DICHLOROPROPENE", "DICHLOROPROPENE", "CHLOROPICRIN", "CHLOROPICRIN-FUM",
-    "DAZOMET", "DIMETHYL DISULFIDE", "METAM", "METAM-POTASSIUM", "METAM-SODIUM",
-    "METHYL BROMIDE", "METHYL ISOTHIOCYANATE", "SODIUM TETRATHIOCARBONATE",
+    "DAZOMET", "DIMETHYL DISULFIDE", "DIMETHLYDISULFIDE", "METAM", "METAM-POTASSIUM",
+    "METAM POTASSIUM", "METAM-SODIUM", "METHYL BROMIDE", "METHYL ISOTHIOCYANATE",
+    "SODIUM TETRATHIOCARBONATE", "TETRATHIOCARBONATE",
 }
 # Dedicated soil nematicides that fall in "Other" (most others — fenamiphos,
 # oxamyl, aldicarb, ethoprophos — are classed as insecticides, not "Other").

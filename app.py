@@ -33,6 +33,7 @@ from app import coal_ash_data
 from app import tri_reference
 from app import pfas_chem
 from app.categories import subtype as compound_subtype
+from app.categories import categorize as _categorize
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
@@ -220,6 +221,41 @@ def lb_jsonify(payload):
 
 def db() -> sqlite3.Connection:
     return database.connect()
+
+
+def _sync_pesticide_categories() -> None:
+    """Re-derive pesticide_categories from categories.categorize() for every
+    compound in the data, so a corrected category mapping (app/categories.py)
+    takes effect on deploy WITHOUT rebuilding or republishing the database. It
+    only updates rows whose category actually changed — cheap (~a few hundred
+    compounds), idempotent, and never fatal (a read-only or absent DB is a
+    no-op). This is what turns the miscategorization fix into a plain code
+    deploy: the app corrects its own category table from the code on startup.
+    """
+    from app.config import db_is_present
+    if not db_is_present():
+        return
+    try:
+        conn = db()
+        existing = {r["compound"]: r["category"] for r in
+                    conn.execute("SELECT compound, category FROM pesticide_categories")}
+        changed = []
+        for row in conn.execute("SELECT DISTINCT compound FROM pesticide_use"):
+            c = row[0]
+            want = _categorize(c)
+            if existing.get(c) != want:
+                changed.append((c, want))
+        if changed:
+            conn.executemany(
+                "INSERT OR REPLACE INTO pesticide_categories(compound, category) "
+                "VALUES (?, ?)", changed)
+            conn.commit()
+        conn.close()
+    except Exception:   # never let a metadata sync break startup
+        pass
+
+
+_sync_pesticide_categories()
 
 
 def category_filter_sql(category: str | None) -> tuple[str, list]:
