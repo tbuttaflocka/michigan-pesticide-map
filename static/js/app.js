@@ -933,6 +933,7 @@
   // ---------- active choropleth switching (mutually exclusive) ----------
   async function setActiveChoropleth(which) {
     if (!which) return;
+    console.log('[CHORO] setActiveChoropleth(', JSON.stringify(which), ') — was', JSON.stringify(state.activeChoropleth));  // TEMP DEBUG
     state.activeChoropleth = which;
     // Keep the legacy per-layer flags in sync (county cards + meta text use them).
     state.resp.enabled       = (which === 'resp');
@@ -4207,9 +4208,23 @@
     // one source of truth) decides: re-clicking the ACTIVE option deselects it
     // to "None"; clicking any other option selects it. We don't rely on the
     // radios' native `change` event at all.
+    let _choroClickSeq = 0;   // TEMP DEBUG: detect double-fire per click
     document.querySelectorAll('input[name="choropleth"]').forEach((r) => {
       r.addEventListener('click', () => {
         const val = r.value;
+        const active = state.activeChoropleth;
+        const isActive = (active === val);
+        // ---- TEMP DEBUG (choropleth deselect) — remove after diagnosis ----
+        const seq = ++_choroClickSeq;
+        const branch = (val !== 'none' && isActive) ? 'DESELECT->none'
+          : (active !== val ? 'SELECT-NEW' : 'noop(none-or-same)');
+        console.log('[CHORO] click#' + seq,
+          '| clicked value=', JSON.stringify(val), '(' + typeof val + ')',
+          '| state.activeChoropleth=', JSON.stringify(active), '(' + typeof active + ')',
+          '| active===val ?', isActive,
+          '| radioChecked=', r.checked,
+          '| BRANCH=', branch);
+        // -------------------------------------------------------------------
         if (val !== 'none' && state.activeChoropleth === val) {
           // Re-click of the already-active choropleth -> turn coloring off.
           // Defer to a microtask-after-tick so we set the FINAL radio state
@@ -4220,6 +4235,7 @@
           setTimeout(() => {
             const none = document.querySelector('input[name="choropleth"][value="none"]');
             if (none) none.checked = true;   // radio group: unchecks `val`
+            console.log('[CHORO] deselect timeout firing -> setActiveChoropleth("none"); active was', JSON.stringify(state.activeChoropleth));
             setActiveChoropleth('none');
           }, 0);
         } else if (state.activeChoropleth !== val) {
