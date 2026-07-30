@@ -136,6 +136,50 @@ def _strip_isomer_suffix(name: str) -> str:
     return name
 
 
+# ---- sub-types WITHIN the "Other" bucket (for the trend "Other" breakdown) ----
+# "Other" in USGS EPest is a catch-all for pesticide types outside the primary
+# three (herbicide / insecticide / fungicide). These curated sub-type sets let the
+# UI label the biggest drivers — above all soil FUMIGANTS, which are applied at
+# very high rates and produce large poundage from relatively little acreage, so
+# they often dominate a county's "Other" share (e.g. metam-sodium on potatoes). A
+# compound that can't be classified confidently is left UNLABELLED, not guessed.
+FUMIGANTS = {
+    "1,3-DICHLOROPROPENE", "DICHLOROPROPENE", "CHLOROPICRIN", "CHLOROPICRIN-FUM",
+    "DAZOMET", "DIMETHYL DISULFIDE", "METAM", "METAM-POTASSIUM", "METAM-SODIUM",
+    "METHYL BROMIDE", "METHYL ISOTHIOCYANATE", "SODIUM TETRATHIOCARBONATE",
+}
+# Dedicated soil nematicides that fall in "Other" (most others — fenamiphos,
+# oxamyl, aldicarb, ethoprophos — are classed as insecticides, not "Other").
+NEMATICIDES = {"FLUENSULFONE", "FOSTHIAZATE"}
+# Plant growth regulators reuse GROWTH_REGULATORS (they fold into "Other").
+_SUBTYPE_BUCKETS = (
+    ("fumigant", FUMIGANTS),
+    ("nematicide", NEMATICIDES),
+    ("plant growth regulator", GROWTH_REGULATORS),
+)
+
+
+def subtype(compound: str) -> str | None:
+    """Sub-type label for a compound within the 'Other' bucket, or None when it
+    can't be confidently classified (the UI then shows it without a sub-type
+    label rather than guessing). Mirrors categorize()'s name normalization."""
+    if not compound:
+        return None
+    name = compound.strip().upper()
+    for sep in (" & ", "/", " AND "):
+        if sep in name:
+            for part in name.split(sep):
+                st = subtype(part.strip())
+                if st:
+                    return st
+            return None
+    base = _strip_isomer_suffix(name)
+    for label, bucket in _SUBTYPE_BUCKETS:
+        if name in bucket or base in bucket:
+            return label
+    return None
+
+
 def categorize(compound: str) -> str:
     """Return the functional category for a compound name.
 

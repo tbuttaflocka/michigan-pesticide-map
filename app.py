@@ -32,6 +32,7 @@ from app import spraying_programs
 from app import coal_ash_data
 from app import tri_reference
 from app import pfas_chem
+from app.categories import subtype as compound_subtype
 from app.config import GEOJSON_PATH, HOST, PORT
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
@@ -1050,6 +1051,29 @@ def api_trend():
             compounds.append({"name": "All others",
                               "values": [round(v, 1) for v in others]})
 
+    # --- per-year "Other" breakdown: which specific compounds make up the
+    # "Other" band each year (the band is otherwise an opaque catch-all). Pulled
+    # straight from the loaded EPest data; each poundage matches the underlying
+    # rows. A code-side sub-type lookup (categories.subtype) labels the big
+    # drivers — fumigants, PGRs — and leaves the rest unlabelled. ---
+    other_breakdown: dict[str, list] = {}
+    for r in cur.execute(
+        f"""SELECT pu.year AS y, pu.compound AS c, SUM({col}) AS kg
+              FROM pesticide_use pu
+         LEFT JOIN pesticide_categories pc ON pc.compound = pu.compound
+            {where_for_top}
+             AND COALESCE(pc.category,'other') NOT IN ('herbicide','insecticide','fungicide')
+             GROUP BY pu.year, pu.compound""", base_params):
+        lbs = to_lbs(r["kg"])
+        if lbs <= 0:
+            continue
+        other_breakdown.setdefault(str(r["y"]), []).append({
+            "compound": r["c"], "lbs": round(lbs, 1),
+            "subtype": compound_subtype(r["c"]),
+        })
+    for lst in other_breakdown.values():
+        lst.sort(key=lambda d: d["lbs"], reverse=True)
+
     conn.close()
     return jsonify({
         "scope": scope,
@@ -1059,6 +1083,7 @@ def api_trend():
         "total": [round(v, 1) for v in total],
         "categories": categories,
         "compounds": compounds,
+        "other_breakdown": other_breakdown,
     })
 
 

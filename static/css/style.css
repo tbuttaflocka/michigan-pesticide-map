@@ -531,6 +531,43 @@ a:hover { text-decoration: underline; }
 .pesticide-detail > summary:hover { color: var(--accent); }
 .pesticide-detail[open] > summary { margin-bottom: 6px; }
 
+/* "What's in Other" breakdown panel under the pesticide-mix trend chart */
+.trend-other {
+  margin: 8px 0 4px; padding: 10px 12px;
+  background: rgba(240, 180, 41, .08);
+  border: 1px solid rgba(240, 180, 41, .30);
+  border-left: 3px solid var(--other, #f0b429); border-radius: 10px;
+}
+.trend-other .to-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 13px;
+}
+.trend-other .to-head .muted { font-weight: 400; }
+.trend-other .to-close {
+  flex: 0 0 auto; width: 32px; height: 32px; line-height: 1;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; font-size: 20px; cursor: pointer;
+}
+.trend-other .to-note { margin: 6px 0 8px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.trend-other .to-note b { color: var(--text); }
+.trend-other .to-list { list-style: none; margin: 0; padding: 0; }
+.trend-other .to-list li {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  padding: 5px 0; border-bottom: 1px solid rgba(154,164,178,.10); font-size: 12.5px;
+}
+.trend-other .to-list li:last-child { border-bottom: none; }
+.trend-other .to-sub {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px;
+}
+.trend-other .to-v { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend-other .to-what { margin-top: 8px; }
+.trend-other .to-what > summary { cursor: pointer; font-size: 11.5px; color: var(--link); }
+.trend-other .to-what-body { font-size: 11.5px; line-height: 1.5; color: var(--muted); margin-top: 4px; }
+.trend-other .to-what-body ul { margin: 4px 0 0; padding-left: 16px; }
+.trend-other .to-what-body li { margin: 3px 0; }
+.trend-other .to-what-body b { color: var(--text); }
+
 .top-list {
   list-style: none;
   padding: 0;

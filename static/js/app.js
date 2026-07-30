@@ -1417,6 +1417,28 @@
   // A self-contained trend panel: fetches /api/trend for a scope (statewide or a
   // county fips) and renders it in one of four view modes, with a mode toggle,
   // clickable legend, and a breakdown tooltip. Reused for both trend charts.
+  // Readable compound name for the "Other" breakdown ("METAM-SODIUM" ->
+  // "Metam-Sodium", "1,3-DICHLOROPROPENE" -> "1,3-Dichloropropene").
+  const prettyCompound = (s) => String(s || '').toLowerCase().replace(/\b[a-z]/g, (m) => m.toUpperCase());
+
+  // Short, factual context shown with the "Other" breakdown.
+  const OTHER_WHY =
+    'A high “Other” share usually reflects heavy soil <b>fumigation</b> tied to '
+    + 'specific crops (potatoes, carrots, mint) — fumigants are applied at very high '
+    + 'rates, so a little acreage produces a lot of poundage. It is rarely a junk category.';
+  const OTHER_EXPLAIN =
+    '“Other” is the USGS EPest catch-all for pesticide types outside herbicide / '
+    + 'insecticide / fungicide:'
+    + '<ul>'
+    + '<li><b>Fumigants</b> — high-rate soil sterilants applied before planting '
+    + '(metam-sodium, metam-potassium, dazomet, chloropicrin, 1,3-dichloropropene); '
+    + 'usually the biggest driver of a high “Other” share.</li>'
+    + '<li><b>Nematicides</b> — target soil nematodes.</li>'
+    + '<li><b>Soil sterilants &amp; desiccants</b> — kill plant matter or dry a crop down pre-harvest.</li>'
+    + '<li><b>Plant growth regulators</b> — alter plant growth rather than kill pests (e.g. mepiquat).</li>'
+    + '<li><b>Miscellaneous</b> — molluscicides, adjuvants, and anything not in the primary three.</li>'
+    + '</ul>';
+
   function createTrendPanel(opts) {
     const { canvasId, modesId, scopeId, chartKey } = opts;
     const endpoint = opts.endpoint || '/api/trend';
@@ -1429,6 +1451,51 @@
     }));
     let mode = 'category';
     let data = null;
+
+    // "Other" breakdown panel (pesticide trend only — present when the response
+    // carries other_breakdown). Created lazily right after the chart box.
+    function breakdownEl(create) {
+      const existing = document.getElementById(canvasId + '-other');
+      if (existing || !create) return existing;
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return null;
+      const box = canvas.closest('.chart-box') || canvas.parentElement;
+      const el = document.createElement('div');
+      el.id = canvasId + '-other';
+      el.className = 'trend-other hidden';
+      box.parentNode.insertBefore(el, box.nextSibling);
+      return el;
+    }
+    function hideBreakdown() {
+      const el = breakdownEl(false);
+      if (el) el.classList.add('hidden');
+    }
+    function showOtherBreakdown(year) {
+      if (!data || !data.other_breakdown) return;
+      const list = data.other_breakdown[String(year)] || [];
+      const el = breakdownEl(true);
+      if (!el) return;
+      if (!list.length) { el.classList.add('hidden'); return; }
+      const tot = list.reduce((s, c) => s + c.lbs, 0) || 1;
+      const rows = list.map((c) => {
+        const pct = c.lbs / tot * 100;
+        const sub = c.subtype ? `<span class="to-sub">${esc(c.subtype)}</span>` : '';
+        return `<li>${chemLink(c.compound, { label: esc(prettyCompound(c.compound)) })}${sub}`
+          + `<span class="to-v">${PMCharts.fmtLbs(c.lbs)} · ${pct.toFixed(pct < 1 ? 1 : 0)}%</span></li>`;
+      }).join('');
+      el.innerHTML =
+        `<div class="to-head"><strong>What’s in “Other” — ${esc(String(year))}`
+        + `<span class="muted"> · ${esc((data.scope || '').trim())}</span></strong>`
+        + '<button class="to-close" type="button" aria-label="Close">×</button></div>'
+        + `<p class="to-note">${OTHER_WHY}</p>`
+        + `<ul class="to-list">${rows}</ul>`
+        + `<details class="to-what"><summary>What counts as “Other”?</summary>`
+        + `<div class="to-what-body">${OTHER_EXPLAIN}</div></details>`;
+      el.classList.remove('hidden');
+      const x = el.querySelector('.to-close');
+      if (x) x.addEventListener('click', hideBreakdown);
+      try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) { /* noop */ }
+    }
 
     function buildSpec() {
       if (mode === 'total') {
@@ -1509,8 +1576,29 @@
                 },
                 footer: (items) => spec.pct ? ''
                   : `Total: ${PMCharts.fmtLbs(totals[items[0].dataIndex])}`,
+                // When hovering the "Other" band, reveal its top contributors.
+                afterLabel: (item) => {
+                  if (!data.other_breakdown || (mode !== 'category' && mode !== 'percent')) return undefined;
+                  if (((data.categories[item.datasetIndex] || {}).key) !== 'other') return undefined;
+                  const list = data.other_breakdown[String(data.years[item.dataIndex])] || [];
+                  if (!list.length) return undefined;
+                  const t = list.reduce((s, c) => s + c.lbs, 0) || 1;
+                  const lines = list.slice(0, 3).map(
+                    (c) => `  • ${prettyCompound(c.compound)} ${(c.lbs / t * 100).toFixed(0)}%`);
+                  lines.push(list.length > 3 ? `  +${list.length - 3} more — click to see all`
+                                             : '  click to see all');
+                  return ['What’s in “Other”:', ...lines];
+                },
               },
             },
+          },
+          // Click a year in the category/percent view to reveal the full "Other"
+          // breakdown (with clickable compounds) below the chart.
+          onClick: (evt, els, chart) => {
+            if (!data.other_breakdown || (mode !== 'category' && mode !== 'percent')) return;
+            const pts = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, false);
+            if (!pts.length) return;
+            showOtherBreakdown(data.years[pts[0].index]);
           },
           scales: {
             x: { grid: { color: 'rgba(154,164,178,.08)' },
@@ -1533,6 +1621,7 @@
         b.addEventListener('click', () => {
           mode = b.dataset.mode;
           bar.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+          hideBreakdown();   // the "Other" breakdown is category/year-specific
           render();
         });
       });
@@ -1540,6 +1629,7 @@
 
     async function load(fips) {
       data = await api(endpoint, paramsFor(fips));
+      hideBreakdown();   // clear any stale breakdown from a previous scope
       if (scopeId) {
         $(scopeId).textContent = data.scope
           + (data.category_filter ? ` · ${data.category_filter}` : '');
