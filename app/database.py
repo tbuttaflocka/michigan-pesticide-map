@@ -44,6 +44,28 @@ CREATE TABLE IF NOT EXISTS crop_acreage (
 CREATE INDEX IF NOT EXISTS ix_crop_county ON crop_acreage(county_fips);
 CREATE INDEX IF NOT EXISTS ix_crop_year   ON crop_acreage(year);
 
+-- USGS state-level pesticide use by major crop or crop group (DOI
+-- 10.5066/P900FZ6Y). One row per state x compound x crop-group x year. The
+-- source publishes crop use in a wide layout (one column per crop group) with
+-- the EPest-LOW and EPest-HIGH methods in two separate files; we unpivot to
+-- long form and keep both estimates in their own columns (never averaged).
+-- NULL in an estimate = "no use estimated"; 0 = estimated but below the
+-- reporting threshold. Compound / crop values are stored exactly as published.
+CREATE TABLE IF NOT EXISTS pesticide_use_by_crop (
+    state_fips      TEXT NOT NULL,          -- state FIPS (Michigan = 26)
+    state           TEXT,                   -- state name as published
+    compound        TEXT NOT NULL,          -- pesticide active-ingredient common name
+    crop            TEXT NOT NULL,          -- crop group as published (e.g. 'Corn',
+                                            --   'Vegetables_and_fruit', 'Other_crops')
+    year            INTEGER NOT NULL,
+    epest_low_kg    REAL,                   -- EPest LOW-method estimate, kg
+    epest_high_kg   REAL,                   -- EPest HIGH-method estimate, kg
+    PRIMARY KEY (state_fips, compound, crop, year)
+);
+CREATE INDEX IF NOT EXISTS ix_pubc_compound ON pesticide_use_by_crop(compound);
+CREATE INDEX IF NOT EXISTS ix_pubc_crop     ON pesticide_use_by_crop(crop);
+CREATE INDEX IF NOT EXISTS ix_pubc_year     ON pesticide_use_by_crop(year);
+
 CREATE TABLE IF NOT EXISTS data_sources (
     source_id       TEXT PRIMARY KEY,
     title           TEXT,

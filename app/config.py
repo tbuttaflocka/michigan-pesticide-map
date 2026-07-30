@@ -71,6 +71,34 @@ USGS_SCIENCEBASE_DATASETS = [
     ),
 ]
 
+# ---- USGS state-level pesticide use by MAJOR CROP or CROP GROUP ----
+# "Estimated annual agricultural pesticide use by major crop or crop group for
+# states of the conterminous United States, 1992-2019" (DOI 10.5066/P900FZ6Y,
+# ScienceBase item 6081ae7cd34e8564d6866222, CC0). Same Thelin & Stone / Baker
+# & Stone EPest methodology as the county files above, but aggregated to
+# STATE x compound x year, with one column per crop group. The EPest-LOW and
+# EPest-HIGH estimates ship as two separate wide-format tab-delimited files.
+USGS_CROP_USE_DOI = "https://doi.org/10.5066/P900FZ6Y"
+USGS_CROP_USE_ITEM = "6081ae7cd34e8564d6866222"
+# {estimate: (ScienceBase file-get URL, local filename)}
+USGS_CROP_USE_FILES = {
+    "low": (
+        "https://www.sciencebase.gov/catalog/file/get/6081ae7cd34e8564d6866222"
+        "?f=__disk__40%2F88%2F9c%2F40889cb98036f6e8c479a6a8fc656923843dc6ba",
+        "LowEstimate_AgPestUsebyCropGroup92to19.txt",
+    ),
+    "high": (
+        "https://www.sciencebase.gov/catalog/file/get/6081ae7cd34e8564d6866222"
+        "?f=__disk__57%2F0f%2F3a%2F570f3a82a4fdd00693e4486ba62f9ac943ad539e",
+        "HighEstimate_AgPestUsebyCropGroup92to19.txt",
+    ),
+}
+# The 10 crop-group value columns in each file, in the published header order.
+USGS_CROP_GROUPS = [
+    "Corn", "Soybeans", "Wheat", "Cotton", "Vegetables_and_fruit", "Rice",
+    "Orchards_and_grapes", "Alfalfa", "Pasture_and_hay", "Other_crops",
+]
+
 # Plotly counties GeoJSON (TIGER/Line derived)
 COUNTIES_GEOJSON_URL = (
     "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"

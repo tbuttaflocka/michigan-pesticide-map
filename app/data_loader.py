@@ -43,6 +43,9 @@ from .config import (
     USGS_BASE,
     USGS_SCIENCEBASE_DATASETS,
     USGS_YEARS,
+    USGS_CROP_USE_DOI,
+    USGS_CROP_USE_FILES,
+    USGS_CROP_GROUPS,
     WBD_HUC8_QUERY,
     WQP_RESULT_URL,
     WQP_STATION_URL,
@@ -471,6 +474,163 @@ def _ingest_epest_file(conn: sqlite3.Connection, path: Path) -> tuple[int, set[i
         )
     conn.commit()
     return inserted, years_seen
+
+
+# ---------- 2b. USGS state-level pesticide use by major crop / crop group ----
+
+def _crop_use_norm(s: str) -> str:
+    """Exact-match key: lowercase, strip ALL whitespace and punctuation. Used
+    ONLY to CHECK correspondence against existing tables (compounds vs
+    pesticide_use, crop groups vs crop_acreage) — never to rewrite, fuzzy-match,
+    or force-match the published names."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _read_mi_crop_use(path: Path) -> dict:
+    """Parse one wide-format estimate file into
+    {(compound, year): {crop_group: raw_value_str}} for Michigan (FIPS 26) only.
+    Values are kept as raw strings so blank ("no estimate") stays distinct from
+    "0" (estimated but below the reporting threshold)."""
+    out: dict = {}
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            if (row.get("State_FIPS_code") or "").strip() != MICHIGAN_STATE_FIPS:
+                continue
+            try:
+                year = int(row["Year"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            key = ((row.get("Compound") or "").strip(), year)
+            out[key] = {c: (row.get(c) or "").strip() for c in USGS_CROP_GROUPS}
+    return out
+
+
+def load_usgs_pesticide_use_by_crop(conn: sqlite3.Connection) -> int:
+    """Download + ingest the USGS state-level 'pesticide use by major crop or
+    crop group' release (DOI 10.5066/P900FZ6Y), Michigan only, into
+    pesticide_use_by_crop.
+
+    The release ships the EPest-LOW and EPest-HIGH methods as two separate
+    wide-format files (one crop group per column); we unpivot to long form and
+    keep both estimates in their own columns (never averaged). A blank cell means
+    "no use estimated" (stored NULL); an explicit 0 means "estimated but below
+    threshold" (stored 0.0) — the two are preserved distinctly.
+
+    Logs how the file's compounds and crop groups line up with our existing
+    pesticide_use / crop_acreage tables on an EXACT normalized key. Nothing is
+    force-matched or dropped on a mismatch — unmatched names are reported as-is.
+    Returns the number of rows inserted."""
+    paths: dict = {}
+    for est, (url, filename) in USGS_CROP_USE_FILES.items():
+        local = DATA_DIR / filename
+        log(f"USGS pesticide-use-by-crop ({est}) -> {filename}")
+        try:
+            if not local.exists() or local.stat().st_size < 100_000:
+                size = download_to(url, local, timeout=600)
+                log(f"  fetched {size/1_000_000:.1f} MB", level="ok")
+            else:
+                log(f"  using cached ({local.stat().st_size/1_000_000:.1f} MB)")
+        except Exception as e:
+            log(f"  download failed ({est}): {e}", level="warn")
+            record_source(conn, "usgs_epest_crop",
+                          "USGS — agricultural pesticide use by major crop or "
+                          "crop group (state-level, 1992-2019)",
+                          USGS_CROP_USE_DOI, "unavailable", 0,
+                          f"Download failed for {est}-estimate file: {e}")
+            conn.commit()
+            return 0
+        paths[est] = local
+
+    low = _read_mi_crop_use(paths["low"])
+    high = _read_mi_crop_use(paths["high"])
+
+    def _val(v: str):
+        """Raw cell -> float or None. Blank/NA = no estimate (None); '0' kept."""
+        if v in ("", "NA", "ND", "NaN"):
+            return None
+        try:
+            return float(v)
+        except ValueError:
+            return None
+
+    cur = conn.cursor()
+    # Idempotent re-run: clear Michigan rows so a compound/crop that dropped out
+    # of the source doesn't linger (INSERT OR REPLACE only overwrites collisions).
+    cur.execute("DELETE FROM pesticide_use_by_crop WHERE state_fips = ?",
+                (MICHIGAN_STATE_FIPS,))
+    batch: list[tuple] = []
+    inserted = 0
+    compounds: set[str] = set()
+    years: set[int] = set()
+    crops_present: set[str] = set()
+    for (compound, year) in set(low) | set(high):
+        lo = low.get((compound, year), {})
+        hi = high.get((compound, year), {})
+        compounds.add(compound)
+        years.add(year)
+        for crop in USGS_CROP_GROUPS:
+            lv, hv = lo.get(crop, ""), hi.get(crop, "")
+            if lv == "" and hv == "":
+                continue                 # no estimate for this crop/compound/year
+            batch.append((MICHIGAN_STATE_FIPS, "Michigan", compound, crop, year,
+                          _val(lv), _val(hv)))
+            crops_present.add(crop)
+            if len(batch) >= 5000:
+                cur.executemany("INSERT OR REPLACE INTO pesticide_use_by_crop "
+                                "VALUES (?,?,?,?,?,?,?)", batch)
+                inserted += len(batch)
+                batch.clear()
+    if batch:
+        cur.executemany("INSERT OR REPLACE INTO pesticide_use_by_crop "
+                        "VALUES (?,?,?,?,?,?,?)", batch)
+        inserted += len(batch)
+    conn.commit()
+
+    # ---- exact-normalized correspondence checks (report only) ----
+    db_comp = {r[0] for r in cur.execute(
+        "SELECT DISTINCT compound FROM pesticide_use")}
+    db_comp_norm = {_crop_use_norm(c) for c in db_comp}
+    matched = sorted(c for c in compounds if _crop_use_norm(c) in db_comp_norm)
+    unmatched = sorted(c for c in compounds if _crop_use_norm(c) not in db_comp_norm)
+    log(f"  compound exact-match vs pesticide_use: "
+        f"{len(matched)}/{len(compounds)} matched", level="ok")
+    if unmatched:
+        log(f"  unmatched compounds (kept as published, NOT force-matched): "
+            f"{unmatched}", level="warn")
+
+    nass = {r[0] for r in cur.execute("SELECT DISTINCT crop FROM crop_acreage")}
+    nass_norm = {_crop_use_norm(c): c for c in nass}
+    file_norm = {_crop_use_norm(c) for c in USGS_CROP_GROUPS}
+    for crop in USGS_CROP_GROUPS:
+        m = nass_norm.get(_crop_use_norm(crop))
+        log(f"    crop group {crop!r} -> "
+            f"{m + ' (crop_acreage)' if m else 'no exact NASS counterpart'}")
+    nass_only = sorted(c for c in nass if _crop_use_norm(c) not in file_norm)
+    if nass_only:
+        log(f"  NASS crops with no crop-group counterpart: {nass_only}",
+            level="warn")
+
+    ys = sorted(years)
+    span = f"{ys[0]}-{ys[-1]}" if ys else "none"
+    notes = (
+        f"Michigan only. {inserted:,} rows; {len(compounds)} compounds; "
+        f"{len(crops_present)} of {len(USGS_CROP_GROUPS)} crop groups with data; "
+        f"years {span}. EPest low/high kept separate (never averaged); "
+        f"blank=no estimate, 0=below threshold. Compound exact-match to county "
+        f"EPest: {len(matched)}/{len(compounds)}"
+        + (f" (unmatched: {', '.join(unmatched)})" if unmatched else "")
+        + ". Crop groups matching NASS crop_acreage: Corn, Soybeans, Wheat."
+    )
+    record_source(conn, "usgs_epest_crop",
+                  "USGS — agricultural pesticide use by major crop or crop group "
+                  "(state-level, 1992-2019)",
+                  USGS_CROP_USE_DOI, "ok", inserted, notes,
+                  coverage_start=str(ys[0]) if ys else None,
+                  coverage_end=str(ys[-1]) if ys else None)
+    conn.commit()
+    log(f"pesticide_use_by_crop rows: {inserted:,} (MI, {span})", level="ok")
+    return inserted
 
 
 # ---------- 3. Optional: USDA NASS Quick Stats crop acreage ----------
@@ -3995,6 +4155,9 @@ def run() -> int:
     rows, ok_years, failed_years = load_usgs_pesticide_use(conn)
     log(f"USGS pesticide_use rows: {rows:,} across {len(ok_years)} years", level="ok")
 
+    crop_use_rows = load_usgs_pesticide_use_by_crop(conn)
+    log(f"USGS pesticide_use_by_crop rows: {crop_use_rows:,}", level="ok")
+
     nass_rows = load_nass_crop_acreage(conn)
     log(f"NASS crop_acreage rows: {nass_rows:,}")
 
@@ -4024,7 +4187,7 @@ def run() -> int:
     # Summary
     cur = conn.cursor()
     for t in ("counties", "places", "pesticide_use", "pesticide_categories",
-              "crop_acreage", "data_sources",
+              "pesticide_use_by_crop", "crop_acreage", "data_sources",
               "respiratory_ed_visits", "respiratory_hospitalizations",
               "respiratory_prevalence", "respiratory_mortality",
               "water_quality_sites", "water_quality_results", "watersheds",

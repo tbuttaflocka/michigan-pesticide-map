@@ -183,6 +183,19 @@ SOURCES: list[Source] = [
         coverage=year_range("pesticide_use"),
     ),
     Source(
+        id="usgs_epest_crop",
+        label="USGS — pesticide use by major crop group (state-level)",
+        loaders=[dl.load_usgs_pesticide_use_by_crop],
+        targets=["pesticide_use_by_crop"],
+        primary_target="pesticide_use_by_crop", primary_source_id="usgs_epest_crop",
+        # Same archival annual publication cadence as the county EPest data.
+        interval_months=12, min_abs=1000, floor_frac=0.8,
+        coverage=year_range("pesticide_use_by_crop"),
+        # The correspondence report reads pesticide_use + crop_acreage to check
+        # compound / crop-group overlap, so seed staging with them (read-only).
+        seed_extra=("pesticide_use", "crop_acreage"),
+    ),
+    Source(
         id="nass_crop", label="USDA NASS — Michigan crop acreage",
         loaders=[dl.load_nass_crop_acreage],
         targets=["crop_acreage"],
