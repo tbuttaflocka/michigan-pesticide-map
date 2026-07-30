@@ -551,6 +551,17 @@ a:hover { text-decoration: underline; }
 .notable-list .nt-v { font-size: 13px; color: var(--text); font-weight: 600; line-height: 1.35; }
 .notable-list .nt-note { font-size: 10.8px; color: var(--muted); line-height: 1.35; }
 .notable-list .nt-src { font-size: 10px; color: var(--muted); font-style: italic; margin-top: 1px; }
+/* clickable highlight -> jumps to the county/site on the map */
+.notable-list li.clickable { cursor: pointer; transition: border-color .12s, background .12s; }
+.notable-list li.clickable:hover,
+.notable-list li.clickable:focus-visible {
+  border-color: var(--accent); background: var(--bg-3); outline: none;
+}
+.notable-list li.clickable:hover { border-left-color: var(--accent); }
+.notable-list .nt-go {
+  font-style: normal; letter-spacing: .3px; color: var(--link); font-weight: 600;
+  text-transform: none; margin-left: 4px;
+}
 
 .pesticide-detail { margin: 2px 0 4px; }
 .pesticide-detail > summary {

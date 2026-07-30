@@ -1729,10 +1729,24 @@
       ul.innerHTML = '';
       for (const n of d.notable) {
         const li = document.createElement('li');
-        li.innerHTML = `<span class="nt-k">${esc(n.label)}</span>`
+        const clickable = !!n.target;
+        if (clickable) {
+          li.className = 'clickable';
+          li.setAttribute('role', 'button');
+          li.setAttribute('tabindex', '0');
+          li.title = 'Show this on the map';
+        }
+        li.innerHTML = `<span class="nt-k">${esc(n.label)}${clickable ? ' <span class="nt-go" aria-hidden="true">→ show on map</span>' : ''}</span>`
           + `<span class="nt-v">${esc(n.value)}</span>`
           + (n.note ? `<span class="nt-note">${esc(n.note)}</span>` : '')
           + (n.source ? `<span class="nt-src">Source: ${esc(n.source)}</span>` : '');
+        if (clickable) {
+          const go = () => runHighlightAction(n.target);
+          li.addEventListener('click', go);
+          li.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+          });
+        }
         ul.appendChild(li);
       }
       if (wrap) show(wrap);
@@ -1794,6 +1808,37 @@
     for (const L of SHARE_LAYERS) {
       const cb = $(L.cb);
       if (cb && cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    refreshOverviewCardStates();
+  }
+
+  function zoomToCounty(fips) {
+    const layer = layerForFips(fips);
+    if (layer && layer.getBounds && state.map) {
+      try { state.map.fitBounds(layer.getBounds(), { padding: [30, 30], maxZoom: 10 }); } catch (e) { /* noop */ }
+    }
+  }
+
+  // A "Statewide highlight" click jumps to the exact county / site / facility the
+  // number came from: turns on the relevant layer (which flows through the same
+  // controls, so the layer panel + totals grid stay in sync) and pans/zooms —
+  // opening the feature's popup for a specific site/facility, or zooming to and
+  // highlighting the county for a county-level stat. Reveals the map on mobile,
+  // where the summary sheet otherwise covers it.
+  async function runHighlightAction(target) {
+    if (!target) return;
+    if (isMobile()) document.body.classList.remove('m-detail-open', 'm-layers-open');
+    if (target.kind === 'feature') {
+      // focusFinding enables the site's layer (dispatching `change`, so the panel
+      // + grid update), flies to it, and opens its popup.
+      await focusFinding(target.focus, target.id || null, Number(target.lat), Number(target.lng));
+    } else if (target.kind === 'county') {
+      if (target.cb) {
+        const cb = $(target.cb);
+        if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
+      zoomToCounty(target.fips);
+      selectCounty(target.fips);   // persistent gold outline on the county
     }
     refreshOverviewCardStates();
   }

@@ -936,9 +936,12 @@ def api_overview():
              {"type": "choropleth", "value": "air_toxics"}),
     ]
 
-    # ---- honest cross-layer callouts (factual, sourced; medium/standard labelled) ----
+    # ---- honest cross-layer callouts (factual, sourced; medium/standard
+    # labelled). Each carries a `target` so the frontend can jump to the exact
+    # county / site / facility the number comes from (computed at request time —
+    # no schema change). ----
     notable = []
-    r = _ov_row(cur, "SELECT co.name, COUNT(*) c FROM ust_sites u "
+    r = _ov_row(cur, "SELECT co.name, co.fips AS fips, COUNT(*) c FROM ust_sites u "
                      "JOIN counties co ON co.fips = u.county_fips "
                      "WHERE u.category='leaking_open' GROUP BY u.county_fips "
                      "ORDER BY c DESC LIMIT 1")
@@ -946,30 +949,42 @@ def api_overview():
         notable.append({
             "label": "Most open leaking-tank releases",
             "value": f"{r['name']} County — {r['c']:,}",
-            "source": "Michigan EGLE RRD (Part 213)"})
-    r = _ov_row(cur, "SELECT name, site_type, county, max_ppt FROM pfas_features "
-                     "WHERE kind='surface_water' AND max_ppt IS NOT NULL "
-                     "ORDER BY max_ppt DESC LIMIT 1")
+            "source": "Michigan EGLE RRD (Part 213)",
+            "target": {"kind": "county", "fips": r["fips"], "cb": "ust-sites"}})
+    r = _ov_row(cur, "SELECT name, site_type, county, county_fips, latitude, longitude, "
+                     "max_ppt FROM pfas_features WHERE kind='surface_water' "
+                     "AND max_ppt IS NOT NULL ORDER BY max_ppt DESC LIMIT 1")
     if r and r["max_ppt"]:
         wb = (r["site_type"] or "").strip()
         cty = f"{r['county']} Co." if r["county"] else None
         where = " · ".join(x for x in (wb or None, cty) if x) or "a monitored water body"
+        tgt = None
+        if r["latitude"] is not None and r["longitude"] is not None:
+            tgt = {"kind": "feature", "focus": "pfas_water",
+                   "lat": r["latitude"], "lng": r["longitude"], "fips": r["county_fips"]}
         notable.append({
             "label": "Highest PFAS in surface water",
             "value": f"{round(r['max_ppt']):,} ppt — {where}",
             "note": "single PFAS analyte in a surface-water sample — surface water, not drinking water",
-            "source": "Michigan EGLE surface-water PFAS sampling"})
+            "source": "Michigan EGLE surface-water PFAS sampling",
+            "target": tgt})
     if tri_year:
-        r = _ov_row(cur, "SELECT f.facility_name, f.county, SUM(r.total_lbs) t "
-                         "FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id "
+        r = _ov_row(cur, "SELECT f.facility_name, f.county, f.facility_id, f.latitude, "
+                         "f.longitude, SUM(r.total_lbs) t FROM tri_release r "
+                         "JOIN tri_facility f ON f.facility_id = r.facility_id "
                          "WHERE r.year = ? GROUP BY r.facility_id ORDER BY t DESC LIMIT 1",
                     (tri_year,))
         if r and r["t"]:
             loc = f" ({r['county']} Co.)" if r["county"] else ""
+            tgt = None
+            if r["latitude"] is not None and r["longitude"] is not None:
+                tgt = {"kind": "feature", "focus": "tri", "id": r["facility_id"],
+                       "lat": r["latitude"], "lng": r["longitude"]}
             notable.append({
                 "label": f"Largest single TRI releaser ({tri_year})",
                 "value": f"{r['facility_name']}{loc} — {_compact_lbs(r['t'])}",
-                "source": "EPA Toxics Release Inventory (self-reported)"})
+                "source": "EPA Toxics Release Inventory (self-reported)",
+                "target": tgt})
 
     conn.close()
     return jsonify({"totals": totals, "notable": notable,
