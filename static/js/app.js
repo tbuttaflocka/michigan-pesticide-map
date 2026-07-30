@@ -1819,15 +1819,59 @@
     }
   }
 
+  // Which layer/choropleth id a highlight points at, so we can read its current
+  // on/off state (single source of truth = the layer controls) rather than
+  // assuming the highlight owns it. Returns {choropleth} or {cb}.
+  function highlightLayer(target) {
+    if (!target) return {};
+    if (target.choropleth) return { choropleth: target.choropleth };
+    if (target.kind === 'feature') {
+      const cfg = _FOCUS[target.focus];
+      return { cb: cfg && cfg.cb };
+    }
+    if (target.kind === 'county') return { cb: target.cb };
+    return {};
+  }
+
+  // Is the layer/choropleth behind a highlight already showing on the map?
+  function highlightActive(target) {
+    const L = highlightLayer(target);
+    if (L.choropleth) return state.activeChoropleth === L.choropleth;
+    if (L.cb) { const cb = $(L.cb); return !!(cb && cb.checked); }
+    return false;
+  }
+
   // A "Statewide highlight" click jumps to the exact county / site / facility the
   // number came from: turns on the relevant layer (which flows through the same
   // controls, so the layer panel + totals grid stay in sync) and pans/zooms —
   // opening the feature's popup for a specific site/facility, or zooming to and
   // highlighting the county for a county-level stat. Reveals the map on mobile,
   // where the summary sheet otherwise covers it.
+  //
+  // Re-clicking a highlight whose layer is ALREADY on toggles it back off — the
+  // same click-again-to-deselect behavior the totals-grid tiles have. For a
+  // choropleth that means setActiveChoropleth('none'); for a marker overlay it
+  // means unchecking its box. We check current state first (never blindly
+  // re-activate) so the highlight, totals grid, and layer panel stay in sync.
   async function runHighlightAction(target) {
     if (!target) return;
     if (isMobile()) document.body.classList.remove('m-detail-open', 'm-layers-open');
+    if (highlightActive(target)) {
+      // OFF re-click: clear the layer/choropleth only, no re-navigation.
+      const L = highlightLayer(target);
+      if (L.choropleth) {
+        setActiveChoropleth('none');   // also unchecks in the county-coloring panel
+      } else if (L.cb) {
+        const cb = $(L.cb);
+        if (cb && cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
+      refreshOverviewCardStates();
+      return;
+    }
+    // ON click: turn the layer on and navigate (existing behavior).
+    if (target.choropleth && state.activeChoropleth !== target.choropleth) {
+      setActiveChoropleth(target.choropleth);
+    }
     if (target.kind === 'feature') {
       // focusFinding enables the site's layer (dispatching `change`, so the panel
       // + grid update), flies to it, and opens its popup.
