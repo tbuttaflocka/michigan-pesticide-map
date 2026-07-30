@@ -673,6 +673,7 @@
       case 'landfill_density': return 'Landfill density';
       case 'pfas_density': return 'PFAS site density';
       case 'ust_density': return 'Open leaking storage-tank releases';
+      case 'air_toxics': return 'Air toxics cancer risk';
       default:       return `Pesticide — ${pestFilterLabel()}`;
     }
   }
@@ -4198,21 +4199,31 @@
       }, 1300);
     });
 
-    // County-coloring radio group — exactly one choropleth at a time.
-    // `change` handles switching to a different option; `click` additionally lets
-    // you re-click the ACTIVE option to deselect it back to "None" (a plain radio
-    // can't uncheck itself). On a fresh selection the click fires before change,
-    // when state.activeChoropleth still holds the previous value, so this only
-    // triggers on a genuine re-click of the already-active choropleth.
+    // County-coloring radio group — exactly one choropleth at a time. A single
+    // `click` handler drives BOTH selecting and deselecting, so the behavior is
+    // deterministic and independent of click-vs-change event ordering (which
+    // differs across browsers) and works whether the user clicks the input or
+    // the surrounding <label>. `state.activeChoropleth` (read at click time, the
+    // one source of truth) decides: re-clicking the ACTIVE option deselects it
+    // to "None"; clicking any other option selects it. We don't rely on the
+    // radios' native `change` event at all.
     document.querySelectorAll('input[name="choropleth"]').forEach((r) => {
-      r.addEventListener('change', (e) => {
-        if (e.target.checked) setActiveChoropleth(e.target.value);
-      });
-      r.addEventListener('click', (e) => {
-        if (e.target.value !== 'none' && state.activeChoropleth === e.target.value) {
-          const none = document.querySelector('input[name="choropleth"][value="none"]');
-          if (none) none.checked = true;      // clears the re-clicked radio (radio group)
-          setActiveChoropleth('none');         // clears coloring, updates indicator + grid
+      r.addEventListener('click', () => {
+        const val = r.value;
+        if (val !== 'none' && state.activeChoropleth === val) {
+          // Re-click of the already-active choropleth -> turn coloring off.
+          // Defer to a microtask-after-tick so we set the FINAL radio state
+          // AFTER the browser's own click activation (which re-checks this
+          // radio); otherwise the browser leaves `val` selected while state
+          // says "none". Setting None here wins deterministically in every
+          // browser, without depending on preventDefault/event ordering.
+          setTimeout(() => {
+            const none = document.querySelector('input[name="choropleth"][value="none"]');
+            if (none) none.checked = true;   // radio group: unchecks `val`
+            setActiveChoropleth('none');
+          }, 0);
+        } else if (state.activeChoropleth !== val) {
+          setActiveChoropleth(val);          // switch to the chosen choropleth
         }
       });
     });
