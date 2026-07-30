@@ -62,7 +62,7 @@ app.config["JSON_SORT_KEYS"] = False
 
 # ---------- security headers ----------
 # Applied to every response. The Content-Security-Policy is scoped to exactly
-# what the app loads: its own assets, the Leaflet/MarkerCluster/Heat libraries
+# what the app loads: its own assets, the Leaflet/MarkerCluster libraries
 # from unpkg, Chart.js from jsDelivr, and CARTO/OSM basemap tiles. There are no
 # inline <script> blocks, so script-src stays strict (no 'unsafe-inline');
 # style-src allows inline because Leaflet and the charts set element styles.
@@ -1889,36 +1889,6 @@ def api_water_site_detail(site_id: str):
         "site": dict(site),
         "compound_summary": [dict(r) for r in rows],
     })
-
-
-@app.route("/api/water/heatmap")
-def api_water_heatmap():
-    """Points (lat, lon, weight) for leaflet.heat. Weight = detection count,
-    boosted if any exceedances. ?compound filters to one compound."""
-    compound = (request.args.get("compound") or "").strip().upper()
-    conn = db()
-    cur = conn.cursor()
-    where = ["r.detected = 1"]
-    args: list = []
-    if compound:
-        where.append("r.compound = ?")
-        args.append(compound)
-    rows = cur.execute(f"""
-        SELECT s.latitude, s.longitude,
-               COUNT(*) AS detections,
-               SUM(CASE WHEN r.exceeds_mcl = 1 THEN 1 ELSE 0 END) AS exceedances
-          FROM water_quality_results r
-          JOIN water_quality_sites s ON s.site_id = r.site_id
-         WHERE {' AND '.join(where)}
-           AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
-         GROUP BY s.site_id
-    """, args).fetchall()
-    conn.close()
-    pts = []
-    for r in rows:
-        weight = float(r["detections"] or 0) + 4.0 * float(r["exceedances"] or 0)
-        pts.append([r["latitude"], r["longitude"], weight])
-    return jsonify({"compound": compound or None, "points": pts})
 
 
 # ---- HUC-8 watershed geometry + point-in-polygon aggregation ----

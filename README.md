@@ -194,9 +194,9 @@ key, run `python refresh_data.py --source nass_crop` to pull the crop data.
 - **Heat-map view** — county choropleth, layer toggles (category / specific compound),
   Low/Avg/High estimate switch, total-vs-kg/mi² normalization, time slider
   (1992–2012) with play animation, click-for-county-detail with charts.
-- **Water contamination overlay** — three toggleable layers in the left
+- **Water contamination overlay** — two toggleable layers in the left
   sidebar: monitoring sites (2,514 stations colour-coded green / amber / red
-  by detection severity), Leaflet heatmap of detection density, and HUC-8
+  by detection severity) and HUC-8
   watershed polygons shaded by total detections / MCL exceedances. A
   dropdown filters every layer to a single compound (e.g. ATRAZINE); a
   "Match the main map's compound" checkbox automatically links it to
@@ -585,7 +585,6 @@ michigan-pesticide-map/
 | `GET /api/water/sites?compound=&medium=` | Monitoring sites with detection/exceedance counts |
 | `GET /api/water/site/<id>` | Site detail + per-compound sample summary |
 | `GET /api/water/compounds` | All compounds detected with sample/detection/exceedance counts |
-| `GET /api/water/heatmap?compound=` | `[lat, lon, weight]` points for `L.heatLayer` |
 | `GET /api/water/watersheds?compound=` | HUC-8 GeoJSON with per-watershed detection counts |
 | `GET /api/cancer/types` | Cancer-type registry + matrix compounds/cancers |
 | `GET /api/cancer/counties?type=&data_type=&stage=` | Per-county age-adjusted rates for the cancer choropleth |

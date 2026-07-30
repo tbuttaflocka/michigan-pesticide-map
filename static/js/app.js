@@ -75,8 +75,8 @@
     explore: { vars: null, wired: false, chart: null },
     trend: { sw: null, cty: null },
     water: {
-      sitesLayer: null, heatLayer: null, wsLayer: null,
-      showSites: false, showHeat: false, showWatersheds: false,
+      sitesLayer: null, wsLayer: null,
+      showSites: false, showWatersheds: false,
       compound: '',          // current dropdown selection (override)
       matchMain: false,      // mirror main-map compound filter
       compounds: [],         // dropdown options
@@ -790,7 +790,6 @@
   // Small key entries for whatever point/marker overlays are stacked on top.
   const MARKER_KEYS = [
     { on: () => state.water.showSites,       c: '#f0b429', t: 'Water monitoring sites' },
-    { on: () => state.water.showHeat,        c: '#f85149', t: 'Water detection heatmap' },
     { on: () => state.water.showWatersheds,  c: '#8db0ff', t: 'HUC-8 watersheds' },
     { on: () => state.contam.showSites,      c: '#f85149', t: 'Contamination sites' },
     { on: () => state.contam.showZones,      c: '#e8873c', t: 'Contamination impact zones' },
@@ -1124,20 +1123,6 @@
     layer.setPopupContent(body);
   }
 
-  async function refreshWaterHeat() {
-    if (state.water.heatLayer) state.water.heatLayer.remove();
-    state.water.heatLayer = null;
-    if (!state.water.showHeat) return;
-    const compound = activeWaterCompound();
-    const d = await api('/api/water/heatmap', compound ? { compound } : {});
-    if (!d.points.length || typeof L.heatLayer !== 'function') return;
-    state.water.heatLayer = L.heatLayer(d.points, {
-      radius: 22, blur: 15, minOpacity: 0.35,
-      gradient: { 0.2: '#3f5cad', 0.4: '#7791e1', 0.6: '#bfb4f0',
-                  0.8: '#f0b429', 1.0: '#f85149' },
-    }).addTo(state.map);
-  }
-
   // Fill a watershed by pesticide detections in its water samples (red tint
   // when there are MCL exceedances); grey when nothing was detected.
   function watershedFill(d, e, maxDet) {
@@ -1231,7 +1216,6 @@
 
   function refreshAllWaterLayers() {
     refreshWaterSites();
-    refreshWaterHeat();
     refreshWaterWatersheds();
   }
 
@@ -4324,9 +4308,6 @@
     $('wq-sites').addEventListener('change', (e) => {
       state.water.showSites = e.target.checked; refreshWaterSites(); renderMarkerKeys();
     });
-    $('wq-heat').addEventListener('change', (e) => {
-      state.water.showHeat = e.target.checked; refreshWaterHeat(); renderMarkerKeys();
-    });
     $('wq-watersheds').addEventListener('change', (e) => {
       state.water.showWatersheds = e.target.checked; refreshWaterWatersheds(); renderMarkerKeys();
     });
@@ -6111,7 +6092,6 @@
   // URL short). Codes are 2-3 chars so a full multi-layer link stays compact.
   const SHARE_LAYERS = [
     { c: 'wqs', cb: 'wq-sites' },
-    { c: 'wqh', cb: 'wq-heat' },
     { c: 'wqw', cb: 'wq-watersheds' },
     { c: 'ct',  cb: 'contam-sites', def: 'ns',
       subs: [['n', 'contam-f-npl'], ['s', 'contam-f-state'], ['d', 'contam-f-deleted']] },
