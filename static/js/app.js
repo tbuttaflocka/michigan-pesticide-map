@@ -2131,13 +2131,101 @@
       tbl.innerHTML = '<tr><td class="muted small">No NASS crop data loaded — set NASS_API_KEY to enable.</td></tr>';
     } else {
       tbl.innerHTML = data.crops.map((c) => `
-        <tr>
-          <td>${c.crop}</td>
+        <tr class="crop-row clickable" role="button" tabindex="0"
+            data-crop="${esc(c.crop)}"
+            data-acres="${c.acres_harvested != null ? c.acres_harvested : ''}"
+            data-year="${esc(c.year)}"
+            title="Michigan pesticide estimates for ${esc(c.crop)}">
+          <td>${c.crop} <span class="crop-go" aria-hidden="true">→</span></td>
           <td class="year">${c.year}</td>
           <td class="val">${c.acres_harvested ? c.acres_harvested.toLocaleString() : '—'} ac</td>
         </tr>
       `).join('');
     }
+  }
+
+  // ---------- Crop drill-down (Michigan by-crop pesticide estimates) ----------
+  // Verbatim required wording — do not paraphrase.
+  const CROP_USE_CAVEAT =
+    "Estimates are Michigan statewide for this crop, shown alongside this " +
+    "county's acreage. USGS does not publish county-level by-crop estimates " +
+    "because of uncertainty in placing crop-specific applications " +
+    "geographically. Modeled estimates, not application records.";
+  const CROP_USE_SOURCE =
+    "Crop acreage: USDA NASS. Crop-level pesticide estimates: USGS, Estimated " +
+    "Annual Agricultural Pesticide Use by Major Crop or Crop Group, 1992-2019.";
+  const CROP_CAT_LABEL = {
+    herbicide: 'Herbicides', insecticide: 'Insecticides',
+    fungicide: 'Fungicides', other: 'Other',
+  };
+
+  // EPest low & high shown as a range in lbs — never averaged. Collapses to a
+  // single figure only when the two estimates are identical.
+  function cropLbsRange(lo, hi) {
+    const a = Math.round(lo || 0).toLocaleString();
+    const b = Math.round(hi || 0).toLocaleString();
+    return a === b ? `${a} lbs` : `${a}–${b} lbs`;
+  }
+
+  function cropAcresLine(ctx) {
+    const county = (state._countyData && state._countyData.name)
+      ? `${esc(state._countyData.name)} County` : 'This county';
+    const acres = ctx.acres;
+    if (acres == null || acres === '' || Number.isNaN(Number(acres))) {
+      return `<p class="crop-use-acres">${county}: harvested acreage not reported by NASS.</p>`;
+    }
+    return `<p class="crop-use-acres">${county}: <b>${Number(acres).toLocaleString()}</b>`
+      + ` harvested acres<span class="muted"> (USDA NASS${ctx.nassYear ? ', ' + esc(ctx.nassYear) : ''})</span></p>`;
+  }
+
+  function cropUseHtml(d, ctx) {
+    const crop = esc(d.crop || ctx.crop || 'Crop');
+    const head = `<h2 class="crop-use-h">${crop} — Michigan pesticide use</h2>`
+      + cropAcresLine(ctx);
+    // Unmapped crop: open the panel and say plainly there is no by-crop estimate.
+    if (!d.mapped) {
+      return head
+        + `<p class="crop-use-none">USGS does not publish a crop-group breakdown covering `
+        + `<b>${crop}</b>, so no Michigan by-crop pesticide estimate is available for it. `
+        + `The USGS release only breaks out corn, soybeans, wheat, and a few broad `
+        + `crop groups — this crop is not one of them.</p>`
+        + `<p class="crop-use-src">${esc(CROP_USE_SOURCE)}</p>`;
+    }
+    let body = `<p class="crop-use-year">Estimated pesticide use on <b>${esc(d.crop_group)}</b> `
+      + `statewide — most recent year available: <b>${d.year}</b>. Each figure is a range `
+      + `from the EPest-<b>low</b> to EPest-<b>high</b> estimate (not averaged).</p>`;
+    body += `<p class="crop-use-total">Total across all categories: `
+      + `<b>${cropLbsRange(d.total_low_lbs, d.total_high_lbs)}</b></p>`;
+    for (const cat of (d.categories || [])) {
+      body += `<div class="crop-use-cat">`
+        + `<h3>${CROP_CAT_LABEL[cat.category] || esc(cat.category)}`
+        + ` <span class="muted small">${cropLbsRange(cat.total_low_lbs, cat.total_high_lbs)}</span></h3>`
+        + `<table class="crop-use-table">`
+        + cat.compounds.map((c) =>
+            `<tr><td>${chemLink(c.compound)}</td>`
+            + `<td class="val">${cropLbsRange(c.low_lbs, c.high_lbs)}</td></tr>`).join('')
+        + `</table></div>`;
+    }
+    body += `<p class="crop-use-caveat">${esc(CROP_USE_CAVEAT)}</p>`;
+    body += `<p class="crop-use-src">${esc(CROP_USE_SOURCE)}</p>`;
+    return head + body;
+  }
+
+  // Open the crop drill-down as its own modal overlay, so closing it always
+  // leaves the county panel untouched. Compound names inside render as the same
+  // .chem-link spans used app-wide, so they open the shared PubChem popup.
+  async function openCropUse(crop, ctx) {
+    ctx = ctx || {};
+    ctx.crop = crop;
+    const modal = $('crop-use-modal');
+    const body = $('crop-use-body');
+    if (!modal || !body) return;
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    show(modal);
+    let d;
+    try { d = await api('/api/crop-use', { crop }); }
+    catch (e) { body.innerHTML = '<p class="muted">Could not load crop pesticide estimates.</p>'; return; }
+    body.innerHTML = cropUseHtml(d, ctx);
   }
 
   // ---------- Industrial contamination overlay ----------
@@ -4527,7 +4615,35 @@
       if (e.target.id === 'tri-info-modal') hide($('tri-info-modal'));
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') hide($('tri-info-modal'));
+      if (e.key === 'Escape') { hide($('tri-info-modal')); hide($('crop-use-modal')); }
+    });
+
+    // County crop rows -> Michigan by-crop pesticide drill-down. Delegated on the
+    // table (which persists) so it survives each county re-render.
+    const cropsTbl = $('county-crops');
+    if (cropsTbl) {
+      const openRow = (tr) => {
+        if (!tr) return;
+        openCropUse(tr.dataset.crop, {
+          acres: tr.dataset.acres !== '' ? Number(tr.dataset.acres) : null,
+          nassYear: tr.dataset.year || null,
+        });
+      };
+      cropsTbl.addEventListener('click', (e) => {
+        const tr = e.target.closest && e.target.closest('.crop-row');
+        if (tr) openRow(tr);
+      });
+      cropsTbl.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const tr = e.target.closest && e.target.closest('.crop-row');
+        if (tr) { e.preventDefault(); openRow(tr); }
+      });
+    }
+    // Crop-use modal — close via ×, backdrop, or Escape (handled above). Being a
+    // separate overlay, closing it leaves the county panel open and working.
+    $('crop-use-close').addEventListener('click', () => hide($('crop-use-modal')));
+    $('crop-use-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'crop-use-modal') hide($('crop-use-modal'));
     });
 
     bindSearch();

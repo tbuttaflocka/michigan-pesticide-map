@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -722,6 +723,87 @@ def api_county(fips: str):
         "landfills": landfills,
         "mdard_inspector_url":
             "https://www.michigan.gov/en/mdard/plant-pest/Pesticides/Pesticide-Regulatory-Info",
+    })
+
+
+# Exact-normalized key (lowercase, strip whitespace + punctuation) — the same
+# rule used at load time to line NASS crops up with the USGS crop groups.
+def _norm_crop(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+# The four category buckets this view reports; growth_regulator and any other
+# pesticide_categories value fold into "other".
+_CROP_USE_CAT_ORDER = ["herbicide", "insecticide", "fungicide", "other"]
+
+
+def _crop_use_bucket(cat: str) -> str:
+    return cat if cat in ("herbicide", "insecticide", "fungicide") else "other"
+
+
+@app.route("/api/crop-use")
+def api_crop_use():
+    """Michigan statewide estimated pesticide use for the USGS crop group that
+    matches a NASS crop, grouped by category, for the most recent year with
+    data. Only Corn/Soybeans/Wheat have a NASS counterpart; any other crop
+    returns mapped=False so the UI can say no by-crop estimate is published.
+
+    Values are kg in pesticide_use_by_crop; lb_jsonify converts *_kg -> *_lbs
+    for display. EPest low and high are returned as a range (never averaged)."""
+    crop = (request.args.get("crop") or "").strip()
+    if not crop:
+        abort(400, "crop is required")
+    conn = db()
+    cur = conn.cursor()
+    groups = [r[0] for r in cur.execute(
+        "SELECT DISTINCT crop FROM pesticide_use_by_crop")]
+    match = next((g for g in groups if _norm_crop(g) == _norm_crop(crop)), None)
+    if not match:
+        conn.close()
+        # Unmapped crop (e.g. Potatoes, Sugarbeets): no crop-group breakdown.
+        return jsonify({"crop": crop, "mapped": False})
+
+    year = cur.execute(
+        "SELECT MAX(year) FROM pesticide_use_by_crop WHERE crop = ?", (match,)
+    ).fetchone()[0]
+    rows = cur.execute("""
+        SELECT c.compound,
+               COALESCE(pc.category, 'other') AS category,
+               c.epest_low_kg, c.epest_high_kg
+          FROM pesticide_use_by_crop c
+     LEFT JOIN pesticide_categories pc ON pc.compound = c.compound
+         WHERE c.crop = ? AND c.year = ?
+           AND (c.epest_low_kg > 0 OR c.epest_high_kg > 0)
+      ORDER BY COALESCE(c.epest_high_kg, c.epest_low_kg) DESC NULLS LAST
+    """, (match, year)).fetchall()
+    conn.close()
+
+    buckets: dict = {}
+    for r in rows:
+        b = _crop_use_bucket(r["category"])
+        buckets.setdefault(b, []).append({
+            "compound": r["compound"],
+            "low_kg": r["epest_low_kg"],
+            "high_kg": r["epest_high_kg"],
+        })
+    categories = []
+    tot_low = tot_high = 0.0
+    for b in _CROP_USE_CAT_ORDER:
+        comps = buckets.get(b)
+        if not comps:
+            continue
+        cl = sum(x["low_kg"] or 0 for x in comps)
+        ch = sum(x["high_kg"] or 0 for x in comps)
+        tot_low += cl
+        tot_high += ch
+        categories.append({"category": b, "compounds": comps,
+                           "total_low_kg": cl, "total_high_kg": ch})
+
+    return lb_jsonify({
+        "crop": crop, "crop_group": match, "mapped": True, "year": year,
+        "categories": categories,
+        "total_low_kg": tot_low, "total_high_kg": tot_high,
+        "compound_count": len(rows),
     })
 
 
