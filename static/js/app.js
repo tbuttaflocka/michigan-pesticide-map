@@ -6371,6 +6371,7 @@
       const el = e.target.closest('.info-i, .gloss-term');
       if (!el) return;
       e.stopPropagation();
+      e.preventDefault();   // an info "?" inside a toggle label must not flip the checkbox
       if (current === el && tip.classList.contains('show')) { hide(); return; }
       const r = el.getBoundingClientRect();
       showFor(el, r.right, r.bottom, 0);

@@ -115,6 +115,18 @@
       'The Michigan PFAS Action Response Team — the multi-agency state body (led by EGLE) that ' +
       'investigates PFAS contamination, samples water and fish, and publishes the live data ' +
       'behind this layer. Michigan\'s program is the most aggressive of any U.S. state.',
+    'AOI':
+      'Area of Interest — an area EGLE is investigating for PFAS where the SOURCE has not yet ' +
+      'been confirmed. It flags a place where nearby residential wells may be affected while the ' +
+      'investigation continues, distinct from a confirmed PFAS Site with an identified source.',
+    'forever chemicals':
+      'The nickname for PFAS — synthetic chemicals whose carbon–fluorine bonds are so strong they ' +
+      'essentially don\'t break down in the environment or the body, so they persist for years and ' +
+      'build up (bioaccumulate) over time.',
+    'POTW':
+      'Publicly Owned Treatment Works — a municipal wastewater (sewage) treatment plant. Some test ' +
+      'for PFAS at their permitted discharge points; PFAS can pass through because these plants ' +
+      'are not designed to remove it.',
     'bioaccumulation':
       'The buildup of a chemical in living tissue faster than the body can get rid of it, so ' +
       'concentrations rise up the food chain. PFOS bioaccumulates strongly in fish, which is why ' +
