@@ -1497,6 +1497,28 @@
       try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) { /* noop */ }
     }
 
+    // Discoverable prompt (pesticide trend only) so users know the bands are
+    // clickable/tappable. Shown for the category/percent views (where the click
+    // reveals the "Other" breakdown); hidden for the other modes and the TRI trend.
+    function updateHint() {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const box = canvas.closest('.chart-box') || canvas.parentElement;
+      let el = document.getElementById(canvasId + '-hint');
+      const show = !!(data && data.other_breakdown) && (mode === 'category' || mode === 'percent');
+      if (!show) { if (el) el.classList.add('hidden'); return; }
+      if (!el) {
+        el = document.createElement('p');
+        el.id = canvasId + '-hint';
+        el.className = 'trend-hint';
+        box.parentNode.insertBefore(el, box);   // sits just above the chart
+      }
+      const verb = isMobile() ? 'Tap' : 'Click';
+      el.innerHTML = `<span class="th-ico" aria-hidden="true">👆</span> ${verb} a category band `
+        + '(e.g. “Other”) to see which compounds make it up.';
+      el.classList.remove('hidden');
+    }
+
     function buildSpec() {
       if (mode === 'total') {
         return {
@@ -1533,11 +1555,16 @@
             })
           : c.values;
         const color = catColors[c.key] || '#9aa4b2';
+        // When a breakdown is available (pesticide trend), thicken the band's
+        // outline on hover as a subtle "this is clickable" cue.
+        const clickable = !!(data.other_breakdown);
         return {
           label: c.label, data: vals, borderColor: color,
           backgroundColor: hexA(color, 0.5),
           fill: i === 0 ? 'origin' : '-1',
           borderWidth: 1.2, pointRadius: 0, tension: 0.2,
+          hoverBorderWidth: clickable ? 3 : 1.2,
+          pointHoverRadius: clickable ? 4 : 0,
         };
       });
       return { stacked: true, pct, datasets: ds };
@@ -1546,6 +1573,7 @@
     function render() {
       const ctx = document.getElementById(canvasId);
       if (!ctx || !data) return;
+      updateHint();   // keep the "click a band" prompt in sync with the mode
       // Charts are a progressive enhancement — if the Chart.js library failed to
       // load, skip drawing rather than throwing (the data tables still render).
       if (typeof Chart === 'undefined') return;
@@ -1599,6 +1627,15 @@
             const pts = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, false);
             if (!pts.length) return;
             showOtherBreakdown(data.years[pts[0].index]);
+          },
+          // Pointer cursor over the interactive category bands, so it reads as
+          // clickable/tappable (no effect on the non-clickable modes/TRI trend).
+          onHover: (evt, els) => {
+            const target = evt && evt.native && evt.native.target;
+            if (!target) return;
+            const interactive = !!data.other_breakdown
+              && (mode === 'category' || mode === 'percent') && els.length > 0;
+            target.style.cursor = interactive ? 'pointer' : '';
           },
           scales: {
             x: { grid: { color: 'rgba(154,164,178,.08)' },
