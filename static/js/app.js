@@ -62,8 +62,10 @@
     choropleth: null,
     geoLayer: null,
     map: null,
-    // Which layer colors the county fills. Exactly one at a time (radio group):
-    activeChoropleth: 'pesticide',
+    // Which layer colors the county fills. Exactly one at a time (radio group).
+    // Default is 'none' so the app opens clean (no coloring); a deep link with a
+    // ?ch= param overrides this during boot (see applyViewState/applyViewLayers).
+    activeChoropleth: 'none',
     countyByFips: new Map(),
     breaks: [],
     pestStats: null,
@@ -6033,7 +6035,7 @@
     const activeBtn = document.querySelector('#view-switch button.active');
     const view = activeBtn ? activeBtn.dataset.view : 'map';
     if (view && view !== 'map') q.set('v', view);
-    if (state.activeChoropleth && state.activeChoropleth !== 'pesticide') q.set('ch', state.activeChoropleth);
+    if (state.activeChoropleth && state.activeChoropleth !== 'none') q.set('ch', state.activeChoropleth);
 
     const latest = state.years[state.years.length - 1];
     if (state.year && state.year !== latest) q.set('yr', String(state.year));

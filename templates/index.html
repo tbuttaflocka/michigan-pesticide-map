@@ -49,13 +49,13 @@
 
       <div class="active-layer" id="active-layer-indicator">
         <span class="al-k">Currently showing</span>
-        <strong id="active-layer-name">Pesticide</strong>
+        <strong id="active-layer-name">None (no county coloring)</strong>
       </div>
 
       <div class="layer-group">
-        <label class="layer-radio" data-tip="Turn off county shading and show only the point overlays (markers, sites, wind)."><input type="radio" name="choropleth" value="none" /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
+        <label class="layer-radio" data-tip="Turn off county shading and show only the point overlays (markers, sites, wind)."><input type="radio" name="choropleth" value="none" checked /> <span class="lr-dot none"></span> <span>None (no coloring)</span></label>
 
-        <label class="layer-radio" data-tip="Shade each county by how much agricultural pesticide is applied. Source: USGS NAWQA EPest estimates."><input type="radio" name="choropleth" value="pesticide" checked /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
+        <label class="layer-radio" data-tip="Shade each county by how much agricultural pesticide is applied. Source: USGS NAWQA EPest estimates."><input type="radio" name="choropleth" value="pesticide" /> <span class="lr-dot pest"></span> <span>Pesticide application</span></label>
         <div class="layer-inline" data-layer-filters="pesticide">
           <label class="field">
             <span>Compound category</span>
