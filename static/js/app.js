@@ -370,6 +370,9 @@
   const CDL_OLDEST_YEAR = 1997;
   const CDL_YEARS = [];
   for (let y = CDL_NEWEST_YEAR; y >= CDL_OLDEST_YEAR; y--) CDL_YEARS.push(y);
+  // Michigan bounding box — Leaflet only requests CDL tiles that intersect it,
+  // so the raster never renders nationwide (the WMS itself covers all of CONUS).
+  const CDL_BOUNDS = L.latLngBounds([[41.6, -90.5], [48.4, -82.5]]);
 
   // Dedicated pane so the raster sits ABOVE the basemap tiles (z200) but BELOW
   // the county choropleth/overlays (overlayPane z400) and every marker pane
@@ -393,6 +396,7 @@
       crs: L.CRS.EPSG4326,          // CDL serves 4326, not the map's 3857
       opacity: state.cdl.opacity,
       pane: cdlPane(),
+      bounds: CDL_BOUNDS,           // only request tiles intersecting Michigan
       attribution: 'USDA NASS Cropland Data Layer',
     });
   }
