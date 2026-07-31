@@ -215,6 +215,8 @@
       layer: null,                 // L.tileLayer.wms instance
       year: null,                  // selected CDL year (defaults to newest)
       opacity: 0.7,                // ~70% so markers/choropleths read on top
+      clipRings: null,             // cached [lat,lng] rings (MI outline, simplified)
+      clipPathEl: null,            // the <path> inside the pane's SVG clipPath
     },
     wind: {
       showRoses: false,
@@ -345,6 +347,16 @@
       return d;
     };
     badge.addTo(state.map);
+
+    // Keep the CDL state-outline clip aligned with the raster on any view
+    // change (recomputed on zoom + move). rAF-throttled to at most once per
+    // frame, and a no-op unless the CDL layer is on, so it never costs anything
+    // when the layer is off.
+    let _cdlClipRAF = null;
+    state.map.on('viewreset zoom move zoomend moveend', () => {
+      if (!state.cdl.on || _cdlClipRAF) return;
+      _cdlClipRAF = requestAnimationFrame(() => { _cdlClipRAF = null; updateCdlClip(); });
+    });
   }
 
   // Detach a dedicated L.canvas RENDERER from the map. Vector layers that use a
@@ -404,9 +416,10 @@
   // Rebuild the layer (year changes the WMS `layers` param, so we recreate it).
   function refreshCdl() {
     if (state.cdl.layer) { state.cdl.layer.remove(); state.cdl.layer = null; }
-    if (!state.cdl.on) return;
+    if (!state.cdl.on) { clearCdlClip(); return; }
     if (!state.cdl.year) state.cdl.year = CDL_NEWEST_YEAR;   // e.g. a shared ?ly=cdl before the selector inits
     state.cdl.layer = buildCdlLayer().addTo(state.map);
+    updateCdlClip();   // clip the fresh layer to the MI outline right away
   }
 
   // The service's own legend (GetLegendGraphic) — the authoritative CDL color
@@ -424,6 +437,111 @@
     if (!img) return;
     const url = cdlLegendUrl(state.cdl.year);
     if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+  }
+
+  // ---- Clip the CDL raster to the Michigan state outline ----
+  // The `bounds` option keeps tile REQUESTS inside a Michigan rectangle; this
+  // additionally clips the RENDERED raster to the actual state shape so it no
+  // longer bleeds into Wisconsin / Illinois / Iowa / Minnesota / Ontario. The
+  // clip is an SVG clipPath applied to the dedicated 'cdl' pane ONLY — the
+  // basemap, county polygons, markers and every other pane are untouched, and
+  // surrounding states still show as normal basemap.
+  const CDL_CLIP_ID = 'cdl-state-clip';
+  const CDL_CLIP_TOL = 0.01;   // Douglas-Peucker tolerance in degrees (~1 km)
+
+  // Perpendicular distance point->segment (planar; fine at Michigan scale).
+  function _perpDist(p, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    if (dx === 0 && dy === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+    let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy);
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+  }
+  function _dpSimplify(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    let dmax = 0, idx = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = _perpDist(pts[i], pts[0], pts[pts.length - 1]);
+      if (d > dmax) { dmax = d; idx = i; }
+    }
+    if (dmax > tol) {
+      const l = _dpSimplify(pts.slice(0, idx + 1), tol);
+      const r = _dpSimplify(pts.slice(idx), tol);
+      return l.slice(0, -1).concat(r);
+    }
+    return [pts[0], pts[pts.length - 1]];
+  }
+
+  // The Michigan outline for the clip: the UNION of the county polygons (drawn
+  // as nonzero-fill subpaths, which dissolves the internal borders visually).
+  // Rings are cached as simplified [lat,lng] arrays, reprojected per view change.
+  function cdlClipRings() {
+    if (state.cdl.clipRings) return state.cdl.clipRings;
+    if (!state.geojson) return null;
+    const rings = [];
+    for (const f of state.geojson.features) {
+      const g = f.geometry;
+      if (!g) continue;
+      const parts = g.type === 'Polygon' ? [g.coordinates]
+        : g.type === 'MultiPolygon' ? g.coordinates : [];
+      for (const poly of parts) {
+        const outer = poly[0];             // outer ring (MI counties have no holes)
+        if (!outer || outer.length < 4) continue;
+        // GeoJSON is [lng,lat]; store [lat,lng] for latLngToLayerPoint.
+        rings.push(_dpSimplify(outer.map((c) => [c[1], c[0]]), CDL_CLIP_TOL));
+      }
+    }
+    state.cdl.clipRings = rings;
+    return rings;
+  }
+
+  // A 0-size SVG holding the clipPath def. Lives in the map container; the
+  // clipPath resolves by id no matter where it sits in the DOM.
+  function ensureCdlClipSvg() {
+    if (state.cdl.clipPathEl) return state.cdl.clipPathEl;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('width', '0');
+    svg.setAttribute('height', '0');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.position = 'absolute';
+    svg.style.pointerEvents = 'none';
+    const defs = document.createElementNS(NS, 'defs');
+    const clip = document.createElementNS(NS, 'clipPath');
+    clip.setAttribute('id', CDL_CLIP_ID);
+    clip.setAttribute('clipPathUnits', 'userSpaceOnUse');  // coords = layer points
+    const path = document.createElementNS(NS, 'path');
+    clip.appendChild(path); defs.appendChild(clip); svg.appendChild(defs);
+    state.map.getContainer().appendChild(svg);
+    state.cdl.clipPathEl = path;
+    return path;
+  }
+
+  // Recompute the clip path in LAYER-POINT space and apply it to the 'cdl' pane.
+  // Layer points share the mapPane coordinate system, so the clip pans/zooms in
+  // lockstep with the raster; we still recompute on view changes to stay exact.
+  function updateCdlClip() {
+    if (!state.cdl.on || !state.map) return;
+    const pane = state.map.getPane('cdl');
+    const rings = cdlClipRings();
+    if (!pane || !rings || !rings.length) return;   // no geometry -> leave rect bounds as the only limit
+    const path = ensureCdlClipSvg();
+    let d = '';
+    for (const ring of rings) {
+      for (let i = 0; i < ring.length; i++) {
+        const p = state.map.latLngToLayerPoint(ring[i]);
+        d += (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1) + ' ';
+      }
+      d += 'Z ';
+    }
+    path.setAttribute('d', d);
+    pane.style.clipPath = 'url(#' + CDL_CLIP_ID + ')';
+    pane.style.webkitClipPath = 'url(#' + CDL_CLIP_ID + ')';
+  }
+
+  function clearCdlClip() {
+    const pane = state.map && state.map.getPane('cdl');
+    if (pane) { pane.style.clipPath = ''; pane.style.webkitClipPath = ''; }
   }
 
   // Fill color for a county under whichever choropleth is currently active.
