@@ -1978,6 +1978,27 @@ a:hover { text-decoration: underline; }
 }
 #cdl-legend-img { display: block; width: auto; max-width: 100%; height: auto; }
 
+/* CDL crop filter (searchable input + datalist) */
+.cdl-crop-ctl { position: relative; }
+.cdl-crop-ctl input[type="text"] { width: 150px; max-width: 55vw; }
+.cdl-crop-clear {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 5px; width: 20px; height: 20px; line-height: 1; cursor: pointer;
+  font-size: 13px; padding: 0;
+}
+.cdl-crop-clear:hover { color: var(--text); background: var(--bg-2); }
+
+/* Single-crop legend: name + USDA color swatch (replaces the full PNG) */
+.cdl-legend-single {
+  display: flex; align-items: center; gap: 8px;
+  margin: 4px 0 6px 22px; font-size: 12px; color: var(--text);
+}
+.cdl-swatch {
+  width: 16px; height: 16px; border-radius: 3px; flex: none;
+  border: 1px solid var(--line);
+}
+.cdl-swatch-name { font-weight: 600; }
+
 .landfill-divicon { background: transparent; border: 0; }
 .landfill-marker {
   border-radius: 6px;                 /* rounded square — distinct from round contam / square TRI */

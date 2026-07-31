@@ -217,6 +217,10 @@
       opacity: 0.7,                // ~70% so markers/choropleths read on top
       clipRings: null,             // cached [lat,lng] rings (MI outline, simplified)
       clipPathEl: null,            // the <path> inside the pane's SVG clipPath
+      crop: null,                  // selected CDL class value to filter to (null = all crops)
+      classes: null,               // USDA CDL classes [{value,name,color}] (fetched)
+      classByValue: null,          // Map value -> class
+      classByName: null,           // Map lowercased name -> class
     },
     wind: {
       showRoses: false,
@@ -399,8 +403,30 @@
     return 'cdl';
   }
 
+  // The USDA CDL class currently filtered to, or null for "All crops".
+  function cdlSelectedClass() {
+    if (state.cdl.crop == null || !state.cdl.classByValue) return null;
+    return state.cdl.classByValue.get(state.cdl.crop) || null;
+  }
+
+  // Server-side single-crop filter: a RasterSymbolizer ColorMap that draws only
+  // the selected pixel value, in that crop's own USDA color. Unlisted values
+  // render transparent, so the layer shows just that crop (verified viable
+  // against the live WMS). NamedLayer must match the current year's layer.
+  function cdlSld(cls) {
+    return '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld">'
+      + '<NamedLayer><Name>cdl_' + state.cdl.year + '</Name><UserStyle><FeatureTypeStyle><Rule>'
+      + '<RasterSymbolizer><Opacity>1.0</Opacity>'
+      + '<ColorMap type="values"><ColorMapEntry color="' + cls.color
+      + '" quantity="' + cls.value + '" opacity="1"/></ColorMap>'
+      + '</RasterSymbolizer></Rule></FeatureTypeStyle></UserStyle></NamedLayer>'
+      + '</StyledLayerDescriptor>';
+  }
+
   function buildCdlLayer() {
-    return L.tileLayer.wms(CDL_WMS_URL, {
+    // Extra WMS params (SLD_BODY) not in Leaflet's option set pass straight
+    // through to the tile request; omitted entirely for "All crops".
+    const opts = {
       layers: 'cdl_' + state.cdl.year,
       format: 'image/png',
       transparent: true,
@@ -410,16 +436,58 @@
       pane: cdlPane(),
       bounds: CDL_BOUNDS,           // only request tiles intersecting Michigan
       attribution: 'USDA NASS Cropland Data Layer',
-    });
+    };
+    const cls = cdlSelectedClass();
+    if (cls) {
+      opts.SLD_BODY = cdlSld(cls);
+    } else if (state.cdl.crop != null) {
+      // Crop chosen (e.g. from a shared link) but the class table isn't loaded
+      // yet — fetch it, then rebuild so the filter applies.
+      loadCdlClasses().then(() => { if (state.cdl.on) refreshCdl(); });
+    }
+    return L.tileLayer.wms(CDL_WMS_URL, opts);
   }
 
-  // Rebuild the layer (year changes the WMS `layers` param, so we recreate it).
+  // Rebuild the layer (year / crop change the WMS params, so we recreate it).
   function refreshCdl() {
     if (state.cdl.layer) { state.cdl.layer.remove(); state.cdl.layer = null; }
     if (!state.cdl.on) { clearCdlClip(); return; }
     if (!state.cdl.year) state.cdl.year = CDL_NEWEST_YEAR;   // e.g. a shared ?ly=cdl before the selector inits
     state.cdl.layer = buildCdlLayer().addTo(state.map);
     updateCdlClip();   // clip the fresh layer to the MI outline right away
+  }
+
+  // Load USDA's CDL class table (static JSON in the repo — sourced, not
+  // hardcoded). Populates the searchable datalist and value/name lookups.
+  async function loadCdlClasses() {
+    if (state.cdl.classes) return state.cdl.classes;
+    try {
+      const r = await fetch('/static/data/cdl_classes.json');
+      const j = await r.json();
+      const classes = (j.classes || []).filter((c) => c.value > 0);  // drop Background (0)
+      state.cdl.classes = classes;
+      state.cdl.classByValue = new Map(classes.map((c) => [c.value, c]));
+      state.cdl.classByName = new Map(classes.map((c) => [c.name.toLowerCase(), c]));
+      const dl = $('cdl-crop-datalist');
+      if (dl) dl.innerHTML = classes.map((c) => `<option value="${esc(c.name)}"></option>`).join('');
+      // A crop was already chosen (e.g. from a shared ?cdlc= link) before the
+      // table loaded — sync the input, clear button, legend and layer now.
+      if (state.cdl.crop != null) setCdlCrop(state.cdl.crop);
+    } catch (e) { /* filter stays empty; the layer still works as All crops */ }
+    return state.cdl.classes;
+  }
+
+  // Apply a crop selection (value or null=all): rebuild the WMS layer and swap
+  // the legend. Reflected in the input + clear button.
+  function setCdlCrop(value) {
+    state.cdl.crop = value;
+    const input = $('cdl-crop-filter');
+    const cls = value != null && state.cdl.classByValue ? state.cdl.classByValue.get(value) : null;
+    if (input) input.value = cls ? cls.name : '';
+    const clr = $('cdl-crop-clear');
+    if (clr) clr.classList.toggle('hidden', value == null);
+    refreshCdl();
+    updateCdlLegend();
   }
 
   // The service's own legend (GetLegendGraphic) — the authoritative CDL color
@@ -429,14 +497,28 @@
       + '&LAYER=cdl_' + (year || CDL_NEWEST_YEAR) + '&FORMAT=image/png';
   }
 
-  // Point the legend <img> at the current year's legend. Lazy: only fetched
-  // once the panel is opened or the CDL layer is turned on, and refreshed when
-  // the year changes so it always matches what's drawn.
+  // Legend: for "All crops" show the service's full GetLegendGraphic PNG; for a
+  // single crop hide that PNG and show just that crop's name + color swatch.
   function updateCdlLegend() {
     const img = $('cdl-legend-img');
+    const scroll = document.querySelector('.cdl-legend-scroll');
+    const single = $('cdl-legend-single');
     if (!img) return;
-    const url = cdlLegendUrl(state.cdl.year);
-    if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+    const cls = cdlSelectedClass();
+    if (cls) {
+      if (single) {
+        single.innerHTML = `<span class="cdl-swatch" style="background:${esc(cls.color)}"></span>`
+          + `<span class="cdl-swatch-name">${esc(cls.name)}</span>`;
+        show(single);
+      }
+      if (scroll) hide(scroll);
+      img.removeAttribute('src');   // don't fetch the full 2,210px legend when filtered
+    } else {
+      if (single) hide(single);
+      if (scroll) show(scroll);
+      const url = cdlLegendUrl(state.cdl.year);
+      if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+    }
   }
 
   // ---- Clip the CDL raster to the Michigan state outline ----
@@ -4621,6 +4703,7 @@
         if (state.cdl.on) updateCdlLegend();
       });
       cdlYearSel.addEventListener('change', (e) => {
+        // Year change keeps the selected crop (state.cdl.crop is untouched).
         state.cdl.year = parseInt(e.target.value, 10); refreshCdl();
         updateCdlLegend();   // keep the legend in step with the drawn year
       });
@@ -4635,6 +4718,28 @@
         $('cdl-opacity-val').textContent = `${e.target.value}%`;
         if (state.cdl.layer) state.cdl.layer.setOpacity(state.cdl.opacity);
       });
+
+      // Crop filter (SLD_BODY). Load the USDA class table for the searchable
+      // datalist; empty input = All crops (no SLD). Resolve a typed/picked name
+      // to its CDL value on change.
+      loadCdlClasses();
+      const cropInput = $('cdl-crop-filter');
+      if (cropInput) {
+        cropInput.addEventListener('focus', loadCdlClasses);   // ensure list ready
+        cropInput.addEventListener('change', () => {
+          const txt = (cropInput.value || '').trim().toLowerCase();
+          if (!txt) { setCdlCrop(null); return; }
+          const cls = state.cdl.classByName && state.cdl.classByName.get(txt);
+          if (cls) setCdlCrop(cls.value);
+          else {
+            // Unrecognized text -> revert to the current selection (or All crops).
+            const cur = cdlSelectedClass();
+            cropInput.value = cur ? cur.name : '';
+          }
+        });
+      }
+      const cropClear = $('cdl-crop-clear');
+      if (cropClear) cropClear.addEventListener('click', () => setCdlCrop(null));
     }
 
     // Respiratory metric — reloads the fill when respiratory is active.
@@ -6481,6 +6586,7 @@
     if (state.cancer.dataType && state.cancer.dataType !== 'incidence') q.set('cd', state.cancer.dataType);
     if (state.tri.metric && state.tri.metric !== 'total') q.set('tm', state.tri.metric);
     if (state.water.compound) q.set('wc', state.water.compound);
+    if (state.cdl.crop != null) q.set('cdlc', String(state.cdl.crop));   // CDL crop filter
     const atx = document.querySelector('input[name="airtox-metric"]:checked');
     if (atx && atx.value !== 'cancer') q.set('am', atx.value);
 
@@ -6588,6 +6694,10 @@
     if (cd && ['incidence', 'mortality'].includes(cd)) { state.cancer.dataType = cd; activateSegByVal(cd); }
     const tm = p.get('tm'); if (tm) { state.tri.metric = tm; const e = $('tri-metric'); if (e) e.value = tm; }
     const wc = p.get('wc'); if (wc) { state.water.compound = wc; const e = $('wq-compound'); if (e) e.value = wc; }
+    // CDL crop filter: set the value now; loadCdlClasses() syncs the input,
+    // legend and layer once the class table is available.
+    const cdlc = p.get('cdlc');
+    if (cdlc) { const v = parseInt(cdlc, 10); if (!Number.isNaN(v)) state.cdl.crop = v; }
     const am = p.get('am');
     if (am) { const r = document.querySelector(`input[name="airtox-metric"][value="${am}"]`); if (r) r.checked = true; }
 

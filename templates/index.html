@@ -286,13 +286,20 @@
             <input type="range" id="cdl-opacity" min="10" max="100" value="70" step="5" />
             <span id="cdl-opacity-val" class="muted">70%</span>
           </label>
+          <label class="small cdl-ctl cdl-crop-ctl">Crop
+            <input type="text" id="cdl-crop-filter" list="cdl-crop-datalist" autocomplete="off"
+                   placeholder="All crops — type to filter" aria-label="Filter CDL to a single crop" />
+            <datalist id="cdl-crop-datalist"></datalist>
+            <button type="button" id="cdl-crop-clear" class="cdl-crop-clear hidden" title="Show all crops" aria-label="Show all crops">×</button>
+          </label>
         </div>
         <details class="collapsible cdl-legend-wrap" id="cdl-legend-wrap">
           <summary><span class="info-icon">🗺️</span>&nbsp;Crop map legend</summary>
+          <div class="cdl-legend-single hidden" id="cdl-legend-single"></div>
           <div class="cdl-legend-scroll">
             <img id="cdl-legend-img" alt="USDA Cropland Data Layer crop legend" />
           </div>
-          <p class="disclaimer-text small">Legend image served by USDA NASS CropScape (GetLegendGraphic) — the colors match the crop classes drawn on the map for the selected year.</p>
+          <p class="disclaimer-text small">Legend image served by USDA NASS CropScape (GetLegendGraphic) — the colors match the crop classes drawn on the map for the selected year. Filtering to a single crop shows just that class and its USDA color.</p>
         </details>
         <details class="collapsible cdl-caveat">
           <summary><span class="info-icon">ℹ️</span>&nbsp;About the Crop Map (CDL)</summary>
