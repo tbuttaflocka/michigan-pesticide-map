@@ -409,6 +409,23 @@
     state.cdl.layer = buildCdlLayer().addTo(state.map);
   }
 
+  // The service's own legend (GetLegendGraphic) — the authoritative CDL color
+  // scheme. We never hardcode a color->crop mapping; the image comes from USDA.
+  function cdlLegendUrl(year) {
+    return CDL_WMS_URL + '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetLegendGraphic'
+      + '&LAYER=cdl_' + (year || CDL_NEWEST_YEAR) + '&FORMAT=image/png';
+  }
+
+  // Point the legend <img> at the current year's legend. Lazy: only fetched
+  // once the panel is opened or the CDL layer is turned on, and refreshed when
+  // the year changes so it always matches what's drawn.
+  function updateCdlLegend() {
+    const img = $('cdl-legend-img');
+    if (!img) return;
+    const url = cdlLegendUrl(state.cdl.year);
+    if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+  }
+
   // Fill color for a county under whichever choropleth is currently active.
   // Only one choropleth ever paints the base layer, so scales never blend.
   const NO_DATA = '#26303f';
@@ -4483,9 +4500,17 @@
       cdlYearSel.value = String(CDL_NEWEST_YEAR);
       $('cdl-crop').addEventListener('change', (e) => {
         state.cdl.on = e.target.checked; refreshCdl();
+        if (state.cdl.on) updateCdlLegend();
       });
       cdlYearSel.addEventListener('change', (e) => {
         state.cdl.year = parseInt(e.target.value, 10); refreshCdl();
+        updateCdlLegend();   // keep the legend in step with the drawn year
+      });
+      // Lazy-load the legend image the first time the panel is opened, even if
+      // the CDL layer itself is still off.
+      const legendWrap = $('cdl-legend-wrap');
+      if (legendWrap) legendWrap.addEventListener('toggle', () => {
+        if (legendWrap.open) updateCdlLegend();
       });
       $('cdl-opacity').addEventListener('input', (e) => {
         state.cdl.opacity = Math.max(0, Math.min(1, Number(e.target.value) / 100));

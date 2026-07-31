@@ -287,9 +287,17 @@
             <span id="cdl-opacity-val" class="muted">70%</span>
           </label>
         </div>
+        <details class="collapsible cdl-legend-wrap" id="cdl-legend-wrap">
+          <summary><span class="info-icon">🗺️</span>&nbsp;Crop map legend</summary>
+          <div class="cdl-legend-scroll">
+            <img id="cdl-legend-img" alt="USDA Cropland Data Layer crop legend" />
+          </div>
+          <p class="disclaimer-text small">Legend image served by USDA NASS CropScape (GetLegendGraphic) — the colors match the crop classes drawn on the map for the selected year.</p>
+        </details>
         <details class="collapsible cdl-caveat">
           <summary><span class="info-icon">ℹ️</span>&nbsp;About the Crop Map (CDL)</summary>
-          <p class="disclaimer-text small">The USDA <strong>Cropland Data Layer (CDL)</strong> is a <strong>satellite-derived classification</strong>, not a field survey or a record of what was actually planted. It shows <strong>predicted crop cover</strong> for the selected year, and its <strong>per-crop accuracy varies</strong> — major commodities like corn and soybeans classify more reliably than minor crops. Treat it as context, not ground truth. Rather than reproduce the 100+ category legend here, see the official page for the full legend and per-crop accuracy: <a href="https://www.nass.usda.gov/Research_and_Science/Cropland/SARS1a.php" target="_blank" rel="noopener">USDA NASS — Cropland Data Layer</a>. Source: USDA NASS Cropland Data Layer.</p>
+          <p class="disclaimer-text small"><strong>Why it's here.</strong> The pesticide-use figures elsewhere in this app are <strong>county-level estimates</strong> — they don't show <em>where inside a county</em> the applications actually happen. The crop map shows <strong>where cropland actually is</strong>, so you can see which parts of a county are farmed and what is growing near a given location.</p>
+          <p class="disclaimer-text small"><strong>What it is.</strong> The USDA <strong>Cropland Data Layer (CDL)</strong> is a <strong>satellite-derived classification</strong>, not a field survey or a record of what was actually planted or sprayed. It shows <strong>predicted crop cover</strong> for the selected year, and its <strong>per-crop accuracy varies</strong> — major commodities like corn and soybeans classify more reliably than minor crops. Treat it as context, not ground truth. For the full legend and per-crop accuracy see the official page: <a href="https://www.nass.usda.gov/Research_and_Science/Cropland/SARS1a.php" target="_blank" rel="noopener">USDA NASS — Cropland Data Layer</a>. Source: USDA NASS Cropland Data Layer.</p>
         </details>
         <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
         <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>

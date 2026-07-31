@@ -1965,6 +1965,19 @@ a:hover { text-decoration: underline; }
 .cdl-ctl input[type="range"] { width: 96px; vertical-align: middle; }
 #cdl-opacity-val { min-width: 32px; font-variant-numeric: tabular-nums; }
 
+/* CDL legend served by USDA GetLegendGraphic — tall PNG, so scroll it. White
+   backdrop keeps its black class labels legible on the dark theme. */
+.cdl-legend-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 4px 0 6px 22px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+#cdl-legend-img { display: block; width: auto; max-width: 100%; height: auto; }
+
 .landfill-divicon { background: transparent; border: 0; }
 .landfill-marker {
   border-radius: 6px;                 /* rounded square — distinct from round contam / square TRI */
