@@ -64,14 +64,16 @@ app.config["JSON_SORT_KEYS"] = False
 # ---------- security headers ----------
 # Applied to every response. The Content-Security-Policy is scoped to exactly
 # what the app loads: its own assets, the Leaflet/MarkerCluster libraries
-# from unpkg, Chart.js from jsDelivr, and CARTO/OSM basemap tiles. There are no
+# from unpkg, Chart.js from jsDelivr, CARTO/OSM basemap tiles, and the USDA
+# NASS CropScape WMS raster tiles (Cropland Data Layer overlay). There are no
 # inline <script> blocks, so script-src stays strict (no 'unsafe-inline');
 # style-src allows inline because Leaflet and the charts set element styles.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; "
     "style-src 'self' 'unsafe-inline' https://unpkg.com; "
-    "img-src 'self' data: https://*.basemaps.cartocdn.com https://*.cartocdn.com; "
+    "img-src 'self' data: https://*.basemaps.cartocdn.com https://*.cartocdn.com "
+    "https://nassgeodata.gmu.edu; "
     "connect-src 'self'; "
     "font-src 'self'; "
     "object-src 'none'; "

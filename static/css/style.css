@@ -1955,6 +1955,16 @@ a:hover { text-decoration: underline; }
 }
 .landfill-subtoggles label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 
+/* CDL (Crop Map) year + opacity controls */
+.cdl-subtoggles {
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  margin: 4px 0 6px 22px;
+}
+.cdl-ctl { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.cdl-ctl select { max-width: 90px; }
+.cdl-ctl input[type="range"] { width: 96px; vertical-align: middle; }
+#cdl-opacity-val { min-width: 32px; font-variant-numeric: tabular-nums; }
+
 .landfill-divicon { background: transparent; border: 0; }
 .landfill-marker {
   border-radius: 6px;                 /* rounded square — distinct from round contam / square TRI */

@@ -210,6 +210,12 @@
       markers: null,               // L.markerClusterGroup / layerGroup (centroid pins)
       polys: null,                 // L.layerGroup of course footprint polygons
     },
+    cdl: {
+      on: false,                   // USDA Cropland Data Layer WMS overlay
+      layer: null,                 // L.tileLayer.wms instance
+      year: null,                  // selected CDL year (defaults to newest)
+      opacity: 0.7,                // ~70% so markers/choropleths read on top
+    },
     wind: {
       showRoses: false,
       showDrift: false,
@@ -350,6 +356,53 @@
   // the renderer automatically when the layer is shown again, so this is safe.
   function removeCanvasRenderer(renderer) {
     if (renderer && state.map && state.map.hasLayer(renderer)) renderer.remove();
+  }
+
+  // ---------- USDA Cropland Data Layer (CDL) WMS overlay ----------
+  // External WMS raster from USDA NASS / GMU CropScape. Verified via
+  // GetCapabilities: cdl_1997 … cdl_2025, and each cdl_<year> layer advertises
+  // EPSG:4326 (confirmed with a live GetMap over Michigan). The service does NOT
+  // serve the map's native EPSG:3857, so the WMS layer is pinned to CRS 4326 and
+  // Leaflet reprojects each tile's bbox. No database, no ingest — tiles are
+  // fetched straight from the endpoint.
+  const CDL_WMS_URL = 'https://nassgeodata.gmu.edu/CropScapeService/wms_cdlall.cgi';
+  const CDL_NEWEST_YEAR = 2025;                 // newest layer confirmed in caps
+  const CDL_OLDEST_YEAR = 1997;
+  const CDL_YEARS = [];
+  for (let y = CDL_NEWEST_YEAR; y >= CDL_OLDEST_YEAR; y--) CDL_YEARS.push(y);
+
+  // Dedicated pane so the raster sits ABOVE the basemap tiles (z200) but BELOW
+  // the county choropleth/overlays (overlayPane z400) and every marker pane
+  // (z600+). pointer-events:none guarantees it never intercepts a click meant
+  // for a layer above it.
+  function cdlPane() {
+    if (!state.map.getPane('cdl')) {
+      const p = state.map.createPane('cdl');
+      p.style.zIndex = 250;
+      p.style.pointerEvents = 'none';
+    }
+    return 'cdl';
+  }
+
+  function buildCdlLayer() {
+    return L.tileLayer.wms(CDL_WMS_URL, {
+      layers: 'cdl_' + state.cdl.year,
+      format: 'image/png',
+      transparent: true,
+      version: '1.1.1',
+      crs: L.CRS.EPSG4326,          // CDL serves 4326, not the map's 3857
+      opacity: state.cdl.opacity,
+      pane: cdlPane(),
+      attribution: 'USDA NASS Cropland Data Layer',
+    });
+  }
+
+  // Rebuild the layer (year changes the WMS `layers` param, so we recreate it).
+  function refreshCdl() {
+    if (state.cdl.layer) { state.cdl.layer.remove(); state.cdl.layer = null; }
+    if (!state.cdl.on) return;
+    if (!state.cdl.year) state.cdl.year = CDL_NEWEST_YEAR;   // e.g. a shared ?ly=cdl before the selector inits
+    state.cdl.layer = buildCdlLayer().addTo(state.map);
   }
 
   // Fill color for a county under whichever choropleth is currently active.
@@ -4417,6 +4470,26 @@
       refreshAllWaterLayers();
     });
 
+    // USDA Cropland Data Layer (CDL) WMS overlay — populate the year selector
+    // (newest first, default newest) and wire the toggle / year / opacity.
+    const cdlYearSel = $('cdl-year');
+    if (cdlYearSel) {
+      cdlYearSel.innerHTML = CDL_YEARS.map((y) => `<option value="${y}">${y}</option>`).join('');
+      state.cdl.year = CDL_NEWEST_YEAR;
+      cdlYearSel.value = String(CDL_NEWEST_YEAR);
+      $('cdl-crop').addEventListener('change', (e) => {
+        state.cdl.on = e.target.checked; refreshCdl();
+      });
+      cdlYearSel.addEventListener('change', (e) => {
+        state.cdl.year = parseInt(e.target.value, 10); refreshCdl();
+      });
+      $('cdl-opacity').addEventListener('input', (e) => {
+        state.cdl.opacity = Math.max(0, Math.min(1, Number(e.target.value) / 100));
+        $('cdl-opacity-val').textContent = `${e.target.value}%`;
+        if (state.cdl.layer) state.cdl.layer.setOpacity(state.cdl.opacity);
+      });
+    }
+
     // Respiratory metric — reloads the fill when respiratory is active.
     $('resp-metric').addEventListener('change', (e) => {
       state.resp.metric = e.target.value;
@@ -6228,6 +6301,7 @@
     { c: 'wr',  cb: 'wind-roses' },
     { c: 'wd',  cb: 'wind-drift' },
     { c: 'wz',  cb: 'wind-driftzone' },
+    { c: 'cdl', cb: 'cdl-crop' },
   ];
   const SHARE_LAYER_BY_CODE = Object.fromEntries(SHARE_LAYERS.map((l) => [l.c, l]));
 

@@ -278,6 +278,19 @@
           <summary><span class="info-icon">ℹ️</span>&nbsp;About the coal-ash directory</summary>
           <p class="disclaimer-text small">Under the federal <span data-gloss="CCR rule">CCR rule</span>, coal-ash monitoring data is <strong>required to be public</strong>, but each utility posts it <strong>individually on its own website</strong> — there is no central database. So this layer <strong>links to those sources</strong> rather than aggregating live results. It aims to be complete: it mirrors EPA's list of Michigan <span data-gloss="coal combustion residuals">coal combustion residuals</span> sites. Coal ash contains arsenic, lead, lithium and other toxics; units may be a <span data-gloss="surface impoundment">surface impoundment</span> (ash pond) or a landfill, being closed by <span data-gloss="closure by removal">removal</span> or <span data-gloss="cap-in-place">cap-in-place</span>. EPA's <span data-gloss="Legacy CCR Rule">2024 Legacy CCR Rule</span> extended requirements to previously unregulated inactive impoundments. Some groundwater-contamination findings shown are <strong>contested</strong> between watchdog groups (Earthjustice / the Environmental Integrity Project) and the utilities — the popups attribute who found what and note the dispute.</p>
         </details>
+        <div class="overlay-subhead">Land cover</div>
+        <label class="overlay-toggle" data-tip="USDA satellite-derived crop classification (Cropland Data Layer). Predicted crop cover for the selected year — not a field survey or a record of what was planted."><input type="checkbox" id="cdl-crop" /> <span>Crop Map (USDA CDL)</span></label>
+        <div class="cdl-subtoggles" id="cdl-subtoggles">
+          <label class="small cdl-ctl">Year <select id="cdl-year"></select></label>
+          <label class="small cdl-ctl">Opacity
+            <input type="range" id="cdl-opacity" min="10" max="100" value="70" step="5" />
+            <span id="cdl-opacity-val" class="muted">70%</span>
+          </label>
+        </div>
+        <details class="collapsible cdl-caveat">
+          <summary><span class="info-icon">ℹ️</span>&nbsp;About the Crop Map (CDL)</summary>
+          <p class="disclaimer-text small">The USDA <strong>Cropland Data Layer (CDL)</strong> is a <strong>satellite-derived classification</strong>, not a field survey or a record of what was actually planted. It shows <strong>predicted crop cover</strong> for the selected year, and its <strong>per-crop accuracy varies</strong> — major commodities like corn and soybeans classify more reliably than minor crops. Treat it as context, not ground truth. Rather than reproduce the 100+ category legend here, see the official page for the full legend and per-crop accuracy: <a href="https://www.nass.usda.gov/Research_and_Science/Cropland/SARS1a.php" target="_blank" rel="noopener">USDA NASS — Cropland Data Layer</a>. Source: USDA NASS Cropland Data Layer.</p>
+        </details>
         <div class="overlay-subhead">Wind &amp; drift <span class="lg-hint">Apr–Sep avg</span></div>
         <label class="overlay-toggle" data-tip="Prevailing wind direction and speed at each weather station during the growing season. Source: Iowa Environmental Mesonet (ASOS)."><input type="checkbox" id="wind-roses" /> <span>Wind roses</span></label>
         <label class="overlay-toggle" data-tip="Arrows showing the likely direction pesticides drift downwind, for the highest-use counties."><input type="checkbox" id="wind-drift" /> <span>Drift arrows (top 25% counties)</span></label>
