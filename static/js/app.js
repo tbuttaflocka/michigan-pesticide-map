@@ -2843,8 +2843,6 @@
     if (!state.echo._canvas) {
       echoPane();
       state.echo._canvas = L.canvas({ pane: 'echo', padding: 0.5 });
-      state.echo._canvasSeq = (state.echo._canvasSeq || 0) + 1;
-      state.echo._canvas._echoId = state.echo._canvasSeq;   // DIAG: instance id
     }
     return state.echo._canvas;
   }
@@ -2969,12 +2967,10 @@
       state.echo._canvas = null;
       updateEchoStats();
       renderMarkerKeys();
-      console.log('[echo] render: showSites=false -> added 0 markers; canvas detached + cleared (layer hidden)');
-      return { added: 0, redraw: false };
+      return;
     }
     const pane = echoPane();
     const renderer = echoCanvasRenderer();
-    const attachedBefore = state.map.hasLayer(renderer);   // DIAG
     const grp = L.layerGroup();
     const seen = new Set();
     for (const filter of ['snc', 'violation', 'all']) {
@@ -3007,10 +3003,6 @@
     renderMarkerKeys();
     // The canvas renderer stays attached across re-renders, so the newly added
     // circleMarkers repaint on the next frame — no explicit redraw() needed.
-    const redrawCalled = false;
-    const attachedAfter = state.map.hasLayer(renderer);   // DIAG
-    console.log(`[echo] render: showSites=true -> added ${seen.size} markers to canvas '${pane}' (rendererId=${renderer._echoId}, attached before add=${attachedBefore}, after add=${attachedAfter}); redraw() called: ${redrawCalled ? 'yes' : 'no'}`);
-    return { added: seen.size, redraw: redrawCalled };
   }
 
   function updateEchoStats() {
@@ -5103,9 +5095,7 @@
           await Promise.all(['snc', 'violation', 'all']
             .filter((k) => state.echo.filters[k]).map((k) => loadEcho(k)));
         }
-        const info = renderEchoMarkers();
-        console.log(`[echo] control=echo-sites fired -> ${e.target.checked ? 'ON' : 'OFF'}; `
-          + `added ${info.added} facilities to layer; redraw called: ${info.redraw}`);
+        renderEchoMarkers();
       });
     }
     ['snc', 'violation', 'all'].forEach((k) => {
@@ -5123,10 +5113,7 @@
         }
         state.echo.filters[k] = e.target.checked;
         if (e.target.checked && state.echo.showSites) await loadEcho(k);
-        const info = renderEchoMarkers();
-        console.log(`[echo] control=echo-f-${k} fired -> ${e.target.checked ? 'ON' : 'OFF'}; `
-          + `parentShown=${state.echo.showSites}; added ${info.added} facilities to layer; `
-          + `redraw called: ${info.redraw}`);
+        renderEchoMarkers();
       });
     });
 
