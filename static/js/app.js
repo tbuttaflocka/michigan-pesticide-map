@@ -2843,6 +2843,8 @@
     if (!state.echo._canvas) {
       echoPane();
       state.echo._canvas = L.canvas({ pane: 'echo', padding: 0.5 });
+      state.echo._canvasSeq = (state.echo._canvasSeq || 0) + 1;
+      state.echo._canvas._echoId = state.echo._canvasSeq;   // DIAG: instance id
     }
     return state.echo._canvas;
   }
@@ -2959,15 +2961,20 @@
     // click-leak guard stays intact.
     if (!state.echo.showSites) {
       // Layer hidden: detach the canvas so its blank full-map <canvas> (pane
-      // 'echo', above the county overlay) can't swallow county clicks.
+      // 'echo', above the county overlay) can't swallow county clicks. Null the
+      // ref too: a REMOVED L.canvas that is later re-attached does not repaint its
+      // paths until the next viewreset, so the next show must build a FRESH
+      // renderer (echoCanvasRenderer creates one when _canvas is null).
       removeCanvasRenderer(state.echo._canvas);
+      state.echo._canvas = null;
       updateEchoStats();
       renderMarkerKeys();
-      console.log('[echo] render: showSites=false -> added 0 markers; canvas detached (layer hidden)');
+      console.log('[echo] render: showSites=false -> added 0 markers; canvas detached + cleared (layer hidden)');
       return { added: 0, redraw: false };
     }
     const pane = echoPane();
     const renderer = echoCanvasRenderer();
+    const attachedBefore = state.map.hasLayer(renderer);   // DIAG
     const grp = L.layerGroup();
     const seen = new Set();
     for (const filter of ['snc', 'violation', 'all']) {
@@ -2990,15 +2997,19 @@
     if (seen.size === 0) {
       // Nothing to show (e.g. every sub-filter off) — detach the now-empty canvas
       // so it can't sit above the county pane and swallow clicks (ghost-canvas
-      // guard). With markers present the renderer stays attached and repaints.
+      // guard), and clear the ref so the next non-empty render builds a fresh
+      // renderer that repaints without a viewreset. With markers present the
+      // renderer stays attached and repaints on the next frame.
       removeCanvasRenderer(state.echo._canvas);
+      state.echo._canvas = null;
     }
     updateEchoStats();
     renderMarkerKeys();
     // The canvas renderer stays attached across re-renders, so the newly added
     // circleMarkers repaint on the next frame — no explicit redraw() needed.
     const redrawCalled = false;
-    console.log(`[echo] render: showSites=true -> added ${seen.size} markers to canvas '${pane}'; redraw() called: ${redrawCalled ? 'yes' : 'no'}`);
+    const attachedAfter = state.map.hasLayer(renderer);   // DIAG
+    console.log(`[echo] render: showSites=true -> added ${seen.size} markers to canvas '${pane}' (rendererId=${renderer._echoId}, attached before add=${attachedBefore}, after add=${attachedAfter}); redraw() called: ${redrawCalled ? 'yes' : 'no'}`);
     return { added: seen.size, redraw: redrawCalled };
   }
 
