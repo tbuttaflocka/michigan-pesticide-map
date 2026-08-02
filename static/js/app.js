@@ -201,6 +201,19 @@
       densityByFips: new Map(),
       _densityMax: 1,
     },
+    echo: {                        // EPA ECHO enforcement & compliance (81,934 MI
+                                   // facilities — never all plotted by default)
+      showSites: false,
+      // Sub-toggles: SNC/HPV-flagged + rollup 'Violation Identified' on by
+      // default; the ~82k "all" slice is opt-in only.
+      filters: { snc: true, violation: true, all: false },
+      data: {},                    // filter -> facilities[] (cached slice)
+      loading: {},                 // filter -> in-flight Promise (dedupe)
+      statuses: [],                // legend [{label,color}] (verbatim EPA strings)
+      layer: null,                 // L.layerGroup of circleMarkers
+      _canvas: null,               // dedicated L.canvas() renderer (removed on hide)
+      _detail: {},                 // registry_id -> lazy-loaded full popup detail
+    },
     golf: {
       loaded: false,
       sites: [],                   // from /api/golf/sites
@@ -2620,6 +2633,7 @@
       ${chips ? `<div class="chips">${chips}</div>` : ''}
       ${body}
       ${water}${acounties}${provenance}
+      ${echoSection(s.echo)}
     </div>`;
   }
 
@@ -2804,8 +2818,192 @@
         <button type="button" class="lf-foia-btn" data-lf-foia="${s.site_key}">📄 Request monitoring records (FOIA)</button>
       </div>
       ${egle ? `<div class="lf-links">${egle}</div>` : ''}
+      ${echoSection(s.echo)}
       <div class="lf-note">Facility data: Michigan EGLE Materials Management (Part 115 / Part 111). Capacity &amp; monitoring results are not in the public feed.</div>
     </div>`;
+  }
+
+  // ---------- EPA ECHO enforcement & compliance overlay ----------
+  //
+  // 81,934 MI facilities, so we never plot them all by default — the layer pulls
+  // filtered slices (SNC/HPV-flagged, rollup 'Violation Identified'), and only the
+  // opt-in "all" sub-toggle fetches the full set. Points render as circleMarkers
+  // on a DEDICATED canvas renderer that MUST be detached on hide (removeCanvas-
+  // Renderer) or the leftover <canvas> swallows county clicks.
+
+  function echoPane() {
+    if (!state.map.getPane('echo')) {
+      // Above landfills (645), below contamination (650).
+      state.map.createPane('echo').style.zIndex = 648;
+    }
+    return 'echo';
+  }
+
+  function echoCanvasRenderer() {
+    if (!state.echo._canvas) {
+      echoPane();
+      state.echo._canvas = L.canvas({ pane: 'echo', padding: 0.5 });
+    }
+    return state.echo._canvas;
+  }
+
+  async function loadEcho(filter) {
+    if (state.echo.data[filter]) return;
+    if (!state.echo.loading[filter]) {
+      state.echo.loading[filter] = api('/api/echo/sites', { filter })
+        .then((d) => {
+          state.echo.data[filter] = d.facilities || [];
+          if (d.statuses && d.statuses.length) state.echo.statuses = d.statuses;
+        })
+        .finally(() => { delete state.echo.loading[filter]; });
+    }
+    await state.echo.loading[filter];
+  }
+
+  // total_penalties is the raw EPA string ("0", "100728768"); format as $ amount.
+  function echoFmtPenalty(v) {
+    if (v == null || v === '') return null;
+    const n = Number(String(v).replace(/[^0-9.]/g, ''));
+    if (!isFinite(n)) return esc(String(v));
+    return '$' + n.toLocaleString('en-US');
+  }
+
+  function echoFlags(d) {
+    const out = [];
+    if (d.snc_flag === 'Y') out.push('<span class="echo-flag snc" title="Significant Noncompliance — EPA\'s designation for the most serious or repeated violations (CWA/RCRA/SDWA)">SNC</span>');
+    if (d.caa_hpv_flag === 'Y') out.push('<span class="echo-flag hpv" title="Clean Air Act High Priority Violator">CAA HPV</span>');
+    return out.join(' ');
+  }
+
+  // Full ECHO facility popup (lazy-loaded detail `d`; `f` is the marker stub).
+  function echoPopupHtml(d, f) {
+    const color = d.status_color || (f && f.color) || '#9ca3af';
+    const status = d.compliance_status || 'No status reported';
+    const prog = (label, v) => v
+      ? `<div class="row"><span class="k">${label}</span> ${esc(v)}</div>` : '';
+    const pen = echoFmtPenalty(d.total_penalties);
+    const insp = (d.inspection_count != null)
+      ? `${d.inspection_count}${d.date_last_inspection ? ` · last ${esc(d.date_last_inspection)}` : ''}`
+      : 'none recorded';
+    const fa = [];
+    if (d.caa_formal_action_count) fa.push(`CAA ${d.caa_formal_action_count}`);
+    if (d.cwa_formal_action_count) fa.push(`CWA ${d.cwa_formal_action_count}`);
+    if (d.rcra_formal_action_count) fa.push(`RCRA ${d.rcra_formal_action_count}`);
+    if (d.sdwa_formal_action_count) fa.push(`SDWA ${d.sdwa_formal_action_count}`);
+    const progs = [prog('Clean Air Act:', d.caa_status),
+                   prog('Clean Water Act:', d.cwa_status),
+                   prog('RCRA (waste):', d.rcra_status),
+                   prog('Safe Drinking Water:', d.sdwa_status)].join('');
+    return `<div class="echo-popup">
+      <div class="echo-status"><span class="echo-badge" style="background:${color}">${esc(status)}</span> ${echoFlags(d)}</div>
+      <h4>${esc(d.name || (f && f.name) || 'Facility')}</h4>
+      <div class="echo-meta">${d.county ? esc(d.county) + ' Co. · ' : ''}FRS ${esc(d.registry_id)}</div>
+      ${progs ? `<div class="echo-progs">${progs}</div>` : ''}
+      <div class="echo-facts">
+        <div class="row"><span class="k">Quarters in noncompliance:</span> ${d.qtrs_with_nc != null ? d.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>
+        <div class="row"><span class="k">Inspections:</span> ${insp}</div>
+        <div class="row"><span class="k">Penalties:</span> ${d.penalty_count || 0}${pen ? ` · ${pen}` : ''}</div>
+        ${fa.length ? `<div class="row"><span class="k">Formal actions:</span> ${fa.join(' · ')}</div>` : ''}
+      </div>
+      <div class="echo-note">Alleged violations — EPA/state determinations, not final adjudications. Status covers the last 12 federal fiscal quarters (~3&nbsp;yrs). Source: EPA ECHO.</div>
+    </div>`;
+  }
+
+  // Shared compliance section injected into the TRI / Superfund / Part-111 popups.
+  // Renders NOTHING when there is no ID join (`e` is null) — never an empty or
+  // zeroed section.
+  function echoSection(e) {
+    if (!e) return '';
+    const color = e.status_color || '#9ca3af';
+    const status = e.compliance_status || 'No status reported';
+    const pen = echoFmtPenalty(e.total_penalties);
+    const bits = [
+      `<div class="row"><span class="k">EPA compliance:</span> <span class="echo-badge sm" style="background:${color}">${esc(status)}</span> ${echoFlags(e)}</div>`,
+    ];
+    if (e.date_last_inspection)
+      bits.push(`<div class="row"><span class="k">Last inspection:</span> ${esc(e.date_last_inspection)}</div>`);
+    bits.push(`<div class="row"><span class="k">Quarters in noncompliance:</span> ${e.qtrs_with_nc != null ? e.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>`);
+    if (pen) bits.push(`<div class="row"><span class="k">Total penalties:</span> ${pen}</div>`);
+    return `<div class="echo-xsection">
+      <div class="echo-xhead">EPA enforcement &amp; compliance <span class="muted">(ECHO)</span></div>
+      ${bits.join('')}
+      <div class="echo-xnote">Alleged, not adjudicated · last 12 quarters (~3&nbsp;yrs) · EPA ECHO</div>
+    </div>`;
+  }
+
+  function bindEchoDetail(m, f) {
+    m.on('popupopen', async () => {
+      if (m._echoLoaded) return;
+      try {
+        let d = state.echo._detail[f.registry_id];
+        if (!d) {
+          d = await api('/api/echo/facility/' + encodeURIComponent(f.registry_id));
+          state.echo._detail[f.registry_id] = d;
+        }
+        m._echoLoaded = true;
+        m.setPopupContent(echoPopupHtml(d, f));
+      } catch (err) {
+        m.setPopupContent(`<div class="echo-popup"><h4>${esc(f.name || 'Facility')}</h4>`
+          + '<p class="muted small">Could not load the compliance record.</p></div>');
+      }
+    });
+  }
+
+  function renderEchoMarkers() {
+    if (state.echo.layer) { state.echo.layer.remove(); state.echo.layer = null; }
+    // Always detach the canvas renderer first — otherwise a leftover blank
+    // full-map <canvas> (pane 'echo', above the county overlay) eats every county
+    // click. Leaflet re-attaches it automatically when the circleMarkers below are
+    // added, so an empty render (layer off, or all sub-filters off) leaves NO
+    // ghost canvas behind.
+    removeCanvasRenderer(state.echo._canvas);
+    if (!state.echo.showSites) {
+      updateEchoStats();
+      renderMarkerKeys();
+      return;
+    }
+    const pane = echoPane();
+    const renderer = echoCanvasRenderer();
+    const grp = L.layerGroup();
+    const seen = new Set();
+    for (const filter of ['snc', 'violation', 'all']) {
+      if (!state.echo.filters[filter] || !state.echo.data[filter]) continue;
+      for (const f of state.echo.data[filter]) {
+        if (f.lat == null || f.lng == null || seen.has(f.registry_id)) continue;
+        seen.add(f.registry_id);
+        const m = L.circleMarker([f.lat, f.lng], {
+          pane, renderer, radius: 5, weight: 1, color: '#0d1117',
+          opacity: 0.9, fillColor: f.color, fillOpacity: 0.85,
+        });
+        m.bindPopup('<div class="echo-popup"><div class="echo-loading">Loading compliance record…</div></div>',
+          { maxWidth: 330, className: 'echo-popup-wrap' });
+        bindEchoDetail(m, f);
+        grp.addLayer(m);
+      }
+    }
+    grp.addTo(state.map);
+    state.echo.layer = grp;
+    updateEchoStats();
+    renderMarkerKeys();
+  }
+
+  function updateEchoStats() {
+    const leg = $('echo-legend');
+    if (leg) {
+      leg.innerHTML = (state.echo.showSites && state.echo.statuses.length)
+        ? state.echo.statuses.map((s) =>
+            `<span class="echo-key"><span class="cdot" style="background:${s.color}"></span>${esc(s.label)}</span>`).join('')
+        : '';
+    }
+    const el = $('echo-stats');
+    if (!el) return;
+    if (!state.echo.showSites) { el.textContent = ''; return; }
+    const seen = new Set();
+    for (const k of ['snc', 'violation', 'all']) {
+      if (state.echo.filters[k] && state.echo.data[k])
+        state.echo.data[k].forEach((f) => seen.add(f.registry_id));
+    }
+    el.textContent = seen.size ? `${seen.size.toLocaleString()} facilities shown` : 'No facilities in the selected filters';
   }
 
   function updateLandfillStats() {
@@ -4067,6 +4265,7 @@
       <div class="tri-paths">${path('Air:', f.air_lbs)}${path('Water:', f.water_lbs)}${path('Land:', f.land_lbs)}${path('Underground:', f.underground_lbs)}</div>
       ${chem ? `<div class="tri-chem-head">Top chemicals released</div>${chem}` : ''}
       ${triSpark(f.spark)}
+      ${echoSection(f.echo)}
       <div class="tri-note">Facility data: EPA Toxics Release Inventory (self-reported, EPCRA). Pounds per year.</div>
     </div>`;
   }
@@ -4866,6 +5065,37 @@
       if (cb) cb.addEventListener('change', (e) => {
         state.landfill.filters[k] = e.target.checked;
         renderLandfillMarkers();
+      });
+    });
+
+    // EPA ECHO enforcement & compliance (independent overlay) + sub-filters.
+    const echoToggle = $('echo-sites');
+    if (echoToggle) {
+      echoToggle.addEventListener('change', async (e) => {
+        state.echo.showSites = e.target.checked;
+        if (e.target.checked) {
+          await Promise.all(['snc', 'violation', 'all']
+            .filter((k) => state.echo.filters[k]).map((k) => loadEcho(k)));
+        }
+        renderEchoMarkers();
+      });
+    }
+    ['snc', 'violation', 'all'].forEach((k) => {
+      const cb = $(`echo-f-${k}`);
+      if (!cb) return;
+      cb.addEventListener('change', async (e) => {
+        // Guard the ~82k "all" slice behind a confirm — but only for a real user
+        // click (e.isTrusted); the deep-link decoder dispatches synthetic change
+        // events (isTrusted=false) that must restore silently.
+        if (k === 'all' && e.target.checked && e.isTrusted) {
+          const ok = window.confirm(
+            'Show ALL ~82,000 regulated facilities? Most have no recorded '
+            + 'violations, and plotting this many points can slow the map.');
+          if (!ok) { e.target.checked = false; return; }
+        }
+        state.echo.filters[k] = e.target.checked;
+        if (e.target.checked && state.echo.showSites) await loadEcho(k);
+        renderEchoMarkers();
       });
     });
 
@@ -6541,6 +6771,8 @@
     { c: 'lf',  cb: 'landfill-sites', def: 'mich',
       subs: [['m', 'landfill-f-msw'], ['i', 'landfill-f-industrial'],
              ['c', 'landfill-f-coal_ash'], ['h', 'landfill-f-hazardous']] },
+    { c: 'echo', cb: 'echo-sites', def: 'sv',
+      subs: [['s', 'echo-f-snc'], ['v', 'echo-f-violation'], ['a', 'echo-f-all']] },
     { c: 'gf',  cb: 'golf-sites', def: 'mpu',
       subs: [['m', 'golf-f-municipal'], ['p', 'golf-f-private'], ['u', 'golf-f-unknown']] },
     { c: 'pf',  cb: 'pfas-sites', def: 'saw',

@@ -2055,6 +2055,53 @@ a:hover { text-decoration: underline; }
   font-size: 10.5px; font-style: italic; color: var(--muted);
 }
 
+/* ----- EPA ECHO enforcement & compliance ----- */
+.echo-popup { font-size: 12px; line-height: 1.45; }
+.echo-popup h4 { margin: 5px 0 2px; font-size: 13.5px; }
+.echo-popup .echo-meta { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+.echo-popup .echo-loading { color: var(--muted); font-style: italic; padding: 6px 2px; }
+.echo-popup .echo-progs { margin: 6px 0; }
+.echo-popup .echo-facts { margin: 6px 0; }
+.echo-popup .row { margin: 2px 0; }
+.echo-popup .row .k, .echo-xsection .row .k { color: var(--muted); font-weight: 600; }
+.echo-badge {
+  display: inline-block; color: #fff; font-weight: 700; font-size: 10px;
+  padding: 1px 7px; border-radius: 9px;
+}
+.echo-badge.sm { font-size: 9.5px; padding: 1px 6px; }
+.echo-flag {
+  display: inline-block; font-weight: 700; font-size: 9.5px; letter-spacing: .3px;
+  padding: 1px 5px; border-radius: 6px; margin-left: 3px; cursor: help;
+  border: 1px solid currentColor;
+}
+.echo-flag.snc { color: #f85149; }
+.echo-flag.hpv { color: #e8873c; }
+.echo-popup .echo-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+/* compliance section injected into TRI / Superfund / Part-111 popups */
+.echo-xsection {
+  margin: 8px 0 4px; padding: 6px 8px; border-radius: 7px;
+  background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.22);
+  font-size: 11.5px; line-height: 1.45;
+}
+.echo-xsection .echo-xhead { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+.echo-xsection .echo-xhead .muted { font-weight: 500; }
+.echo-xsection .row { margin: 2px 0; }
+.echo-xsection .echo-xnote {
+  margin-top: 4px; font-size: 10px; font-style: italic; color: var(--muted);
+}
+/* sub-toggle status legend under the layer control */
+.echo-legend {
+  display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 3px 0 2px 22px;
+}
+.echo-legend:empty { display: none; }
+.echo-legend .echo-key {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; color: var(--muted);
+}
+
 /* county-panel landfill list */
 .landfill-county-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
 .landfill-li {

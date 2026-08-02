@@ -3199,6 +3199,7 @@ def api_tri_sites():
             "chemical": (r["chemical"] or "").title(),
             "lbs": round(r["lbs"] or 0.0, 1),
             "pfas": bool(r["is_pfas"]), "carcinogen": bool(r["is_carcinogen"])})
+    echo = _echo_enrichment(conn, "matched_tri_ids")
     conn.close()
 
     out = []
@@ -3235,6 +3236,7 @@ def api_tri_sites():
             "underground_lbs": round(cur["underground"], 1),
             "top_chemicals": top_chem,
             "spark": spark, "trend": trend,
+            "echo": echo.get(fid),       # ECHO compliance, only where ID-joined
         })
     out.sort(key=lambda x: x["total_lbs"], reverse=True)
     stats = {"max_total": out[0]["total_lbs"] if out else 0,
@@ -3718,8 +3720,11 @@ def api_contamination_sites():
     q += " ORDER BY hrs_score DESC NULLS LAST, site_name"
     conn = db()
     rows = conn.execute(q, params).fetchall()
+    echo = _echo_enrichment(conn, "matched_sems_ids")
     conn.close()
     sites = [_contam_row(r) for r in rows]
+    for s in sites:                       # only where an ID join exists (epa_id)
+        s["echo"] = echo.get(s["epa_id"])
     return jsonify({
         "count": len(sites),
         "categories": [{"key": k, "glyph": v[0], "label": v[1]}
@@ -3907,8 +3912,11 @@ def api_landfill_sites():
     q += " ORDER BY (category='hazardous') DESC, name"
     conn = db()
     rows = conn.execute(q, params).fetchall()
+    echo = _echo_enrichment(conn, "matched_rcra_ids")
     conn.close()
     sites = [_landfill_row(r) for r in rows]
+    for s in sites:                       # Part 111 TSDFs only — Part 115 has no join
+        s["echo"] = echo.get(s["license_id"]) if s.get("program") == "part111" else None
     return jsonify({
         "count": len(sites),
         "legend": landfill_data.legend_payload(),
@@ -3952,6 +3960,148 @@ def api_landfill_density():
                   "counties_with_sites": len(counts),
                   "total_sites": sum(counts)},
     })
+
+
+# ---------- EPA ECHO enforcement & compliance overlay ----------
+#
+# Enforcement/compliance snapshots from echo_facilities (app.data_loader.load_echo).
+# 81,934 MI facilities, so the map layer NEVER plots them all by default — the
+# frontend requests a filtered slice (SNC/HPV-flagged, or rollup status
+# 'Violation Identified'); only the opt-in "all" sub-toggle pulls the full set.
+# FAC_COMPLIANCE_STATUS strings are served EXACTLY as EPA stores them; the colors
+# below are categorical (for marker distinction) and are NOT a severity scale.
+
+# Categorical marker colors keyed to the verbatim FAC_COMPLIANCE_STATUS string.
+ECHO_STATUS_COLORS = {
+    "Significant Violation":   "#b91c1c",
+    "Violation Identified":    "#d97706",
+    "Violation":               "#ea580c",
+    "No Violation Identified":  "#2f6f3e",
+    "Inactive":                "#6b7280",
+    "Unknown":                 "#7c3aed",
+}
+ECHO_STATUS_NULL_COLOR = "#9ca3af"   # FAC_COMPLIANCE_STATUS is NULL / not reported
+
+# Columns pulled for every compliance payload (popup + popup-enrichment sections).
+_ECHO_COLS = (
+    "registry_id, facility_name, compliance_status, caa_compliance_status, "
+    "cwa_compliance_status, rcra_compliance_status, sdwa_compliance_status, "
+    "snc_flag, caa_hpv_flag, programs_with_snc, qtrs_with_nc, inspection_count, "
+    "date_last_inspection, penalty_count, total_penalties, formal_action_count, "
+    "caa_formal_action_count, cwa_formal_action_count, rcra_formal_action_count, "
+    "sdwa_formal_action_count"
+)
+
+
+def _echo_status_color(status):
+    return ECHO_STATUS_NULL_COLOR if not status else \
+        ECHO_STATUS_COLORS.get(status, ECHO_STATUS_NULL_COLOR)
+
+
+def _echo_compliance_payload(r) -> dict:
+    """Shape one echo_facilities row into the compliance object used by both the
+    ECHO layer popup and the enrichment section on TRI/Superfund/TSDF popups.
+    Every value is served exactly as EPA stores it — no recoding or ranking."""
+    return {
+        "registry_id": r["registry_id"], "name": r["facility_name"],
+        "compliance_status": r["compliance_status"],
+        "status_color": _echo_status_color(r["compliance_status"]),
+        "caa_status": r["caa_compliance_status"],
+        "cwa_status": r["cwa_compliance_status"],
+        "rcra_status": r["rcra_compliance_status"],
+        "sdwa_status": r["sdwa_compliance_status"],
+        "snc_flag": r["snc_flag"], "caa_hpv_flag": r["caa_hpv_flag"],
+        "programs_with_snc": r["programs_with_snc"],
+        "qtrs_with_nc": r["qtrs_with_nc"],
+        "inspection_count": r["inspection_count"],
+        "date_last_inspection": r["date_last_inspection"],
+        "penalty_count": r["penalty_count"],
+        "total_penalties": r["total_penalties"],
+        "formal_action_count": r["formal_action_count"],
+        "caa_formal_action_count": r["caa_formal_action_count"],
+        "cwa_formal_action_count": r["cwa_formal_action_count"],
+        "rcra_formal_action_count": r["rcra_formal_action_count"],
+        "sdwa_formal_action_count": r["sdwa_formal_action_count"],
+    }
+
+
+def _echo_enrichment(conn, matched_col: str) -> dict:
+    """Map each of OUR record ids that ECHO matched -> its compliance payload, for
+    enriching the existing TRI / Superfund / Part-111 popups. `matched_col` is one
+    of matched_tri_ids | matched_sems_ids | matched_rcra_ids. Returns {} when the
+    ECHO table is absent so the other layers degrade gracefully (no section)."""
+    if not _table_exists(conn.cursor(), "echo_facilities"):
+        return {}
+    out: dict = {}
+    for r in conn.execute(
+        f"SELECT {_ECHO_COLS}, {matched_col} AS _ids FROM echo_facilities "
+        f"WHERE {matched_col} IS NOT NULL AND {matched_col} != ''"):
+        payload = _echo_compliance_payload(r)
+        for our_id in (r["_ids"] or "").split():
+            out.setdefault(our_id, payload)
+    return out
+
+
+@app.route("/api/echo/sites")
+def api_echo_sites():
+    """ECHO markers for the map layer. ?filter selects the slice so we never ship
+    all 81,934 facilities unless explicitly asked:
+      * filter=snc       — SNC or HPV flagged (~349); a default sub-layer
+      * filter=violation — rollup FAC_COMPLIANCE_STATUS='Violation Identified'
+      * filter=all       — every facility with coordinates (~82k; opt-in only)
+    Markers carry only what the map needs; full popup detail is lazy-loaded per
+    facility from /api/echo/facility/<registry_id>."""
+    filt = request.args.get("filter", "snc")
+    conn = db()
+    if not _table_exists(conn.cursor(), "echo_facilities"):
+        conn.close()
+        return jsonify({"filter": filt, "count": 0, "facilities": [],
+                        "statuses": [], "available": False})
+    where = "latitude IS NOT NULL AND longitude IS NOT NULL"
+    if filt == "snc":
+        where += " AND (snc_flag='Y' OR caa_hpv_flag='Y')"
+    elif filt == "violation":
+        where += " AND compliance_status='Violation Identified'"
+    elif filt != "all":
+        conn.close()
+        return jsonify({"filter": filt, "count": 0, "facilities": [],
+                        "error": "unknown filter"}), 400
+    rows = conn.execute(
+        f"""SELECT registry_id, facility_name, latitude, longitude,
+                   compliance_status, snc_flag, caa_hpv_flag
+              FROM echo_facilities WHERE {where}""").fetchall()
+    conn.close()
+    facs = [{
+        "registry_id": r["registry_id"], "name": r["facility_name"],
+        "lat": r["latitude"], "lng": r["longitude"],
+        "status": r["compliance_status"],
+        "color": _echo_status_color(r["compliance_status"]),
+        "snc": r["snc_flag"] == "Y", "hpv": r["caa_hpv_flag"] == "Y",
+    } for r in rows]
+    statuses = [{"label": k, "color": v} for k, v in ECHO_STATUS_COLORS.items()]
+    statuses.append({"label": "No status reported", "color": ECHO_STATUS_NULL_COLOR})
+    return jsonify({"filter": filt, "count": len(facs), "facilities": facs,
+                    "statuses": statuses, "available": True})
+
+
+@app.route("/api/echo/facility/<registry_id>")
+def api_echo_facility(registry_id: str):
+    """Full compliance/enforcement detail for one ECHO facility, lazy-loaded when a
+    marker popup opens."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "echo_facilities"):
+        conn.close()
+        return jsonify({"found": False}), 404
+    r = conn.execute(
+        f"SELECT {_ECHO_COLS}, county FROM echo_facilities WHERE registry_id=?",
+        (registry_id,)).fetchone()
+    conn.close()
+    if not r:
+        return jsonify({"found": False}), 404
+    payload = _echo_compliance_payload(r)
+    payload["found"] = True
+    payload["county"] = r["county"]
+    return jsonify(payload)
 
 
 # ---------- Golf courses overlay (OpenStreetMap) ----------

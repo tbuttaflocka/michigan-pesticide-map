@@ -630,6 +630,78 @@ CREATE TABLE IF NOT EXISTS places (
 );
 CREATE INDEX IF NOT EXISTS ix_places_name ON places(name);
 CREATE INDEX IF NOT EXISTS ix_places_kind ON places(kind);
+
+-- ===== EPA ECHO enforcement & compliance (All-Data REST web service) =====
+-- One row per Michigan regulated facility from EPA's Enforcement and Compliance
+-- History Online. Covers Clean Air Act, Clean Water Act, RCRA and Safe Drinking
+-- Water Act: current compliance status, significant-noncompliance / high-priority
+-- flags, inspection counts + dates, formal enforcement action counts, and
+-- penalties. Status strings are stored EXACTLY as EPA returns them
+-- ("No Violation Identified" / "Violation Identified" / "Significant Violation" /
+-- NULL) — never recoded, ranked, or collapsed. Compliance history is the trailing
+-- 12 federal-fiscal-year quarters (3 years); ECHO lags source databases by up to
+-- three months and refreshes weekly except SDWA (quarterly). Data quality prior
+-- to Nov 2000 is, per EPA, "unknown", and violation flags are alleged not
+-- adjudicated. The matched_* columns hold the subset of each space-delimited ECHO
+-- program-ID list that EXACTLY matches one of our existing records (ID join only,
+-- never name matching): TRI_IDS->tri_facility.facility_id,
+-- SEMS_IDS->contamination_sites.epa_id, RCRA_IDS->landfill_sites.license_id
+-- (Part 111 TSDFs only; Part 115 solid-waste landfills carry no FRS/RCRA ID and
+-- are intentionally left unjoined).
+CREATE TABLE IF NOT EXISTS echo_facilities (
+    registry_id              TEXT PRIMARY KEY,  -- REGISTRY_ID (FRS Registry ID)
+    facility_name            TEXT,              -- FAC_NAME
+    street                   TEXT,              -- FAC_STREET
+    city                     TEXT,              -- FAC_CITY
+    state                    TEXT,              -- FAC_STATE
+    zip                      TEXT,              -- FAC_ZIP
+    county                   TEXT,              -- FAC_COUNTY (raw, as EPA returns)
+    county_fips              TEXT,              -- derived from county name
+    latitude                 REAL,              -- FAC_LAT
+    longitude                REAL,              -- FAC_LONG
+    -- current compliance status — stored verbatim, no recoding --
+    compliance_status        TEXT,              -- FAC_COMPLIANCE_STATUS
+    caa_compliance_status    TEXT,              -- CAA_COMPLIANCE_STATUS
+    cwa_compliance_status    TEXT,              -- CWA_COMPLIANCE_STATUS
+    rcra_compliance_status   TEXT,              -- RCRA_COMPLIANCE_STATUS
+    sdwa_compliance_status   TEXT,              -- SDWA_COMPLIANCE_STATUS
+    snc_flag                 TEXT,              -- FAC_SNC_FLG (Y/N)
+    caa_hpv_flag             TEXT,              -- CAA_HPV_FLAG (Y/N)
+    programs_with_snc        TEXT,              -- FAC_PROGRAMS_WITH_SNC
+    -- inspections --
+    inspection_count         INTEGER,           -- FAC_INSPECTION_COUNT
+    date_last_inspection     TEXT,              -- FAC_DATE_LAST_INSPECTION (MM/DD/YYYY as returned)
+    days_last_inspection     INTEGER,           -- FAC_DAYS_LAST_INSPECTION
+    -- penalties --
+    penalty_count            INTEGER,           -- FAC_PENALTY_COUNT
+    total_penalties          TEXT,              -- FAC_TOTAL_PENALTIES (currency string as returned, e.g. "$0")
+    total_penalties_usd      REAL,              -- numeric parse of total_penalties (derived convenience)
+    date_last_penalty        TEXT,              -- FAC_DATE_LAST_PENALTY
+    -- formal enforcement action counts --
+    formal_action_count      INTEGER,           -- FAC_FORMAL_ACTION_COUNT
+    caa_formal_action_count  INTEGER,           -- CAA_FORMAL_ACTION_COUNT
+    cwa_formal_action_count  INTEGER,           -- CWA_FORMAL_ACTION_COUNT
+    rcra_formal_action_count INTEGER,           -- RCRA_FORMAL_ACTION_COUNT
+    sdwa_formal_action_count INTEGER,           -- SDWA_FORMAL_ACTION_COUNT
+    -- timeframe --
+    qtrs_with_nc             INTEGER,           -- FAC_QTRS_WITH_NC
+    compliance_history_3yr   TEXT,              -- FAC_3YR_COMPLIANCE_HISTORY (12-quarter string)
+    -- raw program-ID lists (space-delimited, exactly as returned) --
+    tri_ids                  TEXT,              -- TRI_IDS
+    sems_ids                 TEXT,              -- SEMS_IDS
+    rcra_ids                 TEXT,              -- RCRA_IDS
+    npdes_ids                TEXT,              -- NPDES_IDS
+    -- ID-join results: matched subset present in our data (NULL if none) --
+    matched_tri_ids          TEXT,              -- ⊆ TRI_IDS in tri_facility.facility_id
+    matched_sems_ids         TEXT,              -- ⊆ SEMS_IDS in contamination_sites.epa_id
+    matched_rcra_ids         TEXT,              -- ⊆ RCRA_IDS in landfill_sites.license_id (part111)
+    source                   TEXT DEFAULT 'EPA_ECHO'
+);
+CREATE INDEX IF NOT EXISTS ix_echo_county   ON echo_facilities(county_fips);
+CREATE INDEX IF NOT EXISTS ix_echo_snc      ON echo_facilities(snc_flag);
+CREATE INDEX IF NOT EXISTS ix_echo_tri_m    ON echo_facilities(matched_tri_ids);
+CREATE INDEX IF NOT EXISTS ix_echo_sems_m   ON echo_facilities(matched_sems_ids);
+CREATE INDEX IF NOT EXISTS ix_echo_rcra_m   ON echo_facilities(matched_rcra_ids);
 """
 
 

@@ -58,6 +58,12 @@ from .config import (
     TRI_START_YEAR,
     TRI_END_YEAR,
     TRI_CACHE_DIR,
+    ECHO_BASE,
+    ECHO_METADATA_URL,
+    ECHO_GET_FACILITIES_URL,
+    ECHO_GET_DOWNLOAD_URL,
+    ECHO_STATE,
+    ECHO_COLUMNS,
 )
 from .wind_data import MI_ASOS_STATIONS, DIRS_16, deg_to_dir16, dir16_to_deg
 from .water_quality import (
@@ -2561,6 +2567,209 @@ def load_landfills(conn: sqlite3.Connection) -> int:
         "The mapped disposal facilities come from EGLE's state layer.",
     )
     return total
+
+
+# ---------- EPA ECHO enforcement & compliance (All-Data REST) ----------
+#
+# One row per Michigan regulated facility from EPA's Enforcement and Compliance
+# History Online, pulled via the recommended REST pattern (get_facilities builds
+# the MI-filtered query + returns a QueryID; get_download streams the whole result
+# set as one CSV with only the columns we ask for). Every column name is resolved
+# against ECHO's live metadata dictionary at run time — nothing is hardcoded — and
+# the CSV is parsed by ObjectName header (ECHO returns columns in its own order).
+
+def _echo_resolve_columns() -> tuple[str, dict]:
+    """Resolve the configured ECHO_COLUMNS (given as ColumnNames) against ECHO's
+    LIVE metadata dictionary into (qcolumns string of ColumnIDs, {ColumnName:
+    ObjectName}). Raises if any configured name is absent from the live dictionary
+    — we never assume a column id or name."""
+    meta = json.loads(http_get(ECHO_METADATA_URL, timeout=60))
+    cols = meta.get("Results", {}).get("ResultColumns", [])
+    by_name = {c.get("ColumnName"): c for c in cols}
+    missing = [n for n in ECHO_COLUMNS if n not in by_name]
+    if missing:
+        raise RuntimeError("ECHO metadata missing expected column(s): "
+                           + ", ".join(missing))
+    ids = [str(by_name[n]["ColumnID"]) for n in ECHO_COLUMNS]
+    objname = {n: by_name[n]["ObjectName"] for n in ECHO_COLUMNS}
+    return ",".join(ids), objname
+
+
+def _echo_int(v):
+    v = (v or "").strip()
+    if not v:
+        return None
+    try:
+        return int(float(v))
+    except ValueError:
+        return None
+
+
+def _echo_money(v):
+    """'$324,718,690' -> 324718690.0; blank -> None. The raw string is preserved
+    verbatim in total_penalties — this is only a derived numeric convenience."""
+    if not v:
+        return None
+    s = re.sub(r"[^0-9.]", "", v)
+    try:
+        return float(s) if s not in ("", ".") else None
+    except ValueError:
+        return None
+
+
+def _echo_county_fips(conn):
+    """Return (norm, {norm(county): fips}). Tolerates EPA's bare 'KEWEENAW' and
+    'KEWEENAW COUNTY' spellings and the counties table's 'St. Clair'."""
+    def norm(name):
+        s = (name or "").replace(".", "").strip().lower()
+        if s.endswith(" county"):
+            s = s[:-7]
+        return s.strip()
+    return norm, {norm(name): fips for fips, name in _county_fips_list(conn)}
+
+
+def load_echo(conn: sqlite3.Connection) -> int:
+    """Load Michigan EPA ECHO enforcement/compliance facilities via the All-Data
+    REST service and ID-join each to our TRI / Superfund / Part-111 landfill
+    records (exact ID match only — never name matching)."""
+    log("Loading EPA ECHO enforcement & compliance (Michigan, All-Data REST)...")
+
+    def _bail(msg: str) -> int:
+        log(f"  ECHO {msg}; keeping existing data", level="warn")
+        record_source(conn, "epa_echo",
+                      "EPA ECHO — enforcement & compliance (CAA/CWA/RCRA/SDWA)",
+                      "https://echo.epa.gov/", "unavailable", 0, msg)
+        return 0
+
+    try:
+        qcolumns, obj = _echo_resolve_columns()
+    except Exception as e:                            # noqa: BLE001
+        return _bail(f"metadata fetch failed: {e}")
+
+    # get_facilities builds the MI query and returns summary counts + a QueryID.
+    try:
+        summ = json.loads(http_get(
+            f"{ECHO_GET_FACILITIES_URL}?output=JSON&p_st={ECHO_STATE}",
+            timeout=120)).get("Results", {})
+        qid = summ.get("QueryID")
+        expected = _echo_int(summ.get("QueryRows"))
+        if not qid:
+            raise RuntimeError(f"no QueryID ({summ.get('Message')})")
+    except Exception as e:                            # noqa: BLE001
+        return _bail(f"get_facilities failed: {e}")
+
+    # get_download streams the whole result set as one CSV (selected columns only).
+    try:
+        raw = http_get(f"{ECHO_GET_DOWNLOAD_URL}?qid={qid}&qcolumns={qcolumns}",
+                       timeout=300).decode("utf-8-sig", "replace")
+    except Exception as e:                            # noqa: BLE001
+        return _bail(f"get_download failed: {e}")
+
+    reader = csv.DictReader(io.StringIO(raw))
+    miss = {obj[n] for n in ECHO_COLUMNS} - set(reader.fieldnames or [])
+    if miss:
+        log(f"  ECHO CSV missing expected header(s): {sorted(miss)}", level="warn")
+
+    # Exact-ID join indexes from our existing records. Part 111 TSDFs only — Part
+    # 115 solid-waste landfills carry no FRS/RCRA ID, so they are never joined.
+    tri_set = {r[0] for r in conn.execute(
+        "SELECT facility_id FROM tri_facility WHERE facility_id IS NOT NULL")}
+    sems_set = {r[0] for r in conn.execute(
+        "SELECT epa_id FROM contamination_sites "
+        "WHERE epa_id IS NOT NULL AND epa_id != ''")}
+    rcra_set = {r[0] for r in conn.execute(
+        "SELECT license_id FROM landfill_sites "
+        "WHERE program='part111' AND license_id IS NOT NULL AND license_id != ''")}
+
+    norm_county, fips_by_county = _echo_county_fips(conn)
+
+    def g(row, name):
+        return (row.get(obj[name]) or "").strip() or None
+
+    def matched(raw_ids, idset):
+        if not raw_ids:
+            return None
+        hits = [t for t in raw_ids.split() if t in idset]
+        return " ".join(hits) if hits else None
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM echo_facilities")
+    rows = tri_j = sems_j = rcra_j = 0
+    for row in reader:
+        reg = g(row, "REGISTRY_ID")
+        if not reg:
+            continue
+        tri_ids, sems_ids, rcra_ids = (g(row, "TRI_IDS"), g(row, "SEMS_IDS"),
+                                       g(row, "RCRA_IDS"))
+        m_tri = matched(tri_ids, tri_set)
+        m_sems = matched(sems_ids, sems_set)
+        m_rcra = matched(rcra_ids, rcra_set)
+        tri_j += 1 if m_tri else 0
+        sems_j += 1 if m_sems else 0
+        rcra_j += 1 if m_rcra else 0
+        county = g(row, "FAC_COUNTY")
+        total_pen = g(row, "FAC_TOTAL_PENALTIES")
+        cur.execute(
+            """INSERT OR REPLACE INTO echo_facilities(
+                 registry_id, facility_name, street, city, state, zip, county,
+                 county_fips, latitude, longitude,
+                 compliance_status, caa_compliance_status, cwa_compliance_status,
+                 rcra_compliance_status, sdwa_compliance_status,
+                 snc_flag, caa_hpv_flag, programs_with_snc,
+                 inspection_count, date_last_inspection, days_last_inspection,
+                 penalty_count, total_penalties, total_penalties_usd, date_last_penalty,
+                 formal_action_count, caa_formal_action_count, cwa_formal_action_count,
+                 rcra_formal_action_count, sdwa_formal_action_count,
+                 qtrs_with_nc, compliance_history_3yr,
+                 tri_ids, sems_ids, rcra_ids, npdes_ids,
+                 matched_tri_ids, matched_sems_ids, matched_rcra_ids, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (reg, g(row, "FAC_NAME"), g(row, "FAC_STREET"), g(row, "FAC_CITY"),
+             g(row, "FAC_STATE"), g(row, "FAC_ZIP"), county,
+             fips_by_county.get(norm_county(county)),
+             _to_float(g(row, "FAC_LAT")), _to_float(g(row, "FAC_LONG")),
+             g(row, "FAC_COMPLIANCE_STATUS"), g(row, "CAA_COMPLIANCE_STATUS"),
+             g(row, "CWA_COMPLIANCE_STATUS"), g(row, "RCRA_COMPLIANCE_STATUS"),
+             g(row, "SDWA_COMPLIANCE_STATUS"),
+             g(row, "FAC_SNC_FLG"), g(row, "CAA_HPV_FLAG"),
+             g(row, "FAC_PROGRAMS_WITH_SNC"),
+             _echo_int(g(row, "FAC_INSPECTION_COUNT")),
+             g(row, "FAC_DATE_LAST_INSPECTION"),
+             _echo_int(g(row, "FAC_DAYS_LAST_INSPECTION")),
+             _echo_int(g(row, "FAC_PENALTY_COUNT")), total_pen,
+             _echo_money(total_pen), g(row, "FAC_DATE_LAST_PENALTY"),
+             _echo_int(g(row, "FAC_FORMAL_ACTION_COUNT")),
+             _echo_int(g(row, "CAA_FORMAL_ACTION_COUNT")),
+             _echo_int(g(row, "CWA_FORMAL_ACTION_COUNT")),
+             _echo_int(g(row, "RCRA_FORMAL_ACTION_COUNT")),
+             _echo_int(g(row, "SDWA_FORMAL_ACTION_COUNT")),
+             _echo_int(g(row, "FAC_QTRS_WITH_NC")),
+             g(row, "FAC_3YR_COMPLIANCE_HISTORY"),
+             tri_ids, sems_ids, rcra_ids, g(row, "NPDES_IDS"),
+             m_tri, m_sems, m_rcra, "EPA_ECHO"),
+        )
+        rows += 1
+    conn.commit()
+
+    if expected and rows < expected * 0.9:
+        log(f"  WARNING: parsed {rows:,} rows but get_facilities reported "
+            f"{expected:,} — possible truncated download", level="warn")
+    log(f"  ECHO: {rows:,} MI facilities "
+        f"({tri_j} TRI, {sems_j} Superfund, {rcra_j} Part-111 ID matches)",
+        level="ok" if rows else "warn")
+    record_source(
+        conn, "epa_echo",
+        "EPA ECHO — enforcement & compliance (CAA/CWA/RCRA/SDWA)",
+        "https://echo.epa.gov/",
+        "ok" if rows else "unavailable", rows,
+        f"{rows:,} Michigan facilities via ECHO All-Data REST "
+        f"(get_facilities -> get_download). Compliance history = trailing 12 "
+        f"federal-fiscal quarters (~3 yrs); ECHO refreshes weekly except SDWA "
+        f"(quarterly) and lags source databases by up to 3 months. Status strings "
+        f"stored verbatim; violation flags are alleged, not adjudicated; data "
+        f"quality prior to Nov 2000 is 'unknown' per EPA.",
+    )
+    return rows
 
 
 # ---------- Golf courses (OpenStreetMap via Overpass) ----------

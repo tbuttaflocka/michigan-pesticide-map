@@ -253,6 +253,49 @@ EGLE_TSDF_QUERY = (
 EGLE_FOIA_URL = "https://www.michigan.gov/egle/contact/foia/summary"
 EGLE_FOIA_SUBMIT_URL = "https://michiganegle.govqa.us/WEBAPP/_rs/SupportHome.aspx"
 
+# ---- EPA ECHO enforcement & compliance (All-Data REST web service) ----
+# ECHO's "Facility Search - All Data" service, filtered server-side to Michigan.
+# We use the recommended REST pattern rather than the 392 MB national bulk
+# "ECHO Exporter" zip: get_facilities builds the MI query (and returns summary
+# counts + a QueryID), then get_download streams the whole result set as ONE CSV
+# with only the columns we ask for (a few MB, no row-by-row pagination). The
+# metadata service is the authoritative field dictionary — the loader reads it
+# at run time to resolve every column name below to its numeric ColumnID (for the
+# request) and its CSV ObjectName (for parsing), so NO column id/name is hardcoded
+# and a name that ever disappears fails the load loudly instead of silently.
+# NOTE: ECHO refreshes weekly EXCEPT SDWA (quarterly), and lags the underlying
+# source databases by up to three months; compliance history is the trailing
+# 3 years (12 federal-fiscal-year quarters). Data quality prior to Nov 2000 is,
+# per EPA, "unknown"; violation flags are alleged, not adjudicated.
+ECHO_BASE = "https://echodata.epa.gov/echo"
+ECHO_METADATA_URL = ECHO_BASE + "/echo_rest_services.metadata?output=JSON"
+ECHO_GET_FACILITIES_URL = ECHO_BASE + "/echo_rest_services.get_facilities"
+ECHO_GET_DOWNLOAD_URL = ECHO_BASE + "/echo_rest_services.get_download"
+ECHO_STATE = "MI"
+# The columns to pull, given as ECHO ColumnNames (verified present in the live
+# metadata endpoint). Resolved to ColumnIDs + ObjectNames at load time.
+ECHO_COLUMNS = [
+    # identity + location
+    "REGISTRY_ID", "FAC_NAME", "FAC_STREET", "FAC_CITY", "FAC_STATE", "FAC_ZIP",
+    "FAC_COUNTY", "FAC_LAT", "FAC_LONG",
+    # current compliance status (rollup + per program) — stored verbatim
+    "FAC_COMPLIANCE_STATUS", "CAA_COMPLIANCE_STATUS", "CWA_COMPLIANCE_STATUS",
+    "RCRA_COMPLIANCE_STATUS", "SDWA_COMPLIANCE_STATUS",
+    # significant-noncompliance / high-priority-violator flags
+    "FAC_SNC_FLG", "CAA_HPV_FLAG", "FAC_PROGRAMS_WITH_SNC",
+    # inspections
+    "FAC_INSPECTION_COUNT", "FAC_DATE_LAST_INSPECTION", "FAC_DAYS_LAST_INSPECTION",
+    # penalties
+    "FAC_PENALTY_COUNT", "FAC_TOTAL_PENALTIES", "FAC_DATE_LAST_PENALTY",
+    # formal enforcement action counts (rollup + per program)
+    "FAC_FORMAL_ACTION_COUNT", "CAA_FORMAL_ACTION_COUNT", "CWA_FORMAL_ACTION_COUNT",
+    "RCRA_FORMAL_ACTION_COUNT", "SDWA_FORMAL_ACTION_COUNT",
+    # timeframe of the status
+    "FAC_QTRS_WITH_NC", "FAC_3YR_COMPLIANCE_HISTORY",
+    # program identifiers for cross-linking (space-delimited lists)
+    "TRI_IDS", "SEMS_IDS", "RCRA_IDS", "NPDES_IDS",
+]
+
 # ---- USGS Watershed Boundary Dataset (HUC-8 polygons) ----
 WBD_HUC8_QUERY = (
     "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/4/query"

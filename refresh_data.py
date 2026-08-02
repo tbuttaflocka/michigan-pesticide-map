@@ -132,6 +132,20 @@ def year4_range(table: str, col: str) -> Callable[[sqlite3.Connection], tuple]:
     return fn
 
 
+def mmddyyyy_year_range(table: str, col: str) -> Callable[[sqlite3.Connection], tuple]:
+    """Coverage from an EPA-style MM/DD/YYYY text date column (the year is the
+    trailing 4 digits, unlike year4_range which reads a leading year)."""
+    def fn(conn):
+        row = conn.execute(
+            f"SELECT MIN(substr({col},7,4)), MAX(substr({col},7,4)) FROM {table} "
+            f"WHERE {col} GLOB '[01][0-9]/[0-3][0-9]/[12][0-9][0-9][0-9]'"
+        ).fetchone()
+        if not row or not row[0]:
+            return (None, None)
+        return (row[0], row[1])
+    return fn
+
+
 def label_range(table: str, col: str) -> Callable[[sqlite3.Connection], tuple]:
     """Coverage from a stored 'YYYY-YYYY' label (wind years, cancer data_years)."""
     def fn(conn):
@@ -274,6 +288,22 @@ SOURCES: list[Source] = [
         # Seed staging with the TRI + contamination tables so the loader can
         # match each landfill to its TRI-release and Superfund records.
         seed_extra=("tri_facility", "tri_release", "contamination_sites"),
+    ),
+    Source(
+        id="echo",
+        label="EPA ECHO — enforcement & compliance (CAA/CWA/RCRA/SDWA)",
+        loaders=[dl.load_echo],
+        targets=["echo_facilities"],
+        primary_target="echo_facilities", primary_source_id="epa_echo",
+        # ECHO refreshes WEEKLY for most programs but SDWA only QUARTERLY, and the
+        # warehouse lags the underlying source databases by up to three months. A
+        # monthly check keeps compliance/enforcement current without missing the
+        # SDWA quarter or chasing the sub-weekly churn. ~82k MI facilities.
+        interval_months=1, min_abs=10000, floor_frac=0.5,
+        coverage=mmddyyyy_year_range("echo_facilities", "date_last_inspection"),
+        # Seed the join tables so the loader can ID-match ECHO's program-ID lists
+        # to our TRI / Superfund / Part-111 landfill records at load time.
+        seed_extra=("tri_facility", "contamination_sites", "landfill_sites"),
     ),
     Source(
         id="golf_courses",
