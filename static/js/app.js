@@ -2951,16 +2951,20 @@
 
   function renderEchoMarkers() {
     if (state.echo.layer) { state.echo.layer.remove(); state.echo.layer = null; }
-    // Always detach the canvas renderer first — otherwise a leftover blank
-    // full-map <canvas> (pane 'echo', above the county overlay) eats every county
-    // click. Leaflet re-attaches it automatically when the circleMarkers below are
-    // added, so an empty render (layer off, or all sub-filters off) leaves NO
-    // ghost canvas behind.
-    removeCanvasRenderer(state.echo._canvas);
+    // Do NOT detach the canvas renderer on ordinary re-renders. Keeping the same
+    // live L.canvas attached lets Leaflet repaint the re-added circleMarkers on the
+    // next frame; detaching + re-attaching it every render left the re-added points
+    // blank until the next viewreset (zoom/pan) — the reported bug. The renderer is
+    // detached only when the layer is genuinely empty (below), so the ghost-canvas
+    // click-leak guard stays intact.
     if (!state.echo.showSites) {
+      // Layer hidden: detach the canvas so its blank full-map <canvas> (pane
+      // 'echo', above the county overlay) can't swallow county clicks.
+      removeCanvasRenderer(state.echo._canvas);
       updateEchoStats();
       renderMarkerKeys();
-      return;
+      console.log('[echo] render: showSites=false -> added 0 markers; canvas detached (layer hidden)');
+      return { added: 0, redraw: false };
     }
     const pane = echoPane();
     const renderer = echoCanvasRenderer();
@@ -2983,8 +2987,19 @@
     }
     grp.addTo(state.map);
     state.echo.layer = grp;
+    if (seen.size === 0) {
+      // Nothing to show (e.g. every sub-filter off) — detach the now-empty canvas
+      // so it can't sit above the county pane and swallow clicks (ghost-canvas
+      // guard). With markers present the renderer stays attached and repaints.
+      removeCanvasRenderer(state.echo._canvas);
+    }
     updateEchoStats();
     renderMarkerKeys();
+    // The canvas renderer stays attached across re-renders, so the newly added
+    // circleMarkers repaint on the next frame — no explicit redraw() needed.
+    const redrawCalled = false;
+    console.log(`[echo] render: showSites=true -> added ${seen.size} markers to canvas '${pane}'; redraw() called: ${redrawCalled ? 'yes' : 'no'}`);
+    return { added: seen.size, redraw: redrawCalled };
   }
 
   function updateEchoStats() {
@@ -5077,7 +5092,9 @@
           await Promise.all(['snc', 'violation', 'all']
             .filter((k) => state.echo.filters[k]).map((k) => loadEcho(k)));
         }
-        renderEchoMarkers();
+        const info = renderEchoMarkers();
+        console.log(`[echo] control=echo-sites fired -> ${e.target.checked ? 'ON' : 'OFF'}; `
+          + `added ${info.added} facilities to layer; redraw called: ${info.redraw}`);
       });
     }
     ['snc', 'violation', 'all'].forEach((k) => {
@@ -5095,7 +5112,10 @@
         }
         state.echo.filters[k] = e.target.checked;
         if (e.target.checked && state.echo.showSites) await loadEcho(k);
-        renderEchoMarkers();
+        const info = renderEchoMarkers();
+        console.log(`[echo] control=echo-f-${k} fired -> ${e.target.checked ? 'ON' : 'OFF'}; `
+          + `parentShown=${state.echo.showSites}; added ${info.added} facilities to layer; `
+          + `redraw called: ${info.redraw}`);
       });
     });
 
