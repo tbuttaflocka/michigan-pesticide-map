@@ -200,25 +200,6 @@ WQP_RESULT_URL = (
     "&mimeType=csv&dataProfile=resultPhysChem"
 )
 
-# ---- NCI State Cancer Profiles (cancer incidence / mortality) ----
-# The public site was rebuilt as a JS/session-gated form; the old
-# "?...&output=1" CSV endpoint no longer returns data to a plain HTTP client.
-# The loader still *tries* these URLs (and detects the empty HTML shell), then
-# ingests any real per-county CSVs the user exports into CANCER_DATA_DIR, and
-# otherwise seeds the Michigan statewide baseline from app/cancer_data.py.
-CANCER_DATA_DIR = DATA_DIR / "cancer"
-NCI_SCP_BASE = "https://statecancerprofiles.cancer.gov"
-NCI_INCIDENCE_URL = (
-    NCI_SCP_BASE + "/incidencerates/index.php?stateFIPS=26&areatype=county"
-    "&cancer={code}&race=00&sex={sex}&age=001&stage={stage}&year=0&type=incd"
-    "&sortVariableName=name&sortOrder=default&output=1"
-)
-NCI_MORTALITY_URL = (
-    NCI_SCP_BASE + "/deathrates/index.php?stateFIPS=26&areatype=county"
-    "&cancer={code}&race=00&sex={sex}&age=001&year=0&type=death"
-    "&sortVariableName=name&sortOrder=default&output=1"
-)
-
 # ---- EPA Superfund NPL sites (ArcGIS Feature Service) ----
 # NOTE: EPA's ArcGIS org id changed from the one in older docs
 # (cJ9YHowT8TkDC48t) to cJ9YHowT8TU7DUyn, and the STATE field stores full

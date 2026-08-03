@@ -24,7 +24,6 @@ from typing import Iterable
 
 from . import database
 from . import spraying_programs
-from . import stats
 from .categories import categorize
 from .config import (
     CENSUS_GAZ_BASE,
@@ -87,23 +86,13 @@ from .water_quality import (
     mcl_for,
     to_ugl,
 )
-from .respiratory_data import (
-    MI_BROADER_RESP_BASELINE,
-    MI_STATEWIDE_BASELINE,
-    URBAN_COUNTIES,
-)
-from . import cancer_data
 from . import contamination_data
 from . import landfill_data
 from . import golf_data
 from . import pfas_data
 from . import ust_data
 from .config import (
-    CANCER_DATA_DIR,
     EPA_NPL_QUERY,
-    NCI_INCIDENCE_URL,
-    NCI_MORTALITY_URL,
-    NCI_SCP_BASE,
     EGLE_LANDFILL_QUERY,
     EGLE_TSDF_QUERY,
     EGLE_FOIA_URL,
@@ -810,7 +799,9 @@ def record_reference_sources(conn: sqlite3.Connection) -> None:
 # ---------- 6. Pre-compute correlation_analysis ----------
 
 def build_correlation_table(conn: sqlite3.Connection) -> int:
-    """Join the latest-year pesticide totals with county respiratory rates."""
+    """Pre-compute per-county latest-year pesticide totals. Feeds the wind-drift
+    layer and per-county pesticide lookups (health columns are no longer
+    populated; the table retains them but they stay NULL)."""
     cur = conn.cursor()
     cur.execute("DELETE FROM correlation_analysis")
 
@@ -839,52 +830,19 @@ def build_correlation_table(conn: sqlite3.Connection) -> int:
         GROUP BY c.fips, c.name, c.area_sq_miles
     """, (latest_year,)).fetchall()
 
-    # Latest respiratory rates per county per condition (most recent year).
-    resp = {}
-    for r in cur.execute("""
-        SELECT county_fips, condition, visit_rate
-          FROM respiratory_ed_visits ed
-         WHERE year = (SELECT MAX(year) FROM respiratory_ed_visits
-                        WHERE county_fips = ed.county_fips AND condition = ed.condition)
-    """):
-        resp.setdefault(r["county_fips"], {})[f"ed_{r['condition']}"] = r["visit_rate"]
-    for r in cur.execute("""
-        SELECT county_fips, condition, hosp_rate
-          FROM respiratory_hospitalizations h
-         WHERE year = (SELECT MAX(year) FROM respiratory_hospitalizations
-                        WHERE county_fips = h.county_fips AND condition = h.condition)
-    """):
-        resp.setdefault(r["county_fips"], {})[f"hosp_{r['condition']}"] = r["hosp_rate"]
-
-    prev_lookup: dict[str, float] = {}
-    for r in cur.execute("""
-        SELECT county_fips, prevalence_pct FROM respiratory_prevalence
-         WHERE condition='asthma' AND age_group='adult'
-    """):
-        prev_lookup[r["county_fips"]] = r["prevalence_pct"]
-
     inserted = 0
     for r in rows:
         fips = r["fips"]
         per_sq_mi = (r["total_kg"] / r["area_sq_miles"]) if r["area_sq_miles"] else None
-        resp_row = resp.get(fips, {})
         cur.execute(
             """INSERT INTO correlation_analysis(
                  county_fips, county, total_pesticide_kg, pesticide_per_sq_mile,
-                 herbicide_kg, insecticide_kg, fungicide_kg, area_sq_miles,
-                 is_urban, asthma_ed_rate, asthma_hosp_rate,
-                 copd_ed_rate, copd_hosp_rate, asthma_prevalence_pct)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 herbicide_kg, insecticide_kg, fungicide_kg, area_sq_miles)
+               VALUES (?,?,?,?,?,?,?,?)""",
             (
                 fips, r["name"], r["total_kg"], per_sq_mi,
                 r["herb_kg"], r["insect_kg"], r["fung_kg"],
                 r["area_sq_miles"],
-                1 if r["name"] in URBAN_COUNTIES else 0,
-                resp_row.get("ed_asthma"),
-                resp_row.get("hosp_asthma"),
-                resp_row.get("ed_copd"),
-                resp_row.get("hosp_copd"),
-                prev_lookup.get(fips),
             ),
         )
         inserted += 1
@@ -892,297 +850,12 @@ def build_correlation_table(conn: sqlite3.Connection) -> int:
     return inserted
 
 
-# ---------- 7. Respiratory illness (CDC EPHT Tracking API) ----------
-
-CDC_API = "https://ephtracking.cdc.gov/apigateway/api/v1"
-
-# Asthma & COPD content-area IDs (resolved from /contentareas/json).
-CDC_AREA_ASTHMA = 3
-CDC_AREA_COPD = 23
-
-# Year window. The Tracking API getCoreHolder accepts a comma-separated
-# list of years or the literal "ALL".
-CDC_YEARS = list(range(2010, 2024))
-
-
-def cdc_request(url: str, *, method: str = "GET", body: dict | None = None,
-                max_retries: int = 3) -> object:
-    """Call a CDC EPHT endpoint with exponential backoff. Supports GET + POST."""
-    delays = [2, 4, 8, 16]
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    for attempt in range(max_retries + 1):
-        try:
-            if method == "POST":
-                data = json.dumps(body or {}).encode("utf-8")
-                headers["Content-Type"] = "application/json"
-                req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-            else:
-                req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                raw = resp.read()
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                payload = None
-            if isinstance(payload, dict) and payload.get("code") in (400, 401, 403, 429, 500, 503):
-                code = payload.get("code")
-                msg = payload.get("message", "")
-                if code == 429 and attempt < max_retries:
-                    log(f"  CDC 429 throttle — sleeping {delays[attempt]}s (try {attempt+1})", level="warn")
-                    time.sleep(delays[attempt])
-                    continue
-                raise RuntimeError(f"CDC API error {code}: {msg}")
-            return payload
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < max_retries:
-                log(f"  CDC HTTP 429 — sleeping {delays[attempt]}s", level="warn")
-                time.sleep(delays[attempt])
-                continue
-            if attempt == max_retries:
-                raise
-            log(f"  CDC HTTP {e.code} — sleeping {delays[attempt]}s", level="warn")
-            time.sleep(delays[attempt])
-        except Exception as e:
-            if attempt == max_retries:
-                raise
-            log(f"  CDC fetch error: {e} — sleeping {delays[attempt]}s", level="warn")
-            time.sleep(delays[attempt])
-    raise RuntimeError("CDC API failed after retries")
-
-
-# Backwards-compatible alias.
-def cdc_get(url: str, **kw) -> object:
-    return cdc_request(url, **kw)
-
-
-# Age-adjusted rate per 10,000 population — discovered via /measuresearch.
-# strat level 2 = "State x County" (county-level).
-CDC_MEASURES = [
-    # (table, rate_column, measureId, stratLevelId, condition, label)
-    ("respiratory_ed_visits",        "visit_rate", 437, 2, "asthma", "Asthma ED rate"),
-    ("respiratory_hospitalizations", "hosp_rate",  103, 2, "asthma", "Asthma hosp rate"),
-    ("respiratory_ed_visits",        "visit_rate", 652, 2, "copd",   "COPD ED rate"),
-    ("respiratory_hospitalizations", "hosp_rate",  649, 2, "copd",   "COPD hosp rate"),
-]
 
 
 def _county_fips_list(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(r["fips"], r["name"])
             for r in conn.execute("SELECT fips, name FROM counties ORDER BY fips")]
 
-
-def _is_suppressed(v) -> bool:
-    return v is None or str(v).strip() in ("", "Suppressed", "S", "*", "(D)", "NA")
-
-
-def _ingest_core_holder(
-    conn: sqlite3.Connection,
-    payload: object,
-    table: str,
-    rate_col: str,
-    condition: str,
-    county_lookup: dict[str, str],
-) -> int:
-    """Parse a getCoreHolder POST response and insert per-county-per-year rates."""
-    if not isinstance(payload, dict):
-        return 0
-    # The API returns table data under "tableResult" most commonly, but also
-    # "result", "data", and (older) "tableData". Tolerate all variants.
-    rows = (payload.get("tableResult") or payload.get("result")
-            or payload.get("data") or payload.get("tableData") or [])
-    cur = conn.cursor()
-    inserted = 0
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        geo = r.get("geoId") or r.get("countyFips") or ""
-        if not isinstance(geo, str):
-            geo = str(geo)
-        # County-level rows are 5-digit FIPS starting with 26.
-        if not geo.startswith("26") or len(geo) != 5:
-            continue
-        try:
-            # The Tracking API uses "temporal" / "temporalId" for the year.
-            year_text = (r.get("temporalId") or r.get("temporal")
-                         or r.get("year") or "")
-            year = int(str(year_text)[:4])
-        except (TypeError, ValueError):
-            continue
-        # Suppression: the API sets suppressionFlag="1" and may zero out dataValue.
-        supp_flag = str(r.get("suppressionFlag", "0")) == "1"
-        rate_raw = r.get("dataValue") or r.get("displayValue")
-        suppressed = supp_flag or _is_suppressed(rate_raw)
-        try:
-            rate = None if suppressed else float(rate_raw)
-        except (TypeError, ValueError):
-            rate = None
-        cur.execute(
-            f"""INSERT INTO {table}(county, county_fips, year, condition,
-                  {rate_col}, suppressed, source)
-                VALUES (?, ?, ?, ?, ?, ?, 'CDC_Tracking')""",
-            (county_lookup.get(geo, ""), geo, year, condition, rate,
-             1 if suppressed else 0),
-        )
-        inserted += 1
-    conn.commit()
-    return inserted
-
-
-def _post_core_holder(measure_id: int, strat_level: int,
-                      county_fips_csv: str) -> object:
-    """POST to getCoreHolder. temporalTypeIdFilter=1 means single-year annual;
-    we hand in the full CDC_YEARS list explicitly because the API requires it."""
-    url = f"{CDC_API}/getCoreHolder/{measure_id}/{strat_level}/0/0"
-    body = {
-        "geographicTypeIdFilter": "2",
-        "geographicItemsFilter": county_fips_csv,
-        "temporalTypeIdFilter": "1",
-        "temporalItemsFilter": ",".join(str(y) for y in CDC_YEARS),
-        "isSmoothed": "0",
-    }
-    return cdc_request(url, method="POST", body=body)
-
-
-def load_respiratory_data(conn: sqlite3.Connection) -> int:
-    """Pull asthma + COPD ED and hospitalization age-adjusted rates from the
-    CDC Tracking API. Falls back gracefully if the API is throttled.
-    """
-    log("Loading respiratory data (CDC EPHT Tracking API)...")
-    cur = conn.cursor()
-    cur.execute("DELETE FROM respiratory_ed_visits")
-    cur.execute("DELETE FROM respiratory_hospitalizations")
-    cur.execute("DELETE FROM respiratory_prevalence")
-    cur.execute("DELETE FROM respiratory_mortality")
-    conn.commit()
-
-    county_lookup = {fips: name for fips, name in _county_fips_list(conn)}
-    fips_csv = ",".join(county_lookup.keys())
-
-    inserted_total = 0
-    status_notes: list[str] = []
-    all_ok = True
-
-    for table, rate_col, mid, strat, condition, label in CDC_MEASURES:
-        try:
-            payload = _post_core_holder(mid, strat, fips_csv)
-        except Exception as e:
-            log(f"  CDC measure {mid} ({label}) fetch failed: {e}", level="warn")
-            status_notes.append(f"{label} fetch failed ({e})")
-            all_ok = False
-            continue
-        n = _ingest_core_holder(conn, payload, table, rate_col, condition, county_lookup)
-        inserted_total += n
-        log(f"  CDC measure {mid} {label}: +{n} rows", level="ok")
-        # Be a polite caller — the API throttles aggressively.
-        time.sleep(2)
-
-    # Always seed prevalence baseline (the BRFS data isn't redistributed
-    # per-county in a clean tabular form).
-    _seed_prevalence_baseline(conn, county_lookup)
-
-    # Broader ICD-10 J00-J99 categories: county-level data is not available
-    # from CDC Tracking. Apply Michigan statewide baselines per county.
-    _seed_broader_respiratory(conn, county_lookup)
-
-    record_source(conn, "cdc_tracking",
-                  "CDC National Environmental Public Health Tracking — Asthma & COPD",
-                  f"{CDC_API}/contentareas/json",
-                  "ok" if inserted_total else "unavailable",
-                  inserted_total,
-                  "; ".join(status_notes) or f"Years 2010-2023, county-level Michigan rows.")
-    record_source(conn, "mitracking",
-                  "Michigan MiTracking — MDHHS Environmental Health Tracking Portal",
-                  "https://mitracking.state.mi.us/",
-                  "skipped", 0,
-                  "Mirrors the same CDC dataset; portal-only access.")
-    record_source(conn, "mdhhs_asthma_atlas",
-                  "MDHHS — Michigan Asthma Atlas 2019 (BRFS 2012-2016)",
-                  "https://www.michigan.gov/-/media/Project/Websites/mdhhs/Keeping-Michigan-Healthy/"
-                  "Chronic-Disease-Epidemiology/Asthma-Epi/Reports-Presentations/MI_Asthma_Atlas_2019.pdf",
-                  "ok", 83,
-                  "Statewide adult-asthma prevalence baseline applied to every "
-                  "county; replace with per-county BRFS data when available.")
-    record_source(conn, "mha_hospital",
-                  "Michigan Health and Hospital Association (MHA) discharge data",
-                  "https://www.mdch.state.mi.us/osr/index.asp?Id=14",
-                  "skipped", 0,
-                  "Public portal only; no bulk feed.")
-    record_source(conn, "cdc_wonder",
-                  "CDC WONDER — underlying-cause mortality (J00–J99)",
-                  "https://wonder.cdc.gov/",
-                  "skipped", 0,
-                  "Compressed Mortality file requires query-builder access.")
-    record_source(conn, "mdhhs_resp_dashboard",
-                  "MDHHS Respiratory Disease Dashboard (COVID / flu / RSV)",
-                  "https://www.michigan.gov/mdhhs/keep-mi-healthy/infectious-diseases/"
-                  "seasonal-respiratory-viruses/respiratory-disease-reports",
-                  "skipped", 0,
-                  "Statewide/regional only; not county-level.")
-    record_source(conn, "mi_brfs",
-                  "Michigan Behavioral Risk Factor Survey (MiBRFS)",
-                  "https://www.michigan.gov/mdhhs/keeping-mi-healthy/chronic-diseases/"
-                  "chronicdiseaseepidemiology/brfs",
-                  "skipped", 0,
-                  "Aggregated into the Asthma Atlas baseline above.")
-    conn.commit()
-    return inserted_total
-
-
-def _seed_broader_respiratory(conn, county_lookup: dict[str, str]) -> None:
-    """Seed per-county statewide-baseline rows for ICD-10 categories the
-    CDC Tracking API doesn't expose at county level. Each county gets the
-    same Michigan-statewide rate so the choropleth renders honestly as
-    "no county variation available."
-    """
-    b = MI_BROADER_RESP_BASELINE
-    cur = conn.cursor()
-    # ED-visit-style metrics → respiratory_ed_visits with new condition codes
-    ed_seeds = [
-        ("upper_respiratory",   b["upper_respiratory_ed_rate"]),
-        ("acute_bronchitis",    b["acute_bronchitis_ed_rate"]),
-        ("pneumonia_influenza", b["pneumonia_influenza_ed_rate"]),
-    ]
-    for fips, name in county_lookup.items():
-        for cond, rate in ed_seeds:
-            cur.execute(
-                """INSERT INTO respiratory_ed_visits(county, county_fips, year,
-                       condition, visit_rate, suppressed, source)
-                   VALUES (?, ?, ?, ?, ?, 0, 'MDHHS_state_baseline')""",
-                (name, fips, 2022, cond, rate),
-            )
-    # Mortality-style metrics → respiratory_mortality
-    mort_seeds = [
-        ("pneumonia_influenza",   b["pneumonia_influenza_mortality"]),
-        ("chemical_respiratory",  b["chemical_respiratory_mortality"]),
-        ("all_respiratory",       b["all_respiratory_mortality"]),
-    ]
-    for fips, name in county_lookup.items():
-        for cause, rate in mort_seeds:
-            cur.execute(
-                """INSERT INTO respiratory_mortality(county, county_fips, year,
-                       cause, death_count, death_rate, source)
-                   VALUES (?, ?, ?, ?, NULL, ?, 'MDHHS_state_baseline')""",
-                (name, fips, 2022, cause, rate),
-            )
-    conn.commit()
-
-
-def _seed_prevalence_baseline(conn, county_lookup: dict[str, str]) -> None:
-    """Apply the statewide MDHHS BRFS asthma prevalence to every county.
-
-    Per-county BRFS values are not publicly redistributable as a clean table;
-    we record the state baseline with the data_years tag so the UI can show
-    'baseline (state average)' rather than fabricated county values.
-    """
-    cur = conn.cursor()
-    for fips, name in county_lookup.items():
-        cur.execute(
-            """INSERT INTO respiratory_prevalence(county, county_fips, condition,
-                 prevalence_pct, data_years, age_group, source)
-               VALUES (?, ?, 'asthma', ?, '2012-2016', 'adult', 'MDHHS_state_baseline')""",
-            (name, fips, MI_STATEWIDE_BASELINE["adult_asthma_prevalence_pct"]),
-        )
-    conn.commit()
 
 
 # ---------- 8. Water quality (Water Quality Portal + watersheds + NAWQA) ----------
@@ -1570,478 +1243,6 @@ def load_watersheds(conn: sqlite3.Connection) -> int:
     conn.commit()
     return len(features)
 
-
-# ---------- 9. Cancer incidence / mortality (NCI State Cancer Profiles) ----------
-
-_SEX_PARAM = {"both": "0", "male": "1", "female": "2"}
-_STAGE_PARAM = {"all": "999", "late": "211"}
-
-
-def _find_cancer_csv(key: str, data_type: str, stage: str, code: str) -> Path | None:
-    """Look for a real per-county CSV the user exported from State Cancer
-    Profiles. Accepts several sensible filenames dropped in data/cancer/."""
-    dt = "incd" if data_type == "incidence" else "mort"
-    candidates = [
-        f"{key}_{data_type}_{stage}.csv",
-        f"{key}_{data_type}.csv" if stage == "all" else None,
-        f"{dt}_{code}_{stage}.csv",
-        f"{dt}_{code}.csv" if stage == "all" else None,
-    ]
-    for name in candidates:
-        if not name:
-            continue
-        p = CANCER_DATA_DIR / name
-        if p.exists() and p.stat().st_size > 200:
-            return p
-    return None
-
-
-def _f(v) -> float | None:
-    try:
-        s = str(v).strip().replace(",", "")
-        if s in ("", "*", "N/A", "NA", "—", "-", "**", "data not available",
-                 "Data not available", "#"):
-            return None
-        return float(s)
-    except (TypeError, ValueError):
-        return None
-
-
-def _clean_county_name(name: str) -> str:
-    """Strip NCI footnote markers and the 'County' suffix so names match the
-    geojson/counties table (e.g. 'Presque Isle County(2)' -> 'Presque Isle')."""
-    import re
-    n = re.sub(r"\(\d+\)\s*$", "", name.strip())        # trailing "(2)"
-    n = re.sub(r"\s+County\s*$", "", n, flags=re.I)       # " County"
-    return n.strip()
-
-
-def _parse_nci_csv(path: Path) -> dict:
-    """Parse a State Cancer Profiles county CSV.
-
-    The files wrap every field in quotes, lead with comment lines, and include
-    "United States" and state ("Michigan") summary rows mixed in with counties.
-    We locate columns by header keywords so the parser tolerates the small
-    layout differences between cancer types / incidence vs mortality.
-
-    Returns {"counties": [row, ...], "state_avg": float|None, "us_avg": float|None}.
-    """
-    text = path.read_text(encoding="utf-8", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    rows = [r for r in reader if r]
-
-    # Find the header row: the one that mentions FIPS and a Rate.
-    header_idx = -1
-    for i, r in enumerate(rows):
-        joined = " ".join(r).lower()
-        if "fips" in joined and "rate" in joined:
-            header_idx = i
-            break
-    if header_idx < 0:
-        raise ValueError("no header row with FIPS+Rate found")
-
-    header = [h.strip().lower() for h in rows[header_idx]]
-
-    def col(*keywords, default=None):
-        for idx, h in enumerate(header):
-            if all(k in h for k in keywords):
-                return idx
-        return default
-
-    i_fips = col("fips")
-    i_county = col("county") if col("county") is not None else 0
-    i_rate = col("age-adjusted", "rate")
-    if i_rate is None:
-        i_rate = col("rate")
-    i_lower = col("lower")
-    i_upper = col("upper")
-    i_rank = col("rank")
-    i_count = col("count")
-    i_trend = col("recent", "trend")
-    if i_trend is None:
-        i_trend = col("trend")
-    i_aapc = col("annual percent")
-    if i_aapc is None:
-        i_aapc = col("aapc")
-
-    def cell(row, idx):
-        if idx is None or idx >= len(row):
-            return ""
-        return row[idx].strip()
-
-    out = {"counties": [], "state_avg": None, "us_avg": None, "state_trend": None}
-    for r in rows[header_idx + 1:]:
-        fips = cell(r, i_fips).strip()
-        name = _clean_county_name(cell(r, i_county))
-        rate = _f(cell(r, i_rate))
-        trend = (cell(r, i_trend) or "").strip().lower() or None
-        # Summary rows are identified by their FIPS only — matching on name
-        # wrongly catches footnote lines like "Data for United States ...".
-        # US (SEER+NPCR) national summary row — FIPS 00000.
-        if fips in ("00000", "0", "00"):
-            out["us_avg"] = rate
-            continue
-        # Michigan statewide summary row — FIPS 26000.
-        if fips in ("26", "26000"):
-            out["state_avg"] = rate
-            out["state_trend"] = trend
-            continue
-        # County rows: 5-digit FIPS starting with 26, excluding the 26000 total.
-        digits = "".join(ch for ch in fips if ch.isdigit())
-        if len(digits) == 4:
-            digits = "26" + digits[-3:]
-        if not (len(digits) == 5 and digits.startswith("26") and digits != "26000"):
-            continue
-        raw_rate_cell = cell(r, i_rate)
-        suppressed = raw_rate_cell.strip() in ("*", "**", "") or rate is None
-        out["counties"].append({
-            "fips": digits,
-            "county": name,
-            "rate": rate,
-            "lower": _f(cell(r, i_lower)),
-            "upper": _f(cell(r, i_upper)),
-            "count": _f(cell(r, i_count)),
-            "rank": int(_f(cell(r, i_rank))) if _f(cell(r, i_rank)) is not None else None,
-            "trend": trend.strip().lower() if trend else None,
-            "aapc": _f(cell(r, i_aapc)),
-            "suppressed": 1 if suppressed else 0,
-        })
-    return out
-
-
-def _try_download_nci(key: str, code: str, sex: str, data_type: str,
-                      stage: str) -> Path | None:
-    """Best-effort live fetch. The rebuilt SCP site returns the empty HTML form
-    shell to non-browser clients, so this almost always returns None — we detect
-    the shell and skip. Kept so the loader honestly tries the live source first.
-    """
-    if data_type == "incidence":
-        url = NCI_INCIDENCE_URL.format(code=code, sex=sex, stage=_STAGE_PARAM[stage])
-    else:
-        url = NCI_MORTALITY_URL.format(code=code, sex=sex)
-    try:
-        raw = http_get(url, timeout=30)
-    except Exception:
-        return None
-    text = raw.decode("utf-8", errors="replace")
-    # Reject the HTML form shell / anything without county FIPS rows.
-    if "<html" in text.lower() or "26001" not in text and "fips" not in text.lower():
-        return None
-    CANCER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    dt = "incd" if data_type == "incidence" else "mort"
-    path = CANCER_DATA_DIR / f"{dt}_{code}_{stage}.live.csv"
-    path.write_bytes(raw)
-    return path
-
-
-def _insert_cancer_rows(cur, key, label, data_type, stage, parsed, county_lookup) -> int:
-    # Record the real Michigan + US averages from this file (all-stage only —
-    # that's the population the county cards compare against).
-    if stage == "all" and (parsed.get("state_avg") is not None
-                           or parsed.get("us_avg") is not None):
-        cur.execute(
-            """INSERT INTO cancer_reference(cancer_type, data_type, stage,
-                 mi_rate, us_rate, mi_trend)
-               VALUES (?,?,?,?,?,?)
-               ON CONFLICT(cancer_type, data_type, stage) DO UPDATE SET
-                 mi_rate=excluded.mi_rate, us_rate=excluded.us_rate,
-                 mi_trend=excluded.mi_trend""",
-            (key, data_type, stage, parsed.get("state_avg"),
-             parsed.get("us_avg"), parsed.get("state_trend")),
-        )
-    n = 0
-    for row in parsed["counties"]:
-        fips = row["fips"]
-        name = row["county"] or county_lookup.get(fips, "")
-        rural = "Urban" if name in URBAN_COUNTIES else "Rural"
-        cur.execute(
-            """INSERT INTO cancer_incidence(
-                 county, county_fips, cancer_type, cancer_label, stage,
-                 rate, rate_lower_ci, rate_upper_ci, avg_annual_count, ci_rank,
-                 recent_trend, trend_aapc, rural_urban, data_years, data_type,
-                 source, suppressed)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (name, fips, key, label, stage,
-             row["rate"], row["lower"], row["upper"], row["count"], row["rank"],
-             row["trend"], row["aapc"], rural, cancer_data.DATA_YEARS, data_type,
-             "NCI_State_Cancer_Profiles", row["suppressed"]),
-        )
-        n += 1
-    return n
-
-
-def _seed_cancer_baseline(cur, key, label, data_type, county_lookup) -> int:
-    """Seed every county with the Michigan statewide reference rate, flagged so
-    the UI shows uniform shading as a baseline — never a fake county signal."""
-    rate = cancer_data.statewide_rate(key, data_type)
-    if rate is None:
-        return 0
-    n = 0
-    for fips, name in county_lookup.items():
-        rural = "Urban" if name in URBAN_COUNTIES else "Rural"
-        cur.execute(
-            """INSERT INTO cancer_incidence(
-                 county, county_fips, cancer_type, cancer_label, stage,
-                 rate, rural_urban, data_years, data_type, source, suppressed)
-               VALUES (?,?,?,?,'all',?,?,?,?, 'NCI_state_baseline', 0)""",
-            (name, fips, key, label, rate, rural, cancer_data.DATA_YEARS, data_type),
-        )
-        n += 1
-    return n
-
-
-def _load_cancer_evidence(cur) -> int:
-    for e in cancer_data.CANCER_EVIDENCE:
-        cur.execute(
-            """INSERT INTO cancer_evidence(compound, cancer_type, evidence_level,
-                 iarc_classification, key_mechanism, key_studies, notes)
-               VALUES (?,?,?,?,?,?,?)""",
-            (e["compound"], e["cancer_type"], e["evidence_level"], e["iarc"],
-             e["mechanism"], e["studies"], e["notes"]),
-        )
-    return len(cancer_data.CANCER_EVIDENCE)
-
-
-def load_cancer_data(conn: sqlite3.Connection) -> tuple[int, int]:
-    """Populate cancer_incidence + cancer_evidence.
-
-    Priority per cancer/data_type/stage: (1) a real CSV in data/cancer/,
-    (2) a best-effort live NCI fetch, (3) the Michigan statewide baseline.
-    Returns (real_county_rows, baseline_rows).
-    """
-    log("Loading cancer incidence/mortality (NCI State Cancer Profiles)...")
-    cur = conn.cursor()
-    cur.execute("DELETE FROM cancer_incidence")
-    cur.execute("DELETE FROM cancer_evidence")
-    cur.execute("DELETE FROM cancer_reference")
-    conn.commit()
-
-    county_lookup = {fips: name for fips, name in _county_fips_list(conn)}
-    CANCER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    real_rows = 0
-    baseline_rows = 0
-    live_ok = 0
-    combos_real: set[tuple[str, str]] = set()
-
-    for c in cancer_data.CANCER_TYPES:
-        key, code, label = c["key"], c["nci_code"], c["label"]
-        sex = _SEX_PARAM[c["sex"]]
-        for data_type in ("incidence", "mortality"):
-            stages = ["all"]
-            if data_type == "incidence" and c.get("has_late_stage"):
-                stages.append("late")
-            for stage in stages:
-                parsed = None
-                local = _find_cancer_csv(key, data_type, stage, code)
-                if local:
-                    try:
-                        parsed = _parse_nci_csv(local)
-                        log(f"  {key}/{data_type}/{stage}: parsed {local.name}", level="ok")
-                    except Exception as e:
-                        log(f"  parse failed {local.name}: {e}", level="warn")
-                        parsed = None
-                if parsed is None:
-                    fetched = _try_download_nci(key, code, sex, data_type, stage)
-                    if fetched:
-                        try:
-                            parsed = _parse_nci_csv(fetched)
-                            live_ok += 1
-                        except Exception:
-                            parsed = None
-                if parsed and parsed["counties"]:
-                    n = _insert_cancer_rows(cur, key, label, data_type, stage,
-                                            parsed, county_lookup)
-                    real_rows += n
-                    if stage == "all":
-                        combos_real.add((key, data_type))
-                elif stage == "all":
-                    baseline_rows += _seed_cancer_baseline(
-                        cur, key, label, data_type, county_lookup)
-    conn.commit()
-
-    ev = _load_cancer_evidence(cur)
-    conn.commit()
-
-    have_real = len(combos_real) > 0
-    note = (
-        f"Real county CSVs loaded for {len(combos_real)} cancer/measure combos."
-        if have_real else
-        "No county-level CSVs found; every county seeded with the Michigan "
-        "statewide 2018-2022 reference rate (source=NCI_state_baseline). The "
-        "SCP export URL is JS/session-gated and returns no CSV to a plain HTTP "
-        "client — drop per-county exports in data/cancer/ to populate real rates."
-    )
-    record_source(
-        conn, "nci_scp",
-        "NCI / CDC State Cancer Profiles — county cancer incidence & mortality",
-        NCI_SCP_BASE,
-        "ok" if have_real else "baseline",
-        real_rows if have_real else baseline_rows,
-        note,
-    )
-    record_source(
-        conn, "mcsp",
-        "Michigan Cancer Surveillance Program (MCSP) — MDHHS Vital Records & Health Statistics",
-        "https://www.michigan.gov/mdhhs/inside-mdhhs/statisticsreports/mcsp",
-        "skipped", 0,
-        "State cancer registry feeding NPCR/State Cancer Profiles; county tables "
-        "are portal/PDF only, not a bulk feed.",
-    )
-    record_source(
-        conn, "cdc_npcr",
-        "CDC National Program of Cancer Registries (NPCR)",
-        "https://www.cdc.gov/cancer/npcr/", "skipped", 0,
-        "Source registry program behind U.S. Cancer Statistics / State Cancer Profiles.",
-    )
-    record_source(
-        conn, "nci_seer",
-        "NCI SEER — Surveillance, Epidemiology, and End Results Program",
-        "https://seer.cancer.gov/", "skipped", 0,
-        "National incidence/survival source; county extracts require SEER*Stat access.",
-    )
-    record_source(
-        conn, "cdc_wonder_cancer",
-        "CDC WONDER — Underlying Cause of Death (cancer ICD-10 C-codes)",
-        "https://wonder.cdc.gov/", "skipped", 0,
-        "Longer mortality trend series; query-builder / data-use-agreement gated.",
-    )
-    record_source(
-        conn, "ahs",
-        "Agricultural Health Study (NCI / NIEHS / EPA) — pesticide-cancer evidence base",
-        "https://aghealth.nih.gov/", "ok", ev,
-        "Cohort study underpinning the compound-cancer evidence table.",
-    )
-    record_source(
-        conn, "iarc_monographs",
-        "IARC Monographs on the Evaluation of Carcinogenic Risks to Humans",
-        "https://monographs.iarc.who.int/", "ok", ev,
-        "Carcinogenicity classifications (e.g. glyphosate 2A) shown in the evidence modal.",
-    )
-    conn.commit()
-    log(f"  cancer: {real_rows} real county rows, {baseline_rows} baseline rows, "
-        f"{ev} evidence rows (live_ok={live_ok})", level="ok")
-    return real_rows, baseline_rows
-
-
-def _matrix_compound_totals(conn: sqlite3.Connection) -> dict[str, dict[str, float]]:
-    """Per-county summed kg (latest year) for each compound in the matrix."""
-    cur = conn.cursor()
-    latest = cur.execute("SELECT MAX(year) FROM pesticide_use").fetchone()[0]
-    out: dict[str, dict[str, float]] = {}
-    if latest is None:
-        return out
-    for comp in cancer_data.MATRIX_COMPOUNDS:
-        for r in cur.execute(
-            """SELECT county_fips AS f,
-                      SUM((epest_low_kg + epest_high_kg)/2.0) AS k
-                 FROM pesticide_use
-                WHERE year = ? AND UPPER(compound) LIKE ?
-                GROUP BY county_fips""",
-            (latest, comp + "%"),
-        ):
-            out.setdefault(r["f"], {})[comp] = r["k"]
-    return out
-
-
-def _quartile_means(xs: list[float], ys: list[float]) -> tuple[float | None, float | None]:
-    """Mean y for the top-25% and bottom-25% of counties ranked by x."""
-    pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
-    if len(pairs) < 4:
-        return None, None
-    pairs.sort(key=lambda p: p[0])
-    q = max(1, len(pairs) // 4)
-    bottom = [p[1] for p in pairs[:q]]
-    top = [p[1] for p in pairs[-q:]]
-    return (sum(top) / len(top)) if top else None, \
-           (sum(bottom) / len(bottom)) if bottom else None
-
-
-def build_cancer_correlations(conn: sqlite3.Connection) -> int:
-    """Pre-compute pesticide<->cancer correlations for each cancer type, across
-    category aggregates (all/herb/insect/fung) x cohorts (all/exclude_urban/
-    rural_only), plus the per-compound matrix cells. When only the statewide
-    baseline is loaded there is no county variation, so rows are stored with
-    NULL stats and an explanatory note rather than a fake r=0."""
-    cur = conn.cursor()
-    cur.execute("DELETE FROM cancer_pesticide_correlation")
-
-    pest = {r["county_fips"]: r for r in cur.execute("SELECT * FROM correlation_analysis")}
-    comp_tot = _matrix_compound_totals(conn)
-    name_by_fips = {fips: name for fips, name in _county_fips_list(conn)}
-
-    cat_fields = [
-        ("all", "total_pesticide_kg"),
-        ("herbicide", "herbicide_kg"),
-        ("insecticide", "insecticide_kg"),
-        ("fungicide", "fungicide_kg"),
-    ]
-
-    def store(ck, dt, compound, category, xs, ys, cohort, baseline):
-        pr = stats.pearson(xs, ys)
-        sp = stats.spearman(xs, ys)
-        qt, qb = _quartile_means(xs, ys)
-        note = ("statewide baseline loaded — county-level cancer variation not "
-                "available; correlation pending real NCI county export"
-                if baseline else None)
-        cur.execute(
-            """INSERT INTO cancer_pesticide_correlation(
-                 cancer_type, data_type, pesticide_compound, pesticide_category,
-                 pearson_r, pearson_p, spearman_r, spearman_p, slope, intercept,
-                 n_counties, mean_rate_top_quartile, mean_rate_bottom_quartile,
-                 cohort, notes)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (ck, dt, compound, category,
-             None if baseline else pr["r"], None if baseline else pr["p_value"],
-             None if baseline else sp["rho"], None if baseline else sp["p_value"],
-             None if baseline else pr["slope"], None if baseline else pr["intercept"],
-             pr["n"], qt, qb, cohort, note),
-        )
-
-    inserted = 0
-    for c in cancer_data.CANCER_TYPES:
-        ck = c["key"]
-        dt = "incidence"
-        crates: dict[str, float] = {}
-        baseline = True
-        for r in cur.execute(
-            """SELECT county_fips, rate, source FROM cancer_incidence
-                WHERE cancer_type=? AND data_type=? AND stage='all'""",
-            (ck, dt),
-        ):
-            if r["rate"] is not None:
-                crates[r["county_fips"]] = r["rate"]
-            if r["source"] != "NCI_state_baseline":
-                baseline = False
-
-        for category, field in cat_fields:
-            for cohort in ("all", "exclude_urban", "rural_only"):
-                xs, ys = [], []
-                for fips, crate in crates.items():
-                    name = name_by_fips.get(fips, "")
-                    if cohort in ("exclude_urban", "rural_only") and name in URBAN_COUNTIES:
-                        continue
-                    p = pest.get(fips)
-                    if not p or p[field] is None:
-                        continue
-                    xs.append(p[field])
-                    ys.append(crate)
-                store(ck, dt, None, category, xs, ys, cohort, baseline)
-                inserted += 1
-
-        for compound in cancer_data.MATRIX_COMPOUNDS:
-            xs, ys = [], []
-            for fips, crate in crates.items():
-                kg = comp_tot.get(fips, {}).get(compound)
-                if kg is None:
-                    continue
-                xs.append(kg)
-                ys.append(crate)
-            store(ck, dt, compound, None, xs, ys, "all", baseline)
-            inserted += 1
-
-    conn.commit()
-    return inserted
 
 
 # ---------- 10. Industrial contamination (EPA NPL + compiled sites) ----------
@@ -4878,17 +4079,10 @@ def run() -> int:
     log(f"NASS crop_acreage rows: {nass_rows:,}")
 
     record_reference_sources(conn)
-    resp_rows = load_respiratory_data(conn)
-    log(f"Respiratory rows loaded: {resp_rows}", level="ok")
     wq_sites, wq_results = load_water_quality(conn)
     log(f"Water-quality: {wq_sites:,} sites, {wq_results:,} results", level="ok")
     corr_rows = build_correlation_table(conn)
     log(f"correlation_analysis rows: {corr_rows}", level="ok")
-
-    cancer_real, cancer_base = load_cancer_data(conn)
-    log(f"cancer rows: {cancer_real} real + {cancer_base} baseline", level="ok")
-    cancer_corr = build_cancer_correlations(conn)
-    log(f"cancer_pesticide_correlation rows: {cancer_corr}", level="ok")
 
     contam_rows = load_contamination_data(conn)
     log(f"contamination_sites rows: {contam_rows}", level="ok")
@@ -4904,11 +4098,8 @@ def run() -> int:
     cur = conn.cursor()
     for t in ("counties", "places", "pesticide_use", "pesticide_categories",
               "pesticide_use_by_crop", "crop_acreage", "data_sources",
-              "respiratory_ed_visits", "respiratory_hospitalizations",
-              "respiratory_prevalence", "respiratory_mortality",
               "water_quality_sites", "water_quality_results", "watersheds",
-              "correlation_analysis", "cancer_incidence",
-              "cancer_pesticide_correlation", "cancer_evidence",
+              "correlation_analysis",
               "contamination_sites", "wind_data",
               "tri_facility", "tri_release"):
         n = cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]

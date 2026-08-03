@@ -81,39 +81,6 @@
       matchMain: false,      // mirror main-map compound filter
       compounds: [],         // dropdown options
     },
-    resp: {
-      enabled: false,              // checkbox state
-      metric: 'combined',          // dropdown selection
-      meta: null,                  // {label, units, county_level, icd10, ...}
-      byFips: new Map(),
-      breaks: [],
-      countyLevel: false,
-      hoverLabel: '',
-      scatterPest: 'total',
-      scatterResp: 'asthma_ed',
-      excludeWayne: false,
-      rankings: [],
-      sortKey: 'rank_pest',
-      sortDir: 'asc',
-    },
-    cancer: {
-      enabled: false,              // map-overlay checkbox
-      type: 'nhl',                 // selected cancer type (choropleth + card default)
-      dataType: 'incidence',       // 'incidence' | 'mortality'
-      byFips: new Map(),
-      breaks: [],
-      countyLevel: false,
-      meta: null,
-      hoverLabel: '',
-      // correlation tab
-      scatterCancer: 'nhl',
-      scatterPest: 'all',
-      scatterDtype: 'incidence',
-      excludeUrban: false,
-      ruralOnly: false,
-      controlSmoking: false,
-      types: [],                   // meta.cancer_types
-    },
     contam: {
       loaded: false,
       sites: [],                   // all sites from /api/contamination/sites
@@ -678,20 +645,6 @@
   const NO_DATA = '#26303f';
   function fillColorForActive(fips) {
     switch (state.activeChoropleth) {
-      case 'resp': {
-        const c = state.resp.byFips.get(fips);
-        if (!c || c.value == null) return NO_DATA;
-        return state.resp.countyLevel
-          ? (respColor(c.value, state.resp.breaks) || NO_DATA)
-          : RESP_PALETTE[5];
-      }
-      case 'cancer': {
-        const c = state.cancer.byFips.get(fips);
-        if (!c || c.value == null) return NO_DATA;
-        return state.cancer.countyLevel
-          ? (cancerColor(c.value, state.cancer.breaks) || NO_DATA)
-          : CANCER_PALETTE[5];
-      }
       case 'contam_density': {
         const c = state.contam.densityByFips.get(fips);
         const v = c ? c.value : 0;
@@ -904,23 +857,6 @@
     switch (state.activeChoropleth) {
       case 'none':
         return '';   // county name only — coloring is off
-      case 'resp': {
-        const c = state.resp.byFips.get(fips);
-        const base = (state.resp.meta && !state.resp.countyLevel) ? ' · MI baseline' : '';
-        const units = (state.resp.meta && state.resp.meta.units) ? ` ${state.resp.meta.units}` : '';
-        return (c && c.value != null)
-          ? `<div><span class="muted">${state.resp.hoverLabel}:</span> <span class="r-v">${c.value.toFixed(1)}</span><span class="muted">${units}</span>${base}</div>`
-          : '<div class="muted">No data</div>';
-      }
-      case 'cancer': {
-        const c = state.cancer.byFips.get(fips);
-        const base = (state.cancer.meta && state.cancer.meta.is_baseline) ? ' · MI baseline' : '';
-        const units = (state.cancer.meta && state.cancer.meta.units) ? ` ${state.cancer.meta.units}` : ' per 100,000';
-        if (c && c.value != null) {
-          return `<div><span class="muted">${state.cancer.hoverLabel}:</span> <span class="v">${c.value.toFixed(1)}</span><span class="muted">${units}</span>${base}</div>`;
-        }
-        return `<div class="muted">${c && c.suppressed ? 'Suppressed (&lt;16 cases)' : 'No data'}</div>`;
-      }
       case 'contam_density': {
         const c = state.contam.densityByFips.get(fips);
         return (c && c.value)
@@ -987,8 +923,6 @@
   function activeChoroplethLabel() {
     switch (state.activeChoropleth) {
       case 'none':   return 'None (no county coloring)';
-      case 'resp':   return `Respiratory — ${respMetricLabel(state.resp.metric)}`;
-      case 'cancer': return `Cancer — ${cancerTypeLabel(state.cancer.type)} (${state.cancer.dataType})`;
       case 'contam_density': return 'Contamination site density';
       case 'tri':    return `TRI toxic releases — ${triMetricLabel(state.tri.metric).toLowerCase()}`;
       case 'landfill_density': return 'Landfill density';
@@ -1012,15 +946,6 @@
     const cat = { all: 'all compounds', herbicide: 'herbicides', insecticide: 'insecticides',
       fungicide: 'fungicides', growth_regulator: 'growth regulators', other: 'other / fumigants' };
     return cat[state.category] || 'all compounds';
-  }
-  function respMetricLabel(k) {
-    const sel = $('resp-metric');
-    const o = sel && sel.querySelector(`option[value="${k}"]`);
-    return o ? o.textContent : k;
-  }
-  function cancerTypeLabel(k) {
-    const t = (state.cancer.types || []).find((x) => x.key === k);
-    return t ? t.label : k;
   }
 
   // A simple low→high swatch strip (used by layers whose units aren't lbs).
@@ -1064,18 +989,6 @@
           : 'lbs applied (lower → higher)';
         break;
       }
-      case 'resp':
-        paletteStrip(el, RESP_PALETTE);
-        note.textContent = state.resp.meta
-          ? `${state.resp.hoverLabel} · ${state.resp.meta.units} (lower → higher)`
-          : 'respiratory rate (lower → higher)';
-        break;
-      case 'cancer':
-        paletteStrip(el, CANCER_PALETTE);
-        note.textContent = state.cancer.meta
-          ? `${state.cancer.meta.label} · ${state.cancer.meta.units} (lower → higher)`
-          : 'cancer rate (lower → higher)';
-        break;
       case 'contam_density':
         paletteStrip(el, CONTAM_PALETTE);
         note.textContent = 'contamination sites per county (lower → higher)';
@@ -1214,8 +1127,6 @@
   function layerPeekLabel() {
     switch (state.activeChoropleth) {
       case 'none':           return null;
-      case 'resp':           return 'respiratory rates';
-      case 'cancer':         return 'cancer rates';
       case 'contam_density': return 'contamination-site counts';
       case 'tri':            return 'toxic-release amounts';
       case 'landfill_density': return 'landfill counts';
@@ -1255,8 +1166,6 @@
     if (!which) return;
     state.activeChoropleth = which;
     // Keep the legacy per-layer flags in sync (county cards + meta text use them).
-    state.resp.enabled       = (which === 'resp');
-    state.cancer.enabled     = (which === 'cancer');
     state.contam.showDensity = (which === 'contam_density');
 
     // Show the TRI pathway sub-options only while the TRI choropleth is active.
@@ -1265,8 +1174,6 @@
 
     loading(true);
     try {
-      if (which === 'resp')  await loadRespData();  else updateRespMeta(null);
-      if (which === 'cancer') await loadCancerData(); else updateCancerMeta(null);
       if (which === 'contam_density') await loadContamDensity();
       if (which === 'tri') await loadTriDensity(state.tri.metric);
       if (which === 'landfill_density') await loadLandfillDensity();
@@ -1551,157 +1458,6 @@
       o.textContent = `${c.compound} (${c.detections} det${c.exceedances ? ', ' + c.exceedances + ' exc.' : ''})`;
       sel.appendChild(o);
     }
-  }
-
-  // ---------- Respiratory choropleth overlay ----------
-  // Blue-purple palette (distinct from green/red).
-  const RESP_PALETTE = ['#202b4a', '#2e4382', '#3f5cad', '#5474c9', '#7791e1',
-                        '#9da9f3', '#bfb4f0', '#d3a8e0', '#c97fb5', '#a85998'];
-
-  function respColor(v, breaks) {
-    if (v == null) return null;
-    for (let i = 0; i < breaks.length; i++) if (v <= breaks[i]) return RESP_PALETTE[i];
-    return RESP_PALETTE[RESP_PALETTE.length - 1];
-  }
-
-  // Load respiratory county data into state (the shared base layer paints it
-  // when 'resp' is the active choropleth). No separate map overlay.
-  async function loadRespData() {
-    const data = await api('/api/respiratory/counties', { metric: state.resp.metric });
-    state.resp.meta = data;
-    state.resp.byFips.clear();
-    const vals = [];
-    for (const c of data.counties) {
-      state.resp.byFips.set(c.fips, c);
-      if (c.value != null) vals.push(c.value);
-    }
-    state.resp.hoverLabel = data.label;
-    state.resp.countyLevel = data.county_level;
-    state.resp.breaks = data.county_level ? computeBreaks(vals, RESP_PALETTE.length) : [];
-    updateRespMeta(data);
-  }
-
-  function updateRespMeta(data) {
-    const el = $('resp-meta');
-    if (!state.resp.enabled || !data) { el.textContent = '—'; return; }
-    const valid = data.counties.filter((c) => c.value != null).length;
-    const note  = data.county_level
-      ? `${valid}/${data.counties.length} counties · ${data.units}`
-      : `MI statewide baseline (no county variation) · ${data.units}`;
-    const icd = data.icd10 ? ` · ${data.icd10}` : '';
-    el.textContent = note + icd;
-  }
-
-  // ---------- Cancer choropleth overlay ----------
-  // Orange-red heat palette (distinct from green=pesticide, blue-purple=resp,
-  // magenta=contamination). Low → high = pale orange → deep red.
-  const CANCER_PALETTE = ['#fee0b6', '#fdc98a', '#fcae6b', '#fb9350', '#f5793b',
-                          '#e85d2f', '#d6431f', '#b82e12', '#94210c', '#6b1508'];
-
-  function cancerColor(v, breaks) {
-    if (v == null) return null;
-    for (let i = 0; i < breaks.length; i++) if (v <= breaks[i]) return CANCER_PALETTE[i];
-    return CANCER_PALETTE[CANCER_PALETTE.length - 1];
-  }
-
-  // Load cancer county data into state; the shared base layer paints it when
-  // 'cancer' is the active choropleth.
-  async function loadCancerData() {
-    const data = await api('/api/cancer/counties', {
-      type: state.cancer.type, data_type: state.cancer.dataType,
-    });
-    state.cancer.meta = data;
-    state.cancer.byFips.clear();
-    const vals = [];
-    for (const c of data.counties) {
-      state.cancer.byFips.set(c.fips, c);
-      if (c.value != null) vals.push(c.value);
-    }
-    state.cancer.hoverLabel = `${data.label} (${data.data_type})`;
-    state.cancer.countyLevel = data.county_level;
-    state.cancer.breaks = data.county_level ? computeBreaks(vals, CANCER_PALETTE.length) : [];
-    updateCancerMeta(data);
-  }
-
-  function updateCancerMeta(data) {
-    const el = $('cancer-meta');
-    if (!state.cancer.enabled || !data) { el.textContent = '—'; return; }
-    const valid = data.counties.filter((c) => c.value != null).length;
-    const supp = data.counties.filter((c) => c.suppressed).length;
-    const base = data.is_baseline ? ' · MI statewide baseline' : '';
-    const mi = data.mi_rate != null ? ` · MI ${data.mi_rate}` : '';
-    const suppTxt = supp ? ` · ${supp} suppressed` : '';
-    el.textContent = `${valid}/${data.counties.length} counties · ${data.units}${mi}${suppTxt}${base}`;
-  }
-
-  // ---------- Cancer county card (in the county detail panel) ----------
-  function trendIcon(t) {
-    if (t === 'rising')  return '<span class="trend up">▲ rising</span>';
-    if (t === 'falling') return '<span class="trend down">▼ falling</span>';
-    if (t === 'stable')  return '<span class="trend flat">■ stable</span>';
-    return '<span class="muted">—</span>';
-  }
-
-  function renderCountyCancerCard(cancer) {
-    const tbody = document.querySelector('#county-cancer-table tbody');
-    const note = $('county-cancer-note');
-    const ru = $('county-cancer-ru');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    if (!cancer || !cancer.metrics) {
-      note.textContent = 'No cancer data.';
-      return;
-    }
-    ru.textContent = cancer.rural_urban ? `· ${cancer.rural_urban}` : '';
-    if (cancer.rural_urban) {
-      ru.setAttribute('data-tip', 'Urban/rural classification. Rural agricultural counties are where pesticide exposure is more likely a factor vs urban counties where industrial pollution and lifestyle factors dominate.');
-    } else {
-      ru.removeAttribute('data-tip');
-    }
-    for (const m of cancer.metrics) {
-      const tr = document.createElement('tr');
-      if (m.is_top20) tr.classList.add('top20');
-      const rate = m.suppressed || m.rate == null
-        ? '<span class="muted" title="Suppressed (<16 cases)">suppressed</span>'
-        : m.rate.toFixed(1);
-      let cmp = '—', cmpClass = '';
-      if (m.pct_vs_state != null) {
-        const arrow = m.pct_vs_state > 0 ? '▲' : (m.pct_vs_state < 0 ? '▼' : '·');
-        const sign = m.pct_vs_state > 0 ? '+' : '';
-        cmp = `${arrow} ${sign}${m.pct_vs_state.toFixed(0)}%`;
-        cmpClass = m.pct_vs_state > 0 ? 'high' : (m.pct_vs_state < 0 ? 'low' : '');
-      }
-      const us = m.us_rate != null ? m.us_rate.toFixed(1) : '—';
-      tr.innerHTML =
-        `<td>${m.label}${m.is_top20 ? ' <span class="top20-tag" data-tip="This county ranks in the top 20% statewide for this cancer type.">top 20%</span>' : ''}</td>` +
-        `<td class="num val">${rate}</td>` +
-        `<td class="num cmp ${cmpClass}">${cmp}</td>` +
-        `<td class="num muted">${us}</td>` +
-        `<td class="num trend-cell">${trendIcon(m.trend)}</td>`;
-      tbody.appendChild(tr);
-    }
-    note.textContent = `Age-adjusted per 100,000, ${cancer.data_years}. ` +
-      '▲/▼ = vs Michigan average. "vs US" is the national (SEER+NPCR) rate.';
-  }
-
-  // ---------- Cancer type dropdowns ----------
-  function populateCancerDropdowns() {
-    const types = state.meta.cancer_types || [];
-    state.cancer.types = types;
-    const def = state.meta.cancer_default || 'nhl';
-    state.cancer.type = def;
-    state.cancer.scatterCancer = def;
-    const fill = (sel) => {
-      sel.innerHTML = '';
-      for (const t of types) {
-        const o = document.createElement('option');
-        o.value = t.key; o.textContent = t.label;
-        if (t.key === def) o.selected = true;
-        sel.appendChild(o);
-      }
-    };
-    fill($('cancer-type'));
-    fill($('cancer-scatter-cancer'));
   }
 
   // ---------- composition trend chart (statewide + county) ----------
@@ -2292,23 +2048,6 @@
     const card2 = $('county-stat-2');
     const showCard2 = (on) => { if (card2) card2.style.display = on ? '' : 'none'; };
     switch (state.activeChoropleth) {
-      case 'resp': {
-        const c = state.resp.byFips.get(fips);
-        const units = (state.resp.meta && state.resp.meta.units) || 'rate';
-        v1.textContent = (c && c.value != null) ? c.value.toFixed(1) : '—';
-        l1.textContent = `${state.resp.hoverLabel || 'Respiratory'} (${units})`;
-        showCard2(false);
-        break;
-      }
-      case 'cancer': {
-        const c = state.cancer.byFips.get(fips);
-        const units = (state.cancer.meta && state.cancer.meta.units) || 'per 100,000';
-        v1.textContent = (c && c.value != null) ? c.value.toFixed(1)
-          : (c && c.suppressed ? 'N/A' : '—');
-        l1.textContent = `${cancerTypeLabel(state.cancer.type)} · ${state.cancer.dataType} (${units})`;
-        showCard2(false);
-        break;
-      }
       case 'contam_density': {
         const c = state.contam.densityByFips.get(fips);
         v1.textContent = (c && c.value) ? String(c.value) : '0';
@@ -2377,42 +2116,6 @@
     renderCountyHeadline(fips, data);
     $('county-inspector').href = data.mdard_inspector_url;
 
-    // Respiratory comparison table — one row per metric.
-    const r = data.respiratory || {};
-    const tbody = document.querySelector('#county-resp-table tbody');
-    tbody.innerHTML = '';
-    for (const m of (r.metrics || [])) {
-      const tr = document.createElement('tr');
-      if (m.is_baseline_only) tr.classList.add('baseline');
-      const val = m.value == null ? '—' : `${m.value.toFixed(1)} ${m.units}`;
-      const pct = m.pct_vs_state;
-      let cmp = '';
-      let cmpClass = '';
-      if (pct == null) {
-        cmp = m.is_baseline_only ? '<span class="baseline-tag">MI baseline</span>' : '—';
-      } else {
-        const arrow = pct > 0 ? '▲' : (pct < 0 ? '▼' : '·');
-        const sign = pct > 0 ? '+' : '';
-        cmp = `${arrow} ${sign}${pct.toFixed(0)}%`;
-        cmpClass = pct > 0 ? 'high' : (pct < 0 ? 'low' : '');
-      }
-      tr.innerHTML =
-        `<td>${m.label}</td>` +
-        `<td class="num val">${val}</td>` +
-        `<td class="num cmp ${cmpClass}">${cmp}</td>`;
-      tbody.appendChild(tr);
-    }
-    const noteParts = [];
-    noteParts.push(r.is_urban
-      ? 'Urban county — air quality, density, smoking, industrial emissions dominate.'
-      : 'Rural county.');
-    if (r.asthma_prevalence_pct != null) {
-      noteParts.push(`Adult asthma prevalence (MI BRFS baseline): ${r.asthma_prevalence_pct.toFixed(1)}%.`);
-    }
-    $('county-resp-note').textContent = noteParts.join(' ');
-
-    // Cancer incidence card
-    renderCountyCancerCard(data.cancer);
     // Industrial contamination list
     renderCountyContamination(data.contamination);
     // Landfills & waste facilities rollup
@@ -5315,10 +5018,8 @@
       refreshAll();
     });
 
-    // segments — bind both (estimate + normalize). Skip the cancer measure
-    // segment, which has its own handler below.
+    // segments — bind both (estimate + normalize).
     document.querySelectorAll('.panel .seg').forEach((seg) => {
-      if (seg.id === 'seg-cancer-dtype') return;
       seg.querySelectorAll('button').forEach((b) => {
         b.addEventListener('click', () => {
           seg.querySelectorAll('button').forEach((x) => x.classList.remove('active'));
@@ -5459,34 +5160,6 @@
       const cropClear = $('cdl-crop-clear');
       if (cropClear) cropClear.addEventListener('click', () => setCdlCrop(null));
     }
-
-    // Respiratory metric — reloads the fill when respiratory is active.
-    $('resp-metric').addEventListener('change', (e) => {
-      state.resp.metric = e.target.value;
-      if (state.activeChoropleth === 'resp') setActiveChoropleth('resp');
-      else updateActiveIndicator();
-    });
-
-    // Cancer type / measure — reload the fill when cancer is active.
-    $('cancer-type').addEventListener('change', (e) => {
-      state.cancer.type = e.target.value;
-      if (state.activeChoropleth === 'cancer') setActiveChoropleth('cancer');
-      else updateActiveIndicator();
-    });
-    document.querySelectorAll('#seg-cancer-dtype button').forEach((b) => {
-      b.addEventListener('click', () => {
-        document.querySelectorAll('#seg-cancer-dtype button').forEach((x) => x.classList.remove('active'));
-        b.classList.add('active');
-        state.cancer.dataType = b.dataset.val;
-        if (state.activeChoropleth === 'cancer') setActiveChoropleth('cancer');
-        else updateActiveIndicator();
-      });
-    });
-    $('cancer-evidence-btn').addEventListener('click', openCancerEvidence);
-    $('cancer-evidence-close').addEventListener('click', () => hide($('cancer-evidence-modal')));
-    $('cancer-evidence-modal').addEventListener('click', (e) => {
-      if (e.target.id === 'cancer-evidence-modal') hide($('cancer-evidence-modal'));
-    });
 
     // Industrial contamination overlays (markers + impact zones stack freely)
     $('contam-sites').addEventListener('change', async (e) => {
@@ -6532,13 +6205,6 @@
       + `not a live spray-date feed, and not a complete record of all spraying.</p>${body}</div>`;
   }
 
-  function _pctSpan(pct) {
-    if (pct == null) return '';
-    const dir = pct > 0 ? 'above' : pct < 0 ? 'below' : 'at';
-    const cls = pct > 0 ? 'hi' : pct < 0 ? 'lo' : '';
-    return `<span class="rpt-vs ${cls}">${Math.abs(pct)}% ${dir} state avg</span>`;
-  }
-
   function _countyContextHtml(ctx, county) {
     const p = ctx.pesticide || {};
     const rows = [];
@@ -6547,17 +6213,6 @@
       + `${p.per_acre_lbs != null ? ` · ${p.per_acre_lbs} lbs/cropland acre` : ''}`
       + `${p.statewide_rank ? ` · rank #${p.statewide_rank} of ${p.counties_ranked}` : ''}</span>`
       + `<div class="rpt-cc-note muted small">${_rEsc(p.note || '')}</div></div>`);
-    if (ctx.cancer_nhl) {
-      const c = ctx.cancer_nhl;
-      rows.push(`<div class="rpt-cc"><span class="k">${_rEsc(c.label)}</span>`
-        + `<span class="v">${c.suppressed ? 'suppressed (too few cases to report)'
-          : `${c.county_rate}/100k vs ${c.state_rate}/100k state`} ${_pctSpan(c.pct_vs_state)}</span></div>`);
-    }
-    if (ctx.respiratory_asthma) {
-      const r = ctx.respiratory_asthma;
-      rows.push(`<div class="rpt-cc"><span class="k">${_rEsc(r.label)} (${r.year})</span>`
-        + `<span class="v">${r.county_rate} vs ${r.state_rate} state ${_pctSpan(r.pct_vs_state)}</span></div>`);
-    }
     const dn = ctx.density || {};
     rows.push(`<div class="rpt-cc"><span class="k">Documented sites in county</span>`
       + `<span class="v">${dn.contamination_sites || 0} contamination (${dn.npl_sites || 0} Superfund NPL) · `
@@ -6763,7 +6418,7 @@
 
   // Activate one of the top-level views. Central so both button clicks, #hash
   // deep links, and boot-time restoration go through the same path.
-  const VIEWS = ['map', 'explore', 'respiratory', 'cancer'];
+  const VIEWS = ['map'];
   function switchView(v, updateHash) {
     if (!VIEWS.includes(v)) v = 'map';
     // Leaving the map view — dismiss any open mobile bottom sheets.
@@ -6772,538 +6427,10 @@
       x.classList.toggle('active', x.dataset.view === v));
     VIEWS.forEach((name) =>
       $('view-' + name).classList.toggle('hidden', name !== v));
-    if (v === 'explore') renderExplore();
-    else if (v === 'respiratory') renderRespiratory();
-    else if (v === 'cancer') renderCancer();
-    else if (state.map) state.map.invalidateSize();
+    if (state.map) state.map.invalidateSize();
     if (updateHash) {
       try { history.replaceState(null, '', v === 'map' ? '#' : '#' + v); } catch (e) {}
     }
-  }
-
-  // ---------- Unified "Explore correlations" view ----------
-  const fmtR = (v) => (v == null ? '—' : Number(v).toFixed(3));
-  const fmtP = (v) => (v == null ? '—'
-    : v < 0.001 ? Number(v).toExponential(1) : Number(v).toFixed(3));
-
-  async function renderExplore() {
-    const st = state.explore;
-    if (!st.vars) {
-      st.vars = await api('/api/explore/variables');
-      fillExploreSelect($('explore-x'), st.vars.x, st.vars.x_default);
-      fillExploreSelect($('explore-y'), st.vars.y, st.vars.y_default);
-    }
-    if (!st.wired) {
-      st.wired = true;
-      ['explore-x', 'explore-y', 'explore-rural', 'explore-exclude-missing']
-        .forEach((id) => $(id).addEventListener('change', refreshExplore));
-    }
-    await refreshExplore();
-  }
-
-  function fillExploreSelect(sel, items, def) {
-    sel.innerHTML = '';
-    const groups = {};
-    const order = [];
-    for (const it of items) {
-      if (!groups[it.group]) { groups[it.group] = []; order.push(it.group); }
-      groups[it.group].push(it);
-    }
-    for (const g of order) {
-      const og = document.createElement('optgroup');
-      og.label = g;
-      for (const it of groups[g]) {
-        const o = document.createElement('option');
-        o.value = it.key;
-        o.textContent = it.label;
-        og.appendChild(o);
-      }
-      sel.appendChild(og);
-    }
-    if (def) sel.value = def;
-  }
-
-  async function refreshExplore() {
-    const x = $('explore-x').value;
-    const y = $('explore-y').value;
-    const cohort = $('explore-rural').checked ? 'rural' : 'all';
-    const excludeMissing = $('explore-exclude-missing').checked;
-    const d = await api('/api/explore', {
-      x, y, cohort, exclude_missing: excludeMissing ? 1 : 0,
-    });
-
-    const xFmt = d.x.is_count ? PMCharts.fmtCount : PMCharts.fmtLbs;
-    const yFmt = PMCharts.fmtNum;
-    const xLbl = d.x.label, yLbl = d.y.label;
-
-    // Split dots by urban/rural for a clearly-labelled legend.
-    const rural = [], urban = [];
-    for (const p of d.points) {
-      const pt = { x: p.x, y: p.y, label: p.county, ur: p.is_urban ? 'Urban' : 'Rural' };
-      (p.is_urban ? urban : rural).push(pt);
-    }
-    const datasets = [
-      { label: `Rural counties (${rural.length})`, data: rural,
-        backgroundColor: '#3fb950', pointRadius: 6, pointHoverRadius: 9 },
-      { label: `Urban counties (${urban.length})`, data: urban,
-        backgroundColor: '#58a6ff', pointRadius: 6, pointHoverRadius: 9 },
-    ];
-    if (d.trend_line) {
-      datasets.push({
-        label: 'Overall trend', data: d.trend_line, type: 'line',
-        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2, borderDash: [6, 4],
-        pointRadius: 0, fill: false,
-      });
-    }
-    PMCharts.destroyIfExists(state.explore.chart);
-    state.explore.chart = PMCharts.scatter('chart-explore', datasets, {
-      xLabel: `${xLbl} (${d.x.unit})`,
-      yLabel: `${yLbl} — ${d.y.unit}`,
-      xName: xLbl, yName: yLbl, xFmt, yFmt,
-    });
-
-    $('explore-scatter-title').textContent = `${xLbl} vs ${yLbl}`;
-    $('explore-scatter-explainer').innerHTML =
-      `Each dot is one Michigan county. <b>Left-to-right</b> shows ${xLbl.toLowerCase()} ` +
-      `(${d.x.unit}). <b>Bottom-to-top</b> shows ${yLbl.toLowerCase()} (${d.y.unit}). ` +
-      `If dots trend upward from left to right, more ${xLbl.toLowerCase()} is associated ` +
-      `with higher ${yLbl.toLowerCase()} in this data.`;
-
-    renderExploreReadout(d);
-    $('explore-summary').textContent =
-      PMGloss.summarySentence(d.fit, xLbl.toLowerCase(), yLbl.toLowerCase(), cohort);
-    $('explore-caveat').textContent = d.caveat || '';
-
-    // Surface the "TRI as a control" note whenever an industrial-release
-    // variable is being compared, to frame it against the pesticide signal.
-    const triNote = $('explore-tri-note');
-    if (triNote) triNote.classList.toggle('hidden', !(x && x.startsWith('tri')));
-  }
-
-  function renderExploreReadout(d) {
-    const el = $('explore-readout');
-    const yNoun = d.y.label.toLowerCase() + ' rates';
-    const info = PMGloss.interpret(d.fit, yNoun);
-    if (!info.ok) {
-      el.innerHTML = `<div class="sr-row">${info.r2Sentence}</div>`;
-      return;
-    }
-    const sigClass = info.significant ? 'sr-sig-yes' : 'sr-sig-no';
-    let html = '';
-    html += `<div class="sr-row"><span class="sr-strong">How strong is the pattern?</span> `
-      + `${info.r2Sentence} ${PMGloss.infoIcon('R-squared')}</div>`;
-    html += `<div class="sr-row"><span class="sr-strong">Is it likely real, or chance?</span> `
-      + `<span class="${sigClass}">${info.pSentence}</span> ${PMGloss.infoIcon('p-value')}</div>`;
-    if (d.quartiles) {
-      const q = d.quartiles;
-      html += `<div class="sr-row">Counties in the <b>top 25%</b> for ${d.x.label.toLowerCase()} `
-        + `average <b>${PMCharts.fmtNum(q.top_mean)}</b> ${d.y.unit}, versus `
-        + `<b>${PMCharts.fmtNum(q.bottom_mean)}</b> in the bottom 25%.</div>`;
-    }
-    html += `<div class="sr-row muted small">Based on ${d.fit.n} counties`
-      + (d.n_excluded_missing ? ` (${d.n_excluded_missing} left out for missing data)` : '')
-      + `. Raw statistics: correlation r = ${fmtR(d.fit.r)}, `
-      + `R² = ${fmtR(d.fit.r2)}, p-value = ${fmtP(d.fit.p_value)}.</div>`;
-    el.innerHTML = html;
-  }
-
-  // ---------- Respiratory tab ----------
-  async function renderRespiratory() {
-    bindRespiratoryControlsOnce();
-    await Promise.all([
-      refreshRespScatter(),
-      refreshRespTrend(),
-      refreshRespRankings(),
-    ]);
-  }
-
-  let _respBound = false;
-  function bindRespiratoryControlsOnce() {
-    if (_respBound) return;
-    _respBound = true;
-    $('resp-scatter-pest').addEventListener('change', (e) => {
-      state.resp.scatterPest = e.target.value;
-      refreshRespScatter();
-    });
-    $('resp-scatter-resp').addEventListener('change', (e) => {
-      state.resp.scatterResp = e.target.value;
-      refreshRespScatter(); refreshRespRankings();
-    });
-    $('exclude-wayne').addEventListener('change', (e) => {
-      state.resp.excludeWayne = e.target.checked;
-      refreshRespScatter(); refreshRespRankings();
-    });
-    document.querySelectorAll('#resp-table th.sortable').forEach((th) => {
-      th.addEventListener('click', () => {
-        const k = th.dataset.sort;
-        if (state.resp.sortKey === k) {
-          state.resp.sortDir = state.resp.sortDir === 'asc' ? 'desc' : 'asc';
-        } else {
-          state.resp.sortKey = k;
-          state.resp.sortDir = (k === 'county' || k.startsWith('rank_')) ? 'asc' : 'desc';
-        }
-        renderRespTable();
-      });
-    });
-  }
-
-  async function refreshRespScatter() {
-    const [scatter, stats] = await Promise.all([
-      api('/api/correlation/respiratory/scatter', {
-        pest: state.resp.scatterPest, resp: state.resp.scatterResp,
-        exclude_wayne: state.resp.excludeWayne ? '1' : '',
-      }),
-      api('/api/correlation/respiratory/stats', {
-        pest: state.resp.scatterPest, resp: state.resp.scatterResp,
-        exclude_wayne: state.resp.excludeWayne ? '1' : '',
-      }),
-    ]);
-    const mk = (p) => ({ x: p.x, y: p.y, label: p.county, ur: p.is_urban ? 'Urban' : 'Rural' });
-    const urban = scatter.points.filter((p) => p.is_urban && p.x != null && p.y != null).map(mk);
-    const rural = scatter.points.filter((p) => !p.is_urban && p.x != null && p.y != null).map(mk);
-    const fit = scatter.fit || {};
-    const respLabel = labelForRespMetric(state.resp.scatterResp);
-    const pestLabel = labelForPestMetric(state.resp.scatterPest);
-    const datasets = [
-      { label: `Rural counties (${rural.length})`,
-        data: rural, backgroundColor: '#3fb950', pointRadius: 6, pointHoverRadius: 9 },
-      { label: `Urban counties (${urban.length})`,
-        data: urban, backgroundColor: '#58a6ff', pointRadius: 6, pointHoverRadius: 9 },
-    ];
-    if (scatter.trend_line && fit.r != null) {
-      datasets.push({
-        label: 'Overall trend',
-        data: scatter.trend_line, type: 'line',
-        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2,
-        borderDash: [6, 4], pointRadius: 0, fill: false,
-      });
-    }
-    PMCharts.destroyIfExists(state.charts.respScatter);
-    state.charts.respScatter = PMCharts.scatter('chart-resp-scatter', datasets, {
-      xLabel: `Pesticide applied — ${pestLabel} (lbs)`,
-      yLabel: respLabel,
-      xName: 'Pesticide', yName: respLabel, yFmt: PMCharts.fmtNum,
-    });
-    // One-sentence quartile summary below the chart.
-    const q = stats.quartile_comparison || {};
-    const summary = $('resp-summary');
-    if (q.top_mean == null || q.bottom_mean == null) {
-      summary.textContent = 'Quartile comparison unavailable for the current filter.';
-    } else {
-      const diff = q.top_mean - q.bottom_mean;
-      const pct  = q.bottom_mean ? (diff / q.bottom_mean * 100) : null;
-      const dir  = diff > 0 ? 'higher' : 'lower';
-      const pctText = pct == null ? '' : ` (${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%)`;
-      summary.innerHTML =
-        `Counties in the <strong>top 25% for pesticide use</strong> have an average ` +
-        `respiratory rate of <strong>${q.top_mean.toFixed(1)}</strong> vs ` +
-        `<strong>${q.bottom_mean.toFixed(1)}</strong> for the bottom 25% — ` +
-        `<strong>${Math.abs(diff).toFixed(1)} ${dir}${pctText}</strong>.`;
-    }
-  }
-
-  async function refreshRespTrend() {
-    const d = await api('/api/respiratory/trends', { metric: 'combined' });
-    PMCharts.destroyIfExists(state.charts.respTrend);
-    state.charts.respTrend = PMCharts.lineChart(
-      'chart-resp-trend',
-      d.trend.map((p) => p.year),
-      d.trend.map((p) => p.rate),
-      '#8db0ff',
-    );
-    if (state.charts.respTrend) {
-      const c = state.charts.respTrend;
-      c.options.scales.y.title = { display: true, text: 'rate per 10,000' };
-      c.options.scales.y.ticks = { callback: (v) => v.toFixed(0) };
-      c.update();
-    }
-  }
-
-  function labelForRespMetric(k) {
-    return ({
-      asthma_ed:   'Asthma ED visits (per 10,000)',
-      asthma_hosp: 'Asthma hospitalizations (per 10,000)',
-      copd_ed:     'COPD ED visits (per 10,000)',
-      copd_hosp:   'COPD hospitalizations (per 10,000)',
-      prevalence:  'Adult asthma prevalence (%)',
-    })[k] || k;
-  }
-  function labelForPestMetric(k) {
-    return ({ total:'total lbs', per_sq_mile:'lbs / mi²',
-              herbicide:'herbicide lbs', insecticide:'insecticide lbs',
-              fungicide:'fungicide lbs' })[k] || k;
-  }
-
-  async function refreshRespRankings() {
-    const d = await api('/api/correlation/respiratory/rankings',
-                        { resp: state.resp.scatterResp });
-    state.resp.rankings = d.rows;
-    renderRespTable();
-  }
-
-  function renderRespTable() {
-    const tbody = $('resp-tbody');
-    tbody.innerHTML = '';
-    const rows = state.resp.rankings.slice();
-    const k = state.resp.sortKey;
-    const dir = state.resp.sortDir === 'asc' ? 1 : -1;
-    rows.sort((a, b) => {
-      const va = a[k], vb = b[k];
-      if (va == null && vb == null) return 0;
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      if (typeof va === 'string') return va.localeCompare(vb) * dir;
-      return (va - vb) * dir;
-    });
-    document.querySelectorAll('#resp-table th').forEach((th) => {
-      th.classList.remove('sorted-asc', 'sorted-desc');
-      if (th.dataset.sort === k) {
-        th.classList.add(dir === 1 ? 'sorted-asc' : 'sorted-desc');
-      }
-    });
-    const num = (v) => v == null ? '—' : Number(v).toFixed(1);
-    for (const r of rows) {
-      const tr = document.createElement('tr');
-      if (r.overlap_top20) tr.classList.add('overlap');
-      tr.innerHTML = `
-        <td class="right">${r.rank_pest ?? '—'}</td>
-        <td>${r.county}</td>
-        <td><span class="${r.is_urban ? 'urban-pill' : 'rural-pill'}">${r.is_urban ? 'urban' : 'rural'}</span></td>
-        <td class="right">${r.pest_lbs == null ? '—' : PMCharts.fmtLbs(r.pest_lbs)}</td>
-        <td class="right">${num(r.asthma_ed_rate)}</td>
-        <td class="right">${num(r.asthma_hosp_rate)}</td>
-        <td class="right">${num(r.copd_ed_rate)}</td>
-        <td class="right">${num(r.copd_hosp_rate)}</td>
-        <td class="right">${r.rank_resp ?? '—'}</td>`;
-      tr.addEventListener('click', () => {
-        document.querySelector('#view-switch button[data-view="map"]').click();
-        openCounty(r.county_fips);
-      });
-      tbody.appendChild(tr);
-    }
-  }
-
-  // ---------- Cancer tab ----------
-  async function renderCancer() {
-    bindCancerControlsOnce();
-    // Keep the correlation-tab cancer selector in sync with the map selection.
-    $('cancer-scatter-cancer').value = state.cancer.scatterCancer;
-    $('cancer-scatter-pest').value = ensurePestOption(state.cancer.scatterPest);
-    $('cancer-scatter-dtype').value = state.cancer.scatterDtype;
-    await Promise.all([
-      refreshCancerScatter(),
-      renderCancerMatrix(),
-      refreshCancerQuartiles(),
-    ]);
-  }
-
-  let _cancerBound = false;
-  function bindCancerControlsOnce() {
-    if (_cancerBound) return;
-    _cancerBound = true;
-    $('cancer-scatter-cancer').addEventListener('change', (e) => {
-      state.cancer.scatterCancer = e.target.value;
-      refreshCancerScatter(); refreshCancerQuartiles();
-    });
-    $('cancer-scatter-pest').addEventListener('change', (e) => {
-      state.cancer.scatterPest = e.target.value;
-      refreshCancerScatter(); refreshCancerQuartiles();
-    });
-    $('cancer-scatter-dtype').addEventListener('change', (e) => {
-      state.cancer.scatterDtype = e.target.value;
-      refreshCancerScatter(); refreshCancerQuartiles();
-    });
-    $('cancer-exclude-urban').addEventListener('change', (e) => {
-      state.cancer.excludeUrban = e.target.checked;
-      refreshCancerScatter(); refreshCancerQuartiles();
-    });
-    $('cancer-rural-only').addEventListener('change', (e) => {
-      state.cancer.ruralOnly = e.target.checked;
-      refreshCancerScatter(); refreshCancerQuartiles();
-    });
-    $('cancer-control-smoking').addEventListener('change', (e) => {
-      state.cancer.controlSmoking = e.target.checked;
-      refreshCancerScatter();
-    });
-    $('cancer-matrix-evidence').addEventListener('click', openCancerEvidence);
-  }
-
-  function cancerScatterParams() {
-    return {
-      cancer: state.cancer.scatterCancer,
-      pesticide: state.cancer.scatterPest,
-      data_type: state.cancer.scatterDtype,
-      exclude_urban: state.cancer.excludeUrban ? '1' : '',
-      rural_only: state.cancer.ruralOnly ? '1' : '',
-      control_smoking: state.cancer.controlSmoking ? '1' : '',
-    };
-  }
-
-  async function refreshCancerScatter() {
-    const d = await api('/api/correlation/cancer', cancerScatterParams());
-    const isCount = (d.x_label || '').includes('(count)');
-    const mk = (p) => ({ x: p.x, y: p.y, label: p.county, ur: p.is_urban ? 'Urban' : 'Rural' });
-    const urban = d.points.filter((p) => p.is_urban).map(mk);
-    const rural = d.points.filter((p) => !p.is_urban).map(mk);
-    const fit = d.fit || {};
-    const datasets = [
-      { label: `Rural counties (${rural.length})`, data: rural,
-        backgroundColor: '#3fb950', pointRadius: 6, pointHoverRadius: 9 },
-      { label: `Urban counties (${urban.length})`, data: urban,
-        backgroundColor: '#58a6ff', pointRadius: 6, pointHoverRadius: 9 },
-    ];
-    if (d.trend_line && fit.r != null) {
-      datasets.push({
-        label: 'Overall trend', data: d.trend_line, type: 'line',
-        borderColor: 'rgba(240,180,41,.9)', borderWidth: 2,
-        backgroundColor: 'transparent', borderDash: [6, 4], pointRadius: 0, fill: false,
-      });
-    }
-    PMCharts.destroyIfExists(state.charts.cancerScatter);
-    state.charts.cancerScatter = PMCharts.scatter('chart-cancer-scatter', datasets, {
-      xLabel: d.x_label, yLabel: d.y_label,
-      xName: d.pesticide_label || 'Pesticide', yName: d.cancer_label || 'Rate',
-      xFmt: isCount ? PMCharts.fmtCount : PMCharts.fmtLbs,
-      yFmt: PMCharts.fmtNum, yBeginAtZero: false,
-    });
-    // stats box
-    $('cancer-stat-r').textContent   = fit.r != null ? fit.r.toFixed(3) : '—';
-    $('cancer-stat-p').textContent   = fit.p_value != null ? fit.p_value.toFixed(3) : '—';
-    $('cancer-stat-rho').textContent = d.spearman && d.spearman.rho != null ? d.spearman.rho.toFixed(3) : '—';
-    $('cancer-stat-n').textContent   = d.n;
-    const qc = d.quartile_comparison || {};
-    $('cancer-stat-top').textContent = qc.top_mean != null ? qc.top_mean.toFixed(1) : '—';
-    $('cancer-stat-bot').textContent = qc.bottom_mean != null ? qc.bottom_mean.toFixed(1) : '—';
-    const sig = $('cancer-stat-sig');
-    if (fit.p_value != null) {
-      const significant = fit.p_value < 0.05;
-      sig.innerHTML = significant
-        ? '<span class="sig yes">Statistically significant at p&lt;0.05</span>'
-        : '<span class="sig no">Not statistically significant (p≥0.05)</span>';
-    } else { sig.textContent = ''; }
-    $('cancer-stat-interp').textContent = d.interpretation || '';
-    $('cancer-smoking-note').textContent = d.smoking_note || '';
-    // deep-dive text
-    const dd = $('cancer-deep-dive');
-    const isCompound = (state.cancer.scatterPest || '').startsWith('compound:');
-    const head = isCompound
-      ? `<strong>${d.pesticide_label} application vs ${d.cancer_label}</strong> — `
-      : '';
-    dd.innerHTML = head + (d.link_note || '');
-  }
-
-  function matrixColor(r) {
-    if (r == null) return '#20262e';
-    const t = Math.max(-1, Math.min(1, r));
-    // neutral gray at 0 → blue at -1, red at +1
-    const mix = (a, b, k) => Math.round(a + (b - a) * k);
-    const neutral = [58, 66, 78];
-    const red = [214, 67, 31];
-    const blue = [63, 92, 173];
-    const k = Math.abs(t);
-    const end = t >= 0 ? red : blue;
-    return `rgb(${mix(neutral[0], end[0], k)}, ${mix(neutral[1], end[1], k)}, ${mix(neutral[2], end[2], k)})`;
-  }
-
-  async function renderCancerMatrix() {
-    const d = await api('/api/correlation/cancer/matrix', { data_type: state.cancer.scatterDtype });
-    const el = $('cancer-matrix');
-    el.innerHTML = '';
-    const table = document.createElement('table');
-    table.className = 'matrix-table';
-    // header row
-    const thead = document.createElement('tr');
-    thead.innerHTML = '<th class="corner"></th>' +
-      d.cancers.map((c) => `<th title="${c.label}">${c.label.replace(/ (Cancer|&.*)$/, '')}</th>`).join('');
-    table.appendChild(thead);
-    for (const row of d.matrix) {
-      const tr = document.createElement('tr');
-      const label = document.createElement('th');
-      label.className = 'rowlabel';
-      label.textContent = row.compound;
-      tr.appendChild(label);
-      row.cells.forEach((cell, i) => {
-        const td = document.createElement('td');
-        td.className = 'mcell';
-        td.style.background = matrixColor(cell.r);
-        const rTxt = cell.r == null ? '·' : cell.r.toFixed(2);
-        const ev = cell.evidence
-          ? `<span class="ev-dot" title="Evidence: ${cell.evidence.level}${cell.evidence.iarc ? ' · IARC ' + cell.evidence.iarc : ''}">●</span>`
-          : '';
-        td.innerHTML = `<span class="rval">${rTxt}</span>${ev}`;
-        if (cell.r != null && Math.abs(cell.r) > 0.45) td.classList.add('strong');
-        const cancerKey = d.cancers[i].key;
-        td.title = `${row.compound} × ${d.cancers[i].label}: ` +
-          (cell.r == null ? 'no data' : `r=${cell.r.toFixed(2)}, n=${cell.n}`) +
-          (cell.evidence ? ` · evidence: ${cell.evidence.level}` : '');
-        td.addEventListener('click', () => {
-          // load this compound+cancer combo into the scatter
-          state.cancer.scatterCancer = cancerKey;
-          state.cancer.scatterPest = 'compound:' + row.compound;
-          $('cancer-scatter-cancer').value = cancerKey;
-          $('cancer-scatter-pest').value = ensurePestOption('compound:' + row.compound);
-          refreshCancerScatter(); refreshCancerQuartiles();
-        });
-        tr.appendChild(td);
-      });
-      table.appendChild(tr);
-    }
-    el.appendChild(table);
-  }
-
-  async function refreshCancerQuartiles() {
-    const d = await api('/api/correlation/cancer/quartiles', {
-      cancer: state.cancer.scatterCancer, pesticide: state.cancer.scatterPest,
-      data_type: state.cancer.scatterDtype,
-      exclude_urban: state.cancer.excludeUrban ? '1' : '',
-      rural_only: state.cancer.ruralOnly ? '1' : '',
-    });
-    const labels = d.bars.map((b) => b.label);
-    const vals = d.bars.map((b) => b.mean_rate);
-    const cols = d.bars.map((_, i) => CANCER_PALETTE[[1, 4, 6, 9][i]]);
-    PMCharts.destroyIfExists(state.charts.cancerQuartiles);
-    state.charts.cancerQuartiles = PMCharts.verticalBar(
-      'chart-cancer-quartiles', labels, vals, cols,
-      `${d.cancer_label} — ${d.units}`);
-    $('cancer-quartile-note').textContent =
-      `Counties split into quartiles by ${d.pesticide_label} use; bars = mean ` +
-      `${d.cancer_label} rate per 100,000. MI average: ${d.mi_rate != null ? d.mi_rate : '—'}.`;
-  }
-
-  // Make sure a compound value exists as an <option> in the scatter dropdown.
-  function ensurePestOption(val) {
-    const sel = $('cancer-scatter-pest');
-    if (![...sel.options].some((o) => o.value === val)) {
-      const o = document.createElement('option');
-      o.value = val;
-      o.textContent = val.startsWith('compound:') ? val.split(':')[1] : val;
-      sel.appendChild(o);
-    }
-    return val;
-  }
-
-  // ---------- Cancer evidence modal ----------
-  let _evidenceRows = null;
-  async function openCancerEvidence() {
-    if (!_evidenceRows) {
-      const d = await api('/api/cancer/evidence');
-      _evidenceRows = d.evidence;
-    }
-    const tbl = $('cancer-evidence-table');
-    tbl.innerHTML =
-      '<tr><th>Compound</th><th>Cancer</th><th>Evidence</th><th>IARC</th><th>Mechanism</th><th>Key studies</th></tr>';
-    for (const e of _evidenceRows) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><strong>${e.compound}</strong></td>
-        <td>${e.cancer_label}</td>
-        <td><span class="evidence-pill ev-${(e.evidence_level || '').toLowerCase().replace(/[^a-z]/g, '')}">${e.evidence_level || '—'}</span></td>
-        <td>${e.iarc_classification || '—'}</td>
-        <td class="small">${e.key_mechanism || ''}</td>
-        <td class="small">${e.key_studies || ''}</td>`;
-      tbl.appendChild(tr);
-    }
-    show($('cancer-evidence-modal'));
   }
 
   // ---------- driver ----------
@@ -7312,19 +6439,6 @@
     // If the user has the water-quality "match main" checkbox on, the
     // water overlays follow whatever compound the main map is filtered to.
     if (state.water.matchMain) refreshAllWaterLayers();
-    // Deep-dive: mirror the main map's compound into the cancer scatter so
-    // picking e.g. Glyphosate pre-loads "Glyphosate vs NHL".
-    syncCancerDeepDive();
-  }
-
-  function syncCancerDeepDive() {
-    const want = state.compound ? 'compound:' + state.compound.toUpperCase() : 'all';
-    if (want === state.cancer.scatterPest) return;
-    state.cancer.scatterPest = want;
-    if (!$('view-cancer').classList.contains('hidden')) {
-      $('cancer-scatter-pest').value = ensurePestOption(want);
-      refreshCancerScatter(); refreshCancerQuartiles();
-    }
   }
 
   // ===================== Shareable "view state" deep links =====================
@@ -7400,9 +6514,6 @@
     if (state.category && state.category !== 'all') q.set('cat', state.category);
     if (state.compound) q.set('cmp', state.compound);
 
-    if (state.resp.metric && state.resp.metric !== 'combined') q.set('rm', state.resp.metric);
-    if (state.cancer.type && state.cancer.type !== 'nhl') q.set('ck', state.cancer.type);
-    if (state.cancer.dataType && state.cancer.dataType !== 'incidence') q.set('cd', state.cancer.dataType);
     if (state.tri.metric && state.tri.metric !== 'total') q.set('tm', state.tri.metric);
     if (state.water.compound) q.set('wc', state.water.compound);
     if (state.cdl.crop != null) q.set('cdlc', String(state.cdl.crop));   // CDL crop filter
@@ -7507,10 +6618,6 @@
     }
 
     // per-active-layer metrics — set now so setActiveChoropleth() uses them
-    const rm = p.get('rm'); if (rm) { state.resp.metric = rm; const e = $('resp-metric'); if (e) e.value = rm; }
-    const ck = p.get('ck'); if (ck) { state.cancer.type = ck; const e = $('cancer-type'); if (e) e.value = ck; }
-    const cd = p.get('cd');
-    if (cd && ['incidence', 'mortality'].includes(cd)) { state.cancer.dataType = cd; activateSegByVal(cd); }
     const tm = p.get('tm'); if (tm) { state.tri.metric = tm; const e = $('tri-metric'); if (e) e.value = tm; }
     const wc = p.get('wc'); if (wc) { state.water.compound = wc; const e = $('wq-compound'); if (e) e.value = wc; }
     // CDL crop filter: set the value now; loadCdlClasses() syncs the input,
@@ -7585,7 +6692,6 @@
         sel.appendChild(o);
       }
       buildFeatured();
-      populateCancerDropdowns();
       $('year-min').textContent = state.years[0];
       $('year-max').textContent = state.years[state.years.length - 1];
       $('year-slider').max = state.years.length - 1;

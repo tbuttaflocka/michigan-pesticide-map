@@ -20,9 +20,6 @@
   <div class="header-actions">
     <div class="view-switch" id="view-switch">
       <button data-view="map" class="active">Heat map</button>
-      <button data-view="explore" class="primary-view">Explore correlations</button>
-      <button data-view="respiratory">Respiratory</button>
-      <button data-view="cancer">Cancer</button>
     </div>
     <input id="search" type="search" placeholder="Search a city, county, facility, or chemical…"
       autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
@@ -105,42 +102,6 @@
           </div>
         </div>
 
-        <label class="layer-radio" data-tip="Shade counties by asthma and COPD rates (age-adjusted). Source: CDC Environmental Public Health Tracking."><input type="radio" name="choropleth" value="resp" /> <span class="lr-dot resp"></span> <span>Respiratory health</span></label>
-        <div class="layer-inline" data-layer-filters="resp">
-          <label class="field">
-            <span>Metric</span>
-            <select id="resp-metric">
-              <option value="combined">All Respiratory (combined)</option>
-              <option value="asthma_ed">Asthma — ED Visits</option>
-              <option value="asthma_hosp">Asthma — Hospitalizations</option>
-              <option value="copd_ed">COPD — ED Visits</option>
-              <option value="copd_hosp">COPD — Hospitalizations</option>
-              <option value="acute_bronchitis">Acute Bronchitis</option>
-              <option value="pneumonia_influenza">Pneumonia &amp; Influenza</option>
-              <option value="upper_respiratory">Upper Respiratory Infections</option>
-              <option value="all_respiratory_mort">All Respiratory Mortality</option>
-            </select>
-          </label>
-          <p class="resp-meta" id="resp-meta">—</p>
-        </div>
-
-        <label class="layer-radio" data-tip="Shade counties by cancer incidence (new cases per 100,000, age-adjusted). Source: NCI State Cancer Profiles."><input type="radio" name="choropleth" value="cancer" /> <span class="lr-dot cancer"></span> <span>Cancer incidence</span></label>
-        <div class="layer-inline" data-layer-filters="cancer">
-          <label class="field">
-            <span>Cancer type</span>
-            <select id="cancer-type"></select>
-          </label>
-          <label class="field">
-            <span>Measure</span>
-            <div class="seg" id="seg-cancer-dtype">
-              <button data-val="incidence" class="active">Incidence</button>
-              <button data-val="mortality">Mortality</button>
-            </div>
-          </label>
-          <p class="resp-meta" id="cancer-meta">—</p>
-          <button id="cancer-evidence-btn" class="link-btn" type="button" data-tip="How strong is the research link between pesticides and each cancer?">Pesticide–cancer evidence ›</button>
-        </div>
-
         <label class="layer-radio" data-tip="Shade counties by the number of known contaminated sites. Source: EPA Superfund + compiled records."><input type="radio" name="choropleth" value="contam_density" /> <span class="lr-dot contam"></span> <span>Contamination site density</span></label>
         <div class="layer-inline" data-layer-filters="contam_density">
           <p class="muted small">County color = number of known contaminated sites. Site markers &amp; impact zones are in the <em>Overlays</em> section below.</p>
@@ -192,7 +153,7 @@
         </div>
         <label class="layer-radio" data-tip="Shade each census TRACT (finer than counties) by EPA's modeled air toxics cancer risk — chance-in-a-million from ~140 hazardous air pollutants. A SCREENING estimate from emissions models, NOT measured air. Source: EPA NATA / AirToxScreen."><input type="radio" name="choropleth" value="air_toxics" /> <span class="lr-dot airtox"></span> <span>Air toxics cancer risk</span></label>
         <div class="layer-inline" data-layer-filters="air_toxics">
-          <p class="muted small">Shades each <span data-gloss="census block vs tract">census tract</span> by modeled <span data-gloss="air toxics">air toxics</span> <span data-gloss="cancer risk in-a-million">cancer risk (in a million)</span> from <span data-gloss="hazard air pollutants (HAPs)">hazardous air pollutants</span> — pairs with the Cancer &amp; Respiratory layers. This is a <span data-gloss="screening assessment">screening assessment</span> (<span data-gloss="NATA">NATA</span>): <strong>modeled estimates, not measured air</strong>, meant to flag areas for further study — not to judge a specific address. Click a tract for its risk, the source driver (industry vs traffic vs background), and top pollutants.</p>
+          <p class="muted small">Shades each <span data-gloss="census block vs tract">census tract</span> by modeled <span data-gloss="air toxics">air toxics</span> <span data-gloss="cancer risk in-a-million">cancer risk (in a million)</span> from <span data-gloss="hazard air pollutants (HAPs)">hazardous air pollutants</span>. This is a <span data-gloss="screening assessment">screening assessment</span> (<span data-gloss="NATA">NATA</span>): <strong>modeled estimates, not measured air</strong>, meant to flag areas for further study — not to judge a specific address. Click a tract for its risk, the source driver (industry vs traffic vs background), and top pollutants.</p>
           <div class="airtox-metric" role="group" aria-label="Air toxics metric">
             <label class="small"><input type="radio" name="airtox-metric" value="cancer" checked /> Cancer risk</label>
             <label class="small airtox-metric-off" title="Not available at tract level in EPA's published data — see the note."><input type="radio" name="airtox-metric" value="respiratory" disabled /> Respiratory hazard <span class="muted">(n/a)</span></label>
@@ -500,30 +461,6 @@
       <h3>Crop acreage</h3>
       <table id="county-crops" class="crops"></table>
 
-      <h3>Respiratory health</h3>
-      <table class="resp-table" id="county-resp-table">
-        <thead>
-          <tr><th>Metric</th><th class="num">Rate</th><th class="num">vs MI</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <p class="muted small" id="county-resp-note"></p>
-
-      <h3>Cancer incidence <span class="muted small" id="county-cancer-ru"></span></h3>
-      <table class="resp-table cancer-table" id="county-cancer-table">
-        <thead>
-          <tr>
-            <th data-tip="Cancer type. Those near the top have the strongest research links to pesticide exposure.">Cancer</th>
-            <th class="num" data-tip="New cases diagnosed per 100,000 people per year in this county, age-adjusted, averaged over 2018-2022.">Rate</th>
-            <th class="num" data-tip="How this county compares to the Michigan state average. &#9650; = higher than state average, &#9660; = lower.">vs MI</th>
-            <th class="num" data-tip="National average rate (SEER+NPCR) for comparison.">US</th>
-            <th class="num" data-tip="Whether the rate is rising, falling, or stable over recent years.">Trend</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <p class="muted small" id="county-cancer-note"></p>
-
       <h3>Industrial contamination <span class="muted small" id="county-contam-count"></span></h3>
       <div id="county-contam-list" class="contam-county-list"></div>
 
@@ -562,314 +499,6 @@
   <div id="m-backdrop" class="m-backdrop m-only"></div>
 </main>
 
-<!-- ===================== Explore Correlations (unified) ===================== -->
-<section class="app-body correlation-view hidden" id="view-explore">
-  <div class="explore-wrap">
-
-    <div class="panel explore-controls-panel">
-      <div class="panel-head">
-        <h2>Explore the data yourself</h2>
-      </div>
-      <p class="explainer">
-        Pick <b>any two things</b> to compare across Michigan's counties and see whether
-        they tend to rise and fall together. This is a starting point for questions —
-        <b>not</b> proof that one causes the other.
-      </p>
-
-      <div class="explore-pickers">
-        <label class="explore-pick">
-          <span class="ep-label">Compare this…
-            <span class="info-i" data-tip="The measure shown left-to-right on the chart. Choose a pesticide, a specific chemical, contamination sites, or water detections.">?</span>
-          </span>
-          <select id="explore-x"></select>
-        </label>
-        <span class="explore-vs">vs</span>
-        <label class="explore-pick">
-          <span class="ep-label">…against this health measure:
-            <span class="info-i" data-tip="The measure shown bottom-to-top on the chart. ">?</span>
-          </span>
-          <select id="explore-y"></select>
-        </label>
-      </div>
-
-      <div class="explore-toggles">
-        <label class="toggle-chip">
-          <input type="checkbox" id="explore-rural" />
-          <span>Rural counties only</span>
-          <span class="info-i" data-gloss="urban vs rural">?</span>
-        </label>
-        <label class="toggle-chip">
-          <input type="checkbox" id="explore-exclude-missing" />
-          <span>Exclude counties with missing data</span>
-          <span class="info-i" data-tip="Some counties have no data for a given measure (e.g. no recorded contamination site). Turn this on to drop them instead of treating them as zero.">?</span>
-        </label>
-      </div>
-
-      <p class="explore-summary" id="explore-summary">Choose two measures above to begin.</p>
-      <div class="explore-tri-note hidden" id="explore-tri-note">
-        <strong>Using TRI as a control.</strong> Industrial air pollution is a well-established
-        respiratory risk factor. Compare an <em>industrial air releases</em> vs a respiratory
-        measure against the <em>pesticide</em> correlation to see which shows a stronger
-        association in this data — a way to separate agricultural from industrial explanations.
-      </div>
-    </div>
-
-    <div class="panel scatter-panel wide">
-      <div class="panel-head">
-        <h2 id="explore-scatter-title">Comparison</h2>
-      </div>
-      <p class="explainer" id="explore-scatter-explainer">
-        Each dot is one Michigan county.
-      </p>
-      <div class="ur-legend" id="explore-legend">
-        <span class="ur-item"><span class="ur-dot rural"></span> Rural county</span>
-        <span class="ur-item"><span class="ur-dot urban"></span> Urban county (large population)</span>
-        <span class="ur-item" style="color:var(--muted)">
-          <span class="info-i" data-gloss="urban vs rural">?</span> why this matters
-        </span>
-      </div>
-      <div class="chart-box scatter tall"><canvas id="chart-explore"></canvas></div>
-
-      <div class="stat-readout" id="explore-readout"></div>
-
-      <div class="assoc-reminder">
-        <strong>Association is not causation.</strong> A trend here does not prove one thing
-        causes the other. Counties differ in many ways — population, age, industry, smoking,
-        income — that also affect health. Use this as a starting point for questions, not an answer.
-      </div>
-      <p class="muted small" id="explore-caveat"></p>
-    </div>
-
-  </div>
-</section>
-
-<!-- ===================== Respiratory view ===================== -->
-<section class="app-body correlation-view hidden" id="view-respiratory">
-  <div class="correlation-grid">
-
-    <details class="panel disclaimer-panel resp collapsible" id="resp-caveats">
-      <summary><span class="info-icon">ℹ️</span>&nbsp;<strong>Important context</strong> — click to expand</summary>
-      <ul class="disclaimer">
-        <li><strong>Urban counties</strong> (Wayne / Oakland / Macomb / Genesee /
-          Saginaw) have high asthma rates driven by air pollution, poverty,
-          housing conditions, and industrial emissions — <em>not</em>
-          agricultural pesticides.</li>
-        <li>Asthma and COPD have many causes: smoking, indoor allergens, air
-          quality, genetics, occupational exposures, socioeconomic factors.</li>
-        <li>Pesticide <em>applicators</em> have direct occupational exposure
-          risk; that differs from ambient community exposure.</li>
-        <li>Pesticide and respiratory data are <strong>annual and county-level</strong>.
-          Monthly seasonal correlation isn't possible at the county grain.</li>
-        <li>Broader ICD-10 categories (J00-J06, J20-J22, J60-J70) use Michigan
-          statewide baselines because no county-level breakdowns are published.</li>
-        <li>This tool is for <strong>exploratory visualization only</strong> —
-          it does not constitute epidemiological evidence.</li>
-      </ul>
-    </details>
-
-    <div class="panel scatter-panel wide">
-      <div class="panel-head">
-        <h2>Pesticide use vs respiratory rate</h2>
-        <div class="controls-row">
-          <select id="resp-scatter-pest">
-            <option value="per_sq_mile">lbs / mi²</option>
-            <option value="total">Total lbs</option>
-            <option value="herbicide">Herbicides</option>
-            <option value="insecticide">Insecticides</option>
-            <option value="fungicide">Fungicides</option>
-          </select>
-          <select id="resp-scatter-resp">
-            <option value="asthma_ed">All Respiratory (asthma ED proxy)</option>
-            <option value="asthma_hosp">Asthma — Hospitalizations</option>
-            <option value="copd_ed">COPD — ED</option>
-            <option value="copd_hosp">COPD — Hospitalizations</option>
-            <option value="prevalence">Adult asthma prevalence (%)</option>
-          </select>
-          <label class="small"><input type="checkbox" id="exclude-wayne" /> exclude Wayne</label>
-        </div>
-      </div>
-      <p class="explainer">Each dot is one Michigan county. <b>Left-to-right</b> shows pesticide
-        applied; <b>bottom-to-top</b> shows the respiratory rate. Green dots are rural counties,
-        blue are urban. Hover any dot for the county and its exact values.</p>
-      <div class="ur-legend">
-        <span class="ur-item"><span class="ur-dot rural"></span> Rural county</span>
-        <span class="ur-item"><span class="ur-dot urban"></span> Urban county</span>
-        <span class="ur-item" style="color:var(--muted)"><span class="info-i" data-gloss="urban vs rural">?</span> why this matters</span>
-      </div>
-      <div class="chart-box scatter tall"><canvas id="chart-resp-scatter"></canvas></div>
-      <p class="quartile-summary" id="resp-summary">—</p>
-      <div class="assoc-reminder">
-        <strong>Association is not causation.</strong> Asthma and COPD are driven mostly by air
-        quality, smoking, and industry — not farm pesticides. Urban counties differ from rural
-        ones in many such ways, so check whether any pattern holds within the green (rural) dots alone.
-      </div>
-    </div>
-
-    <div class="panel trend-panel wide">
-      <h2>Year-over-year respiratory rate (statewide average)</h2>
-      <div class="chart-box trend"><canvas id="chart-resp-trend"></canvas></div>
-      <p class="muted small">Average of the four CDC Tracking county-level measures
-        (asthma + COPD, ED + hospitalization, age-adjusted per 10,000).</p>
-    </div>
-
-    <div class="panel table-panel resp">
-      <div class="panel-head">
-        <h2>County rankings · pesticide use & respiratory rate</h2>
-        <span class="muted small">Highlighted rows rank in the top 20 for <em>both</em>.</span>
-      </div>
-      <div class="table-wrap">
-        <table id="resp-table">
-          <thead>
-            <tr>
-              <th data-sort="rank_pest"        class="sortable right" data-tip="This county's rank for total pesticide use (1 = highest).">#&nbsp;Pest</th>
-              <th data-sort="county"           class="sortable" data-tip="Michigan county. Click any header to sort by that column.">County</th>
-              <th data-sort="is_urban"         class="sortable" data-tip="Whether the county is urban (large population) or rural. Urban asthma is driven mostly by air quality and industry, not farming.">Type</th>
-              <th data-sort="pest_lbs"         class="sortable right" data-tip="Total pounds of pesticide applied (USGS EPest estimate).">Total lbs</th>
-              <th data-sort="asthma_ed_rate"   class="sortable right" data-tip="Asthma emergency-room visits per 10,000 people, age-adjusted. Source: CDC Tracking.">Asthma ED</th>
-              <th data-sort="asthma_hosp_rate" class="sortable right" data-tip="Asthma hospitalizations per 10,000 people, age-adjusted.">Asthma hosp.</th>
-              <th data-sort="copd_ed_rate"     class="sortable right" data-tip="COPD (chronic lung disease) emergency-room visits per 10,000, age-adjusted.">COPD ED</th>
-              <th data-sort="copd_hosp_rate"   class="sortable right" data-tip="COPD hospitalizations per 10,000 people, age-adjusted.">COPD hosp.</th>
-              <th data-sort="rank_resp"        class="sortable right" data-tip="This county's rank for the selected respiratory measure (1 = highest).">#&nbsp;Resp</th>
-            </tr>
-          </thead>
-          <tbody id="resp-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-
-  </div>
-</section>
-
-<!-- ===================== Cancer view ===================== -->
-<section class="app-body correlation-view hidden" id="view-cancer">
-  <div class="correlation-grid">
-
-    <div class="panel scatter-panel wide">
-      <div class="panel-head">
-        <h2>Pesticide use vs cancer incidence</h2>
-        <div class="controls-row">
-          <select id="cancer-scatter-cancer"></select>
-          <select id="cancer-scatter-pest">
-            <option value="all">Total pesticide</option>
-            <option value="herbicide">Herbicides</option>
-            <option value="insecticide">Insecticides</option>
-            <option value="fungicide">Fungicides</option>
-            <option value="per_sq_mile">lbs / mi²</option>
-            <option value="compound:GLYPHOSATE">Glyphosate</option>
-            <option value="compound:ATRAZINE">Atrazine</option>
-            <option value="compound:2,4-D">2,4-D</option>
-            <option value="compound:METOLACHLOR">Metolachlor</option>
-            <option value="compound:CHLORPYRIFOS">Chlorpyrifos</option>
-            <option value="compound:DICAMBA">Dicamba</option>
-            <option value="compound:CHLOROTHALONIL">Chlorothalonil</option>
-            <option value="contamination">Contamination sites (count)</option>
-            <option value="contamination:npl">Superfund NPL sites (count)</option>
-          </select>
-          <select id="cancer-scatter-dtype">
-            <option value="incidence">Incidence</option>
-            <option value="mortality">Mortality</option>
-          </select>
-        </div>
-      </div>
-      <div class="controls-row cancer-confounds">
-        <label class="small"><input type="checkbox" id="cancer-exclude-urban" /> exclude urban (&gt;100k)</label>
-        <label class="small"><input type="checkbox" id="cancer-rural-only" /> rural only</label>
-        <label class="small"><input type="checkbox" id="cancer-control-smoking" /> control for smoking</label>
-      </div>
-      <p class="explainer">Each dot is one Michigan county. <b>Left-to-right</b> shows the pesticide
-        (or pollution) measure; <b>bottom-to-top</b> shows the cancer rate. Green dots are rural
-        counties, blue are urban. Hover any dot for the county and its exact values.</p>
-      <div class="ur-legend">
-        <span class="ur-item"><span class="ur-dot rural"></span> Rural county</span>
-        <span class="ur-item"><span class="ur-dot urban"></span> Urban county</span>
-        <span class="ur-item" style="color:var(--muted)"><span class="info-i" data-gloss="urban vs rural">?</span> why this matters</span>
-      </div>
-      <div class="chart-box scatter tall"><canvas id="chart-cancer-scatter"></canvas></div>
-      <p class="deep-dive" id="cancer-deep-dive">—</p>
-      <div class="assoc-reminder">
-        <strong>Association is not causation.</strong> Cancer takes 10–30 years to develop, so
-        today's rates reflect exposures from decades ago. Smoking, age, industry, and income differ
-        between counties and affect cancer more than farming — check whether any pattern holds within
-        the green (rural) dots alone.
-      </div>
-    </div>
-
-    <div class="panel stats-panel">
-      <h2>Statistical summary</h2>
-      <div class="big-stats">
-        <div><strong id="cancer-stat-r">—</strong><span>Pearson r</span></div>
-        <div><strong id="cancer-stat-p">—</strong><span>p-value</span></div>
-        <div><strong id="cancer-stat-rho">—</strong><span>Spearman ρ</span></div>
-        <div><strong id="cancer-stat-n">—</strong><span>counties</span></div>
-        <div><strong id="cancer-stat-top">—</strong><span>top-25% mean</span></div>
-        <div><strong id="cancer-stat-bot">—</strong><span>bottom-25% mean</span></div>
-      </div>
-      <p id="cancer-stat-sig" class="sig-line"></p>
-      <p id="cancer-stat-interp" class="stats-interp"></p>
-      <p id="cancer-smoking-note" class="muted small"></p>
-    </div>
-
-    <div class="panel matrix-panel wide">
-      <div class="panel-head">
-        <h2>Compound × cancer correlation matrix</h2>
-        <button id="cancer-matrix-evidence" class="info-btn" title="Evidence reference">ℹ️ evidence</button>
-      </div>
-      <p class="muted small">Cell = Pearson r across Michigan counties (blue = negative, red = positive).
-        Cells with a dot ● have documented epidemiological evidence — hover for the IARC class.
-        Click any cell to load it in the scatter above.</p>
-      <div id="cancer-matrix" class="cancer-matrix"></div>
-      <div class="matrix-legend">
-        <span>−1</span><span class="matrix-scale"></span><span>+1</span>
-      </div>
-    </div>
-
-    <div class="panel quartile-panel">
-      <h2>Cancer rate by pesticide-use quartile</h2>
-      <div class="chart-box bar"><canvas id="chart-cancer-quartiles"></canvas></div>
-      <p class="muted small" id="cancer-quartile-note">Counties split into quartiles by the
-        selected pesticide metric; bars show the mean cancer rate in each quartile.</p>
-    </div>
-
-    <details class="panel disclaimer-panel collapsible" id="cancer-caveats">
-      <summary><span class="info-icon">ℹ️</span>&nbsp;<strong>Important context</strong> — click to expand</summary>
-      <ul class="disclaimer">
-        <li><strong>Cancer has long latency (10–30 years).</strong> Current rates may reflect
-          exposures from decades ago, not today's application levels.</li>
-        <li>The pesticide data (through ~2019) and NCI cancer data (2018–2022) cover
-          overlapping but not identical periods.</li>
-        <li>This is an <strong>ecological</strong> comparison — it compares county populations,
-          not individuals. Individual exposure data would be needed for causal links
-          (the ecological fallacy).</li>
-        <li>Major confounders: smoking, alcohol, obesity, occupational/industrial exposure,
-          socioeconomic status, healthcare/screening access, age structure, and other
-          contaminants (PFAS, industrial pollution).</li>
-        <li>Urban counties have different cancer profiles for reasons unrelated to agriculture —
-          urban/rural stratification is essential.</li>
-        <li>Some agricultural counties may have <em>lower</em> overall cancer rates (younger,
-          healthier, lower-smoking populations) — this does not mean pesticides are protective.</li>
-        <li>Data suppression in low-population counties (&lt;16 cases) creates gaps that can
-          bias the analysis.</li>
-        <li>This tool is for <strong>exploratory visualization only</strong>. It does not
-          constitute epidemiological evidence of causation.</li>
-      </ul>
-    </details>
-
-  </div>
-</section>
-
-<!-- ===================== Cancer evidence modal ===================== -->
-<div id="cancer-evidence-modal" class="modal hidden" role="dialog" aria-modal="true">
-  <div class="modal-card">
-    <button class="close" id="cancer-evidence-close">×</button>
-    <h2>Pesticide–cancer evidence</h2>
-    <p class="muted">Literature-based associations (IARC monographs + Agricultural Health Study).
-      This is the scientific basis behind the compounds shown in the matrix — separate from the
-      ecological correlations computed from Michigan county data.</p>
-    <table id="cancer-evidence-table"></table>
-    <p class="muted small">IARC groups: 1 = carcinogenic; 2A = probably; 2B = possibly;
-      3 = not classifiable. Evidence strength reflects epidemiological weight, not regulatory status.</p>
-  </div>
-</div>
 
 <!-- ===================== "Start here" intro modal ===================== -->
 <div id="intro-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -880,29 +509,22 @@
       The <strong>Michigan Pollution Map</strong> is a free tool for <strong>exploring</strong>
       Michigan's pollution, contamination, and community-health data on one map. It brings together
       pesticide use, industrial contamination (Superfund), toxic releases (TRI), water quality, and
-      cancer and respiratory health so you can look for patterns and ask better questions.
+      more so you can look for patterns and ask better questions.
     </p>
 
     <div class="intro-grid">
       <div class="intro-block">
         <div class="intro-ico">🗺️</div>
         <h3>Explore the map</h3>
-        <p>Use <strong>Map layers</strong> (left) to color counties by pesticide use, cancer,
-          respiratory health, contamination, or <strong>industrial toxic releases (TRI)</strong>,
+        <p>Use <strong>Map layers</strong> (left) to color counties by pesticide use,
+          contamination, or <strong>industrial toxic releases (TRI)</strong>,
           and to stack overlays like water sites, factory markers, and wind.
           Hover anything with a <span class="info-i" data-tip="Like this — hover or tap a ? for a plain-language explanation.">?</span> for an explanation.</p>
       </div>
       <div class="intro-block">
-        <div class="intro-ico">📊</div>
-        <h3>Compare two things</h3>
-        <p>The <strong>Explore correlations</strong> tab lets you pick any two measures — say,
-          herbicide use vs. a cancer rate — and see whether they rise and fall together across
-          counties, explained in plain English.</p>
-      </div>
-      <div class="intro-block">
         <div class="intro-ico">🔎</div>
         <h3>What the data is</h3>
-        <p>Everything comes from public sources (USGS, EPA, CDC, NCI, Michigan DNR/EGLE). Open
+        <p>Everything comes from public sources (USGS, EPA, Michigan DNR/EGLE). Open
           <a href="#" id="intro-sources-link">Data sources</a> any time to see each dataset, how
           current it is, and its limitations.</p>
       </div>

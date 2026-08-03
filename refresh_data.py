@@ -24,9 +24,9 @@ WHAT IT DOES, PER SOURCE
   5. Record provenance/freshness into the `data_sources` table (last success,
      coverage window, refresh status, expected refresh interval).
 
-After any successful swap the derived analysis tables
-(`correlation_analysis`, `cancer_pesticide_correlation`) are rebuilt from the
-live database so the correlations stay consistent with the refreshed inputs.
+After any successful swap the derived analysis table
+(`correlation_analysis`) is rebuilt from the live database so the per-county
+pesticide aggregates stay consistent with the refreshed inputs.
 
 USAGE
 -----
@@ -41,7 +41,7 @@ The script is idempotent — running it twice does not duplicate data.
 SCHEDULING (Windows Task Scheduler)
 -----------------------------------
 See the "Keeping the data fresh" section of README.md. Recommended cadence:
-  * Annual   (Jan): usgs_epest, nass_crop, respiratory, cancer, wind
+  * Annual   (Jan): usgs_epest, nass_crop, wind
   * Quarterly:      water_quality, superfund
 Example (monthly all-sources check; per-source guards skip anything unchanged):
 
@@ -218,15 +218,6 @@ SOURCES: list[Source] = [
         coverage=year_range("crop_acreage"),
     ),
     Source(
-        id="respiratory", label="CDC Environmental Tracking + WONDER — respiratory",
-        loaders=[dl.load_respiratory_data],
-        targets=["respiratory_ed_visits", "respiratory_hospitalizations",
-                 "respiratory_prevalence", "respiratory_mortality"],
-        primary_target="respiratory_ed_visits", primary_source_id="cdc_tracking",
-        interval_months=12, min_abs=1, floor_frac=0.4,
-        coverage=year_range("respiratory_ed_visits"),
-    ),
-    Source(
         id="water_quality", label="USGS/EPA Water Quality Portal — pesticide samples",
         loaders=[dl.load_water_quality],
         targets=["watersheds", "water_quality_sites", "water_quality_results"],
@@ -255,14 +246,6 @@ SOURCES: list[Source] = [
         primary_target="wind_data", primary_source_id="iem_asos_wind",
         interval_months=12, min_abs=1, floor_frac=0.5,
         coverage=label_range("wind_data", "years"),
-    ),
-    Source(
-        id="cancer", label="NCI/CDC State Cancer Profiles — incidence & mortality",
-        loaders=[dl.load_cancer_data],
-        targets=["cancer_incidence", "cancer_reference", "cancer_evidence"],
-        primary_target="cancer_incidence", primary_source_id="nci_scp",
-        interval_months=12, min_abs=50, floor_frac=0.5,
-        coverage=label_range("cancer_incidence", "data_years"),
     ),
     Source(
         id="tri", label="EPA Toxics Release Inventory — active industrial releases",
@@ -696,8 +679,7 @@ def rebuild_derived(live_path: Path, log: RunLogger) -> None:
     log.line("--- rebuilding derived analysis tables", level="hdr")
     conn = database.connect(live_path)
     try:
-        for name, fn in (("correlation_analysis", dl.build_correlation_table),
-                         ("cancer_pesticide_correlation", dl.build_cancer_correlations)):
+        for name, fn in (("correlation_analysis", dl.build_correlation_table),):
             try:
                 n = fn(conn)
                 conn.commit()
@@ -744,7 +726,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--list", action="store_true",
                    help="list sources with their last refresh status and exit")
     p.add_argument("--no-derived", action="store_true",
-                   help="skip rebuilding correlation_analysis / cancer correlations")
+                   help="skip rebuilding correlation_analysis")
     p.add_argument("--full", action="store_true",
                    help="force a full rebuild of water_quality (re-pull the whole "
                         "~230 MB WQP result set) instead of an incremental delta; "
