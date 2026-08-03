@@ -1134,6 +1134,48 @@ a:hover { text-decoration: underline; }
 }
 .ov-hidden { display: none !important; }
 
+/* Per-layer collapsible groups: a chevron button added to a layer toggle's row.
+   The checkbox stays visible/clickable; only the children (.ov-lg-hidden) hide. */
+.ov-lg-hidden { display: none !important; }
+.ov-lg-dot {
+  margin-left: auto;                 /* right-aligns the dot + chevron cluster */
+  flex: 0 0 auto;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  visibility: hidden;                /* reserves space so the chevron stays put */
+}
+.ov-lg-dot.on { visibility: visible; }
+.ov-lg-chev {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  width: 18px; height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ov-lg-chev::before {
+  content: '';
+  width: 0; height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform: rotate(90deg);          /* down = expanded */
+  transition: transform .15s ease;
+}
+.ov-lg-chev.ov-collapsed::before { transform: rotate(0deg); }  /* right = collapsed */
+.ov-lg-chev:hover { color: var(--text); }
+.ov-lg-chev:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
 /* ---------- wind roses / drift arrows / drift zones ---------- */
 /* strip Leaflet's default white divIcon chrome */
 .wind-rose-icon, .drift-arrow-icon {

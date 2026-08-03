@@ -6683,7 +6683,8 @@
   // listener remains wired. State persists in localStorage; on ANY failure we
   // default to expanded so the sidebar is never left unreadable.
   const SECTION_LS_KEY = 'pm_overlay_sections_v1';
-  const _sections = [];   // { key, head, members:[el], badge }
+  const _sections = [];   // subhead sections: { key, head, members:[el], badge }
+  const _lgroups = [];    // per-layer groups: { key, label, input, chev, dot, members }
 
   function _readSectionPrefs() {
     try {
@@ -6696,6 +6697,7 @@
     try {
       const o = {};
       for (const s of _sections) o[s.key] = !s.head.classList.contains('ov-collapsed');
+      for (const g of _lgroups) o[g.key] = g.chev.getAttribute('aria-expanded') === 'true';
       localStorage.setItem(SECTION_LS_KEY, JSON.stringify(o));
     } catch (e) { /* non-persistent is acceptable */ }
   }
@@ -6774,7 +6776,8 @@
   }
 
   // Reveal (UI only — does not overwrite the saved preference) any collapsed
-  // section that now contains an active layer, e.g. after a deep link loads.
+  // subhead section OR layer group that now contains an active layer, e.g. after
+  // a deep link loads its layers.
   function expandSectionsForActiveLayers() {
     for (const s of _sections) {
       if (!s.head.classList.contains('ov-collapsed')) continue;
@@ -6785,6 +6788,87 @@
       });
       if (hasActive) _setSectionExpanded(s, true);
     }
+    for (const g of _lgroups) {
+      if (g.chev.getAttribute('aria-expanded') === 'false' && g.input && g.input.checked) {
+        _lgSetExpanded(g, true);   // UI only — surface the active layer's hidden options
+      }
+    }
+  }
+
+  // ---------- Collapsible individual layer groups ----------
+  // Any overlay-toggle that is followed by children (sub-filters, a legend/stats
+  // line, and/or an "About X" <details>) becomes its own collapsible group. A
+  // chevron button is added to the toggle's row; the layer's own checkbox stays
+  // visible and clickable while collapsed — only the children hide. The chevron
+  // and the checkbox are separate targets, so they never trigger each other.
+  // These groups nest inside the .overlay-subhead sections and share the same
+  // localStorage store and deep-link auto-expand.
+  function _lgUpdateDot(g) {
+    const collapsed = g.chev.getAttribute('aria-expanded') === 'false';
+    g.dot.classList.toggle('on', collapsed && !!(g.input && g.input.checked));
+  }
+  function _lgSetExpanded(g, expanded) {
+    g.chev.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    g.chev.classList.toggle('ov-collapsed', !expanded);
+    g.label.classList.toggle('ov-lg-collapsed', !expanded);
+    for (const el of g.members) el.classList.toggle('ov-lg-hidden', !expanded);
+    _lgUpdateDot(g);
+  }
+
+  function initLayerGroups() {
+    const prefs = _readSectionPrefs();
+    // The overlays live in the .layer-group that holds .overlay-toggle rows (the
+    // first .layer-group on the page is the choropleth radios — not this one).
+    const firstToggle = document.querySelector('.layer-group .overlay-toggle');
+    const group = firstToggle ? firstToggle.closest('.layer-group') : null;
+    if (!group) return;
+    group.querySelectorAll('.overlay-toggle').forEach((label) => {
+      const input = label.querySelector('input[type=checkbox]');
+      if (!input || !input.id) return;
+      // Children = following siblings up to the next layer toggle or subhead.
+      const members = [];
+      let el = label.nextElementSibling;
+      while (el && !el.classList.contains('overlay-toggle') && !el.classList.contains('overlay-subhead')) {
+        el.classList.add('ov-lg-member');
+        members.push(el);
+        el = el.nextElementSibling;
+      }
+      if (!members.length) return;   // no children -> leave this toggle alone
+
+      const nameEl = label.querySelector('span');
+      const name = (nameEl ? nameEl.textContent : 'layer').trim();
+      label.classList.add('ov-lg-head');
+      const dot = document.createElement('span');
+      dot.className = 'ov-lg-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      dot.title = 'This layer is on; its options are collapsed';
+      const chev = document.createElement('button');
+      chev.type = 'button';
+      chev.className = 'ov-lg-chev';
+      chev.setAttribute('aria-expanded', 'true');
+      chev.setAttribute('aria-label', `Toggle ${name} options`);
+      label.appendChild(dot);
+      label.appendChild(chev);
+
+      const g = { key: input.id, label, input, chev, dot, members };
+      _lgroups.push(g);
+
+      chev.addEventListener('click', (e) => {
+        // preventDefault stops the surrounding <label> from also toggling the
+        // checkbox; stopPropagation keeps it off any parent header handler.
+        e.preventDefault();
+        e.stopPropagation();
+        const willExpand = chev.getAttribute('aria-expanded') === 'false';
+        _lgSetExpanded(g, willExpand);
+        _writeSectionPrefs();
+      });
+
+      const saved = prefs[g.key];
+      _lgSetExpanded(g, saved === undefined ? true : !!saved);
+    });
+
+    // Keep the "layer on but collapsed" dots accurate as toggles change.
+    group.addEventListener('change', () => { for (const g of _lgroups) _lgUpdateDot(g); });
   }
 
   async function boot() {
@@ -7039,6 +7123,7 @@
     setupMobileUI();
     setupChemLinks();
     initSectionCollapse();
+    initLayerGroups();
     wireIntro();
     maybeShowIntroOnFirstVisit();
     boot();
