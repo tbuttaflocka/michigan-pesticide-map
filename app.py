@@ -4084,23 +4084,65 @@ def api_echo_sites():
                     "statuses": statuses, "available": True})
 
 
+def _echo_crosslinks(conn, r) -> list:
+    """Resolve this ECHO facility's already-loaded ID joins to the app's own
+    records so the popup can link to them. Only returns records that actually
+    joined (exact ID match); `kind` matches the data-lf-focus handler. `lat`/`lng`
+    let the UI fly to and open the target record on its own layer."""
+    out = []
+    for tid in (r["matched_tri_ids"] or "").split():
+        row = conn.execute(
+            "SELECT facility_name, latitude, longitude FROM tri_facility "
+            "WHERE facility_id=?", (tid,)).fetchone()
+        if row:
+            out.append({"kind": "tri", "layer": "TRI facility", "id": tid,
+                        "name": row["facility_name"], "lat": row["latitude"],
+                        "lng": row["longitude"]})
+    for sid in (r["matched_sems_ids"] or "").split():
+        row = conn.execute(
+            "SELECT site_name, latitude, longitude FROM contamination_sites "
+            "WHERE epa_id=?", (sid,)).fetchone()
+        if row:
+            out.append({"kind": "contam", "layer": "Superfund / contamination site",
+                        "id": sid, "name": row["site_name"], "lat": row["latitude"],
+                        "lng": row["longitude"]})
+    for rid in (r["matched_rcra_ids"] or "").split():
+        row = conn.execute(
+            "SELECT name, latitude, longitude FROM landfill_sites "
+            "WHERE program='part111' AND license_id=?", (rid,)).fetchone()
+        if row:
+            out.append({"kind": "landfill", "layer": "Part 111 hazardous-waste facility",
+                        "id": rid, "name": row["name"], "lat": row["latitude"],
+                        "lng": row["longitude"]})
+    return out
+
+
 @app.route("/api/echo/facility/<registry_id>")
 def api_echo_facility(registry_id: str):
     """Full compliance/enforcement detail for one ECHO facility, lazy-loaded when a
-    marker popup opens."""
+    marker popup opens. Includes the EPA Detailed Facility Report link key (the
+    FRS Registry ID), the county for navigation, and any already-loaded cross-links
+    to our own TRI / Superfund / Part-111 records."""
     conn = db()
     if not _table_exists(conn.cursor(), "echo_facilities"):
         conn.close()
         return jsonify({"found": False}), 404
     r = conn.execute(
-        f"SELECT {_ECHO_COLS}, county FROM echo_facilities WHERE registry_id=?",
+        f"SELECT {_ECHO_COLS}, county, county_fips, matched_tri_ids, "
+        f"matched_sems_ids, matched_rcra_ids FROM echo_facilities WHERE registry_id=?",
         (registry_id,)).fetchone()
-    conn.close()
     if not r:
+        conn.close()
         return jsonify({"found": False}), 404
     payload = _echo_compliance_payload(r)
     payload["found"] = True
     payload["county"] = r["county"]
+    payload["county_fips"] = r["county_fips"]
+    # EPA's Detailed Facility Report, keyed on the FRS Registry ID (verified live).
+    payload["dfr_url"] = ("https://echo.epa.gov/detailed-facility-report?fid="
+                          + str(r["registry_id"]))
+    payload["crosslinks"] = _echo_crosslinks(conn, r)
+    conn.close()
     return jsonify(payload)
 
 

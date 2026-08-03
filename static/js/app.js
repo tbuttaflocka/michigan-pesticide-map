@@ -2896,36 +2896,67 @@
     return out.join(' ');
   }
 
+  // Plain-language descriptions of each EPA program (same explainer style as the
+  // landfill / storage-tank layers).
+  const ECHO_PROGRAM_DESC = {
+    caa: 'air pollution &amp; emissions',
+    cwa: 'water discharges &amp; permits',
+    rcra: 'hazardous-waste handling',
+    sdwa: 'public drinking-water systems',
+  };
+
   // Full ECHO facility popup (lazy-loaded detail `d`; `f` is the marker stub).
   function echoPopupHtml(d, f) {
     const color = d.status_color || (f && f.color) || '#9ca3af';
     const status = d.compliance_status || 'No status reported';
-    const prog = (label, v) => v
-      ? `<div class="row"><span class="k">${label}</span> ${esc(v)}</div>` : '';
+    // Program row with a short plain-language explainer of what it regulates.
+    const prog = (label, desc, v) => v
+      ? `<div class="row"><span class="k">${label} <span class="muted">— ${desc}</span>:</span> ${esc(v)}</div>` : '';
     const pen = echoFmtPenalty(d.total_penalties);
-    const insp = (d.inspection_count != null)
-      ? `${d.inspection_count}${d.date_last_inspection ? ` · last ${esc(d.date_last_inspection)}` : ''}`
-      : 'none recorded';
     const fa = [];
     if (d.caa_formal_action_count) fa.push(`CAA ${d.caa_formal_action_count}`);
     if (d.cwa_formal_action_count) fa.push(`CWA ${d.cwa_formal_action_count}`);
     if (d.rcra_formal_action_count) fa.push(`RCRA ${d.rcra_formal_action_count}`);
     if (d.sdwa_formal_action_count) fa.push(`SDWA ${d.sdwa_formal_action_count}`);
-    const progs = [prog('Clean Air Act:', d.caa_status),
-                   prog('Clean Water Act:', d.cwa_status),
-                   prog('RCRA (waste):', d.rcra_status),
-                   prog('Safe Drinking Water:', d.sdwa_status)].join('');
+    const progs = [prog('Clean Air Act', ECHO_PROGRAM_DESC.caa, d.caa_status),
+                   prog('Clean Water Act', ECHO_PROGRAM_DESC.cwa, d.cwa_status),
+                   prog('RCRA', ECHO_PROGRAM_DESC.rcra, d.rcra_status),
+                   prog('Safe Drinking Water Act', ECHO_PROGRAM_DESC.sdwa, d.sdwa_status)].join('');
+    // County → navigate to that county (like the rest of the app).
+    const county = d.county
+      ? (d.county_fips
+          ? `<button type="button" class="echo-county-link" data-echo-county="${esc(d.county_fips)}">${esc(d.county)} Co.</button>`
+          : `${esc(d.county)} Co.`) + ' · '
+      : '';
+    // Cross-links to our own records that this facility ID-joined (reuse the
+    // data-lf-focus handler: enable that layer + fly to the record).
+    const glyph = { tri: '🏭', contam: '☣', landfill: '🗑' };
+    const xlinks = (d.crosslinks || []).map((x) =>
+      `<button type="button" class="echo-xlink" data-lf-focus="${x.kind}"`
+      + `${x.kind === 'tri' ? ` data-id="${esc(x.id)}"` : ''}`
+      + ` data-lat="${x.lat}" data-lng="${x.lng}">`
+      + `${glyph[x.kind] || '📍'} Also in this map’s ${esc(x.layer)}: <b>${esc(x.name)}</b> · show on map →</button>`).join('');
+    // Inspections: two explicitly-labelled fields with different timeframes (a
+    // count over the last 5 years vs the date of the most recent inspection ever),
+    // so "0 · last 2013" no longer reads as a contradiction. Neither is hidden.
+    const inspCount = `<div class="row"><span class="k" title="Number of inspections / compliance-monitoring activities in the last 5 years (the 20 most recent federal fiscal quarters), official counts only">Inspections (last 5 yrs):</span> ${d.inspection_count != null ? d.inspection_count : '—'}</div>`;
+    const inspDate = d.date_last_inspection
+      ? `<div class="row"><span class="k" title="Date of the most recent inspection on record — NOT limited to the last 5 years">Most recent inspection:</span> ${esc(d.date_last_inspection)}</div>`
+      : '';
     return `<div class="echo-popup">
       <div class="echo-status"><span class="echo-badge" style="background:${color}">${esc(status)}</span> ${echoFlags(d)}</div>
       <h4>${esc(d.name || (f && f.name) || 'Facility')}</h4>
-      <div class="echo-meta">${d.county ? esc(d.county) + ' Co. · ' : ''}FRS ${esc(d.registry_id)}</div>
+      <div class="echo-meta">${county}FRS ${esc(d.registry_id)}</div>
       ${progs ? `<div class="echo-progs">${progs}</div>` : ''}
       <div class="echo-facts">
         <div class="row"><span class="k">Quarters in noncompliance:</span> ${d.qtrs_with_nc != null ? d.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>
-        <div class="row"><span class="k">Inspections:</span> ${insp}</div>
+        ${inspCount}
+        ${inspDate}
         <div class="row"><span class="k">Penalties:</span> ${d.penalty_count || 0}${pen ? ` · ${pen}` : ''}</div>
         ${fa.length ? `<div class="row"><span class="k">Formal actions:</span> ${fa.join(' · ')}</div>` : ''}
       </div>
+      ${xlinks ? `<div class="echo-xlinks">${xlinks}</div>` : ''}
+      ${d.dfr_url ? `<div class="echo-links"><a href="${d.dfr_url}" target="_blank" rel="noopener">EPA Detailed Facility Report (full report) →</a></div>` : ''}
       <div class="echo-note">Alleged violations — EPA/state determinations, not final adjudications. Status covers the last 12 federal fiscal quarters (~3&nbsp;yrs). Source: EPA ECHO.</div>
     </div>`;
   }
@@ -4251,6 +4282,16 @@
       }
       if (!Number.isNaN(lat)) state.map.setView([lat, lng], zoom);
     }
+  });
+
+  // County link inside a popup (e.g. the ECHO facility popup) — navigate to that
+  // county the same way the rest of the app does. Delegated for dynamic popups.
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest && e.target.closest('[data-echo-county]');
+    if (!el) return;
+    e.preventDefault();
+    const fips = el.getAttribute('data-echo-county');
+    if (fips) openCounty(fips);
   });
 
   // ---------- Spraying Programs directory overlay ----------
