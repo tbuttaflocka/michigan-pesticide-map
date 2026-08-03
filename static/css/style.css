@@ -2102,6 +2102,51 @@ a:hover { text-decoration: underline; }
   font-size: 10.5px; color: var(--muted);
 }
 
+/* ----- Oil & gas wells (EGLE) ----- */
+.ogw-popup { font-size: 12px; line-height: 1.45; }
+.ogw-popup h4 { margin: 5px 0 2px; font-size: 13.5px; }
+.ogw-popup .ogw-meta { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+.ogw-popup .ogw-loading { color: var(--muted); font-style: italic; padding: 6px 2px; }
+.ogw-popup .ogw-facts { margin: 6px 0; }
+.ogw-popup .row { margin: 2px 0; }
+.ogw-popup .row .k { color: var(--muted); font-weight: 600; }
+.ogw-badge {
+  display: inline-block; color: #fff; font-weight: 700; font-size: 10px;
+  padding: 1px 7px; border-radius: 9px;
+}
+.ogw-popup .ogw-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+
+/* ----- FracFocus chemical disclosures ----- */
+.ff-divicon { background: none; border: none; }
+.ff-marker {
+  color: #d6336c; font-size: 16px; line-height: 18px; text-align: center;
+  text-shadow: 0 0 2px #0d1117, 0 0 3px #0d1117; cursor: pointer;
+}
+.ff-popup { font-size: 12px; line-height: 1.45; max-height: 360px; overflow-y: auto; }
+.ff-popup h4 { margin: 5px 0 2px; font-size: 13.5px; }
+.ff-popup .ff-meta { color: var(--muted); font-size: 11px; }
+.ff-popup .ff-sub { font-weight: 600; font-size: 11px; margin: 4px 0 6px; }
+.ff-popup .row { margin: 2px 0; }
+.ff-popup .row .k { color: var(--muted); font-weight: 600; }
+.ff-disc {
+  margin: 6px 0; padding: 6px 8px; border-radius: 7px;
+  background: rgba(214,51,108,.07); border: 1px solid rgba(214,51,108,.2);
+}
+.ff-ing-head { font-weight: 700; font-size: 11px; margin: 5px 0 3px; }
+.ff-ings { margin: 0; padding-left: 16px; font-size: 11.5px; }
+.ff-ings li { margin: 1px 0; }
+.ff-secret {
+  color: #e8873c; font-weight: 600; cursor: help;
+  border-bottom: 1px dotted #e8873c;
+}
+.ff-popup .ff-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+
 /* county-panel landfill list */
 .landfill-county-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
 .landfill-li {

@@ -4104,6 +4104,182 @@ def api_echo_facility(registry_id: str):
     return jsonify(payload)
 
 
+# ---------- Oil & gas wells (EGLE) + FracFocus disclosures ----------
+#
+# 92,577 EGLE wells, so the layer never plots them all by default — the frontend
+# requests category slices (active / injection / orphan / plugged). WellStatus is
+# served VERBATIM; the colors below are categorical (for marker distinction) and
+# are NOT a severity ranking. FracFocus (the ~26 wells that carry an HVHF chemical
+# disclosure) is a SEPARATE layer keyed to wells by exact api_num = APINumber only.
+# There is NO facility-level link to any other overlay.
+
+# Assigns every well exactly one category (null status falls through to 'active').
+_OGW_CATEGORY_SQL = (
+    "CASE "
+    "WHEN (UPPER(COALESCE(well_type,'')) LIKE '%DISP%' "
+    "      OR UPPER(COALESCE(well_type,'')) LIKE '%INJ%') THEN 'injection' "
+    "WHEN well_status='Orphan' THEN 'orphan' "
+    "WHEN COALESCE(well_status,'') LIKE '%Plug%' "
+    "     OR well_status='Terminated Permit' THEN 'plugged' "
+    "ELSE 'active' END"
+)
+
+# Categorical marker colors keyed to the verbatim WellStatus (NOT a severity
+# scale). Unlisted statuses use the neutral default.
+OGW_STATUS_COLORS = {
+    "Producing": "#2f9e44",
+    "Active": "#40c057",
+    "Shut_In": "#1c7ed6",
+    "Temporarily Abandoned": "#f08c00",
+    "Permitted Well": "#74c0fc",
+    "Well Completed": "#63e6be",
+    "Drilling Completed": "#38d9a9",
+    "Orphan": "#e03131",
+    "Injection Suspended": "#9775fa",
+    "Plugging Approved": "#868e96",
+    "Plugging Approved - Part 616": "#adb5bd",
+    "Plugging Completed": "#495057",
+    "Plugging Completed- Part 616": "#343a40",
+    "Plugged Back": "#6c757d",
+    "Terminated Permit": "#ced4da",
+}
+OGW_STATUS_DEFAULT_COLOR = "#adb5bd"
+
+
+def _ogw_color(status):
+    return OGW_STATUS_COLORS.get(status, OGW_STATUS_DEFAULT_COLOR)
+
+
+@app.route("/api/oil-gas/wells")
+def api_oil_gas_wells():
+    """EGLE oil/gas well markers by category so we never ship all 92,577 at once.
+    ?cats=active,injection,orphan (comma list; 'plugged' is opt-in). Markers carry
+    only id/lat/lng/status; full popup detail is lazy-loaded per well."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "oil_gas_wells"):
+        conn.close()
+        return jsonify({"available": False, "wells": [], "counts": {}, "statuses": []})
+    counts = {row["c"]: row["n"] for row in conn.execute(
+        f"SELECT {_OGW_CATEGORY_SQL} c, COUNT(*) n FROM oil_gas_wells GROUP BY c")}
+    counts["total"] = sum(counts.values())
+    valid = {"active", "injection", "orphan", "plugged"}
+    cats = [c for c in request.args.get("cats", "active,injection,orphan").split(",")
+            if c in valid]
+    wells = []
+    if cats:
+        ph = ",".join("?" * len(cats))
+        rows = conn.execute(
+            f"""SELECT id, latitude, longitude, well_status, {_OGW_CATEGORY_SQL} AS cat
+                  FROM oil_gas_wells
+                 WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+                   AND {_OGW_CATEGORY_SQL} IN ({ph})""", cats).fetchall()
+        wells = [{"id": r["id"], "lat": r["latitude"], "lng": r["longitude"],
+                  "status": r["well_status"], "color": _ogw_color(r["well_status"]),
+                  "cat": r["cat"]} for r in rows]
+    conn.close()
+    statuses = [{"label": k, "color": v} for k, v in OGW_STATUS_COLORS.items()]
+    return jsonify({"available": True, "counts": counts, "statuses": statuses,
+                    "wells": wells})
+
+
+@app.route("/api/oil-gas/well/<int:well_id>")
+def api_oil_gas_well(well_id: int):
+    """Full popup detail for one EGLE well (lazy-loaded on marker click)."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "oil_gas_wells"):
+        conn.close()
+        return jsonify({"found": False}), 404
+    r = conn.execute("SELECT * FROM oil_gas_wells WHERE id=?", (well_id,)).fetchone()
+    conn.close()
+    if not r:
+        return jsonify({"found": False}), 404
+    return jsonify({
+        "found": True,
+        "well_name_full": r["well_name_full"], "well_name": r["well_name"],
+        "operator": r["company_name"], "well_type": r["well_type"],
+        "well_status": r["well_status"], "status_color": _ogw_color(r["well_status"]),
+        "producing_formation": r["producing_formation"],
+        "dtd": r["dtd"], "tvd": r["tvd"],
+        "permit_date": r["permit_date"], "plugging_date": r["plugging_date"],
+        "h2s": r["concentration_h2s"], "api_num": r["api_num"],
+        "county_fips": r["county_fips"],
+    })
+
+
+@app.route("/api/oil-gas/fracfocus")
+def api_oil_gas_fracfocus():
+    """Michigan wells that carry a FracFocus HVHF chemical disclosure, matched to
+    EGLE wells by exact api_num = APINumber. Markers only; per-well disclosure +
+    ingredient detail is lazy-loaded. Also returns the dataset-wide masked share."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "fracfocus_disclosures"):
+        conn.close()
+        return jsonify({"available": False, "wells": [], "count": 0})
+    rows = conn.execute("""
+        SELECT w.api_num, MIN(w.latitude) lat, MIN(w.longitude) lng,
+               MIN(w.well_name_full) name, MIN(w.company_name) operator,
+               COUNT(DISTINCT d.disclosure_key) disclosures
+          FROM oil_gas_wells w
+          JOIN fracfocus_disclosures d ON d.matched_api_num = w.api_num
+         WHERE w.latitude IS NOT NULL AND w.longitude IS NOT NULL
+      GROUP BY w.api_num""").fetchall()
+    ing_total = conn.execute("SELECT COUNT(*) FROM fracfocus_ingredients").fetchone()[0]
+    ing_masked = conn.execute(
+        "SELECT COUNT(*) FROM fracfocus_ingredients WHERE is_masked=1").fetchone()[0]
+    conn.close()
+    wells = [{"api_num": r["api_num"], "lat": r["lat"], "lng": r["lng"],
+              "name": r["name"], "operator": r["operator"],
+              "disclosures": r["disclosures"]} for r in rows]
+    masked_pct = round(100.0 * ing_masked / ing_total, 1) if ing_total else 0.0
+    return jsonify({"available": True, "count": len(wells), "wells": wells,
+                    "ingredient_total": ing_total, "ingredient_masked": ing_masked,
+                    "masked_pct": masked_pct})
+
+
+@app.route("/api/oil-gas/fracfocus/<api_num>")
+def api_oil_gas_fracfocus_well(api_num: str):
+    """Disclosure(s) + ingredient records for one FracFocus-matched well. Trade-
+    secret masking is returned VERBATIM (never hidden or guessed); is_masked is a
+    flag for the UI, not a replacement of the published value."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "fracfocus_disclosures"):
+        conn.close()
+        return jsonify({"found": False}), 404
+    discs = conn.execute("""
+        SELECT disclosure_key, operator_name, well_name, total_base_water_volume,
+               tvd, job_start_date, job_end_date, county_name
+          FROM fracfocus_disclosures WHERE matched_api_num=?
+      ORDER BY job_start_date""", (api_num,)).fetchall()
+    if not discs:
+        conn.close()
+        return jsonify({"found": False}), 404
+    keys = [d["disclosure_key"] for d in discs]
+    ph = ",".join("?" * len(keys))
+    ing: dict = {}
+    for r in conn.execute(
+        f"""SELECT disclosure_key, ingredient_name, cas_number, percent_hf_job,
+                   mass_ingredient, is_masked
+              FROM fracfocus_ingredients WHERE disclosure_key IN ({ph})
+          ORDER BY is_masked, cas_number""", keys):
+        ing.setdefault(r["disclosure_key"], []).append({
+            "name": r["ingredient_name"], "cas": r["cas_number"],
+            "pct": r["percent_hf_job"], "mass": r["mass_ingredient"],
+            "masked": bool(r["is_masked"])})
+    conn.close()
+    out, total, masked = [], 0, 0
+    for d in discs:
+        rows = ing.get(d["disclosure_key"], [])
+        total += len(rows)
+        masked += sum(1 for x in rows if x["masked"])
+        out.append({
+            "operator": d["operator_name"], "well_name": d["well_name"],
+            "water_volume": d["total_base_water_volume"], "tvd": d["tvd"],
+            "job_start": d["job_start_date"], "job_end": d["job_end_date"],
+            "county": d["county_name"], "ingredients": rows})
+    return jsonify({"found": True, "api_num": api_num, "disclosures": out,
+                    "ingredient_total": total, "ingredient_masked": masked})
+
+
 # ---------- Golf courses overlay (OpenStreetMap) ----------
 
 def _golf_row(r) -> dict:

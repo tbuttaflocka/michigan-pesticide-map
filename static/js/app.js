@@ -214,6 +214,27 @@
       _canvas: null,               // dedicated L.canvas() renderer (removed on hide)
       _detail: {},                 // registry_id -> lazy-loaded full popup detail
     },
+    oilGas: {                      // EGLE oil & gas wells (92,577 — never all by
+                                   // default; category slices)
+      showSites: false,
+      // Sub-toggles by category: active/injection/orphan on; plugged (~74k) opt-in.
+      filters: { active: true, injection: true, orphan: true, plugged: false },
+      data: {},                    // category -> wells[] (cached slice)
+      loading: {},                 // category -> in-flight Promise (dedupe)
+      counts: {},                  // per-category totals
+      statuses: [],                // legend [{label,color}] (verbatim WellStatus)
+      layer: null,                 // L.layerGroup of circleMarkers
+      _canvas: null,               // dedicated L.canvas() renderer (removed on hide)
+      _detail: {},                 // well id -> lazy-loaded popup detail
+    },
+    fracfocus: {                   // FracFocus HVHF chemical disclosures (~26 wells)
+      loaded: false,
+      showSites: false,
+      wells: [],                   // from /api/oil-gas/fracfocus
+      maskedPct: null,             // dataset-wide masked share (~12.5%)
+      layer: null,                 // L.layerGroup of divIcon markers (small, no canvas)
+      _detail: {},                 // api_num -> lazy-loaded disclosures+ingredients
+    },
     golf: {
       loaded: false,
       sites: [],                   // from /api/golf/sites
@@ -3024,6 +3045,254 @@
     el.textContent = seen.size ? `${seen.size.toLocaleString()} facilities shown` : 'No facilities in the selected filters';
   }
 
+  // ---------- Oil & gas wells (EGLE) ----------
+  //
+  // 92,577 wells, so category slices only (active/injection/orphan on; the ~74k
+  // plugged/historical slice is opt-in). Points render as circleMarkers on a
+  // DEDICATED canvas renderer. Canvas rule (this has bitten three times): keep the
+  // renderer attached across ordinary re-renders; detach AND null the ref only when
+  // the layer is hidden or ends up empty, so the next show builds a fresh renderer
+  // that repaints without a viewreset and no ghost <canvas> eats county clicks.
+
+  function oilGasPane() {
+    if (!state.map.getPane('oilgas')) {
+      state.map.createPane('oilgas').style.zIndex = 646;
+    }
+    return 'oilgas';
+  }
+
+  function oilGasCanvasRenderer() {
+    if (!state.oilGas._canvas) {
+      oilGasPane();
+      state.oilGas._canvas = L.canvas({ pane: 'oilgas', padding: 0.5 });
+    }
+    return state.oilGas._canvas;
+  }
+
+  async function loadOilGas(cat) {
+    if (state.oilGas.data[cat]) return;
+    if (!state.oilGas.loading[cat]) {
+      state.oilGas.loading[cat] = api('/api/oil-gas/wells', { cats: cat })
+        .then((d) => {
+          state.oilGas.data[cat] = d.wells || [];
+          if (d.counts) state.oilGas.counts = d.counts;
+          if (d.statuses && d.statuses.length) state.oilGas.statuses = d.statuses;
+        })
+        .finally(() => { delete state.oilGas.loading[cat]; });
+    }
+    await state.oilGas.loading[cat];
+  }
+
+  function ogwFmtDepth(dtd, tvd) {
+    const bits = [];
+    if (dtd) bits.push(`${Math.round(dtd).toLocaleString()} ft drilled`);
+    if (tvd) bits.push(`${Math.round(tvd).toLocaleString()} ft TVD`);
+    return bits.join(' · ') || null;
+  }
+
+  function ogwPopupHtml(d, w) {
+    const color = d.status_color || (w && w.color) || '#adb5bd';
+    const row = (k, v) => v ? `<div class="row"><span class="k">${k}</span> ${esc(v)}</div>` : '';
+    const depth = ogwFmtDepth(d.dtd, d.tvd);
+    const h2s = (d.h2s != null && d.h2s > 0)
+      ? `${d.h2s}` : null;   // only surface a real (sour-gas) H2S concentration
+    return `<div class="ogw-popup">
+      <div class="ogw-status"><span class="ogw-badge" style="background:${color}">${esc(d.well_status || 'Status not reported')}</span></div>
+      <h4>${esc(d.well_name_full || d.well_name || 'Well')}</h4>
+      ${d.operator ? `<div class="ogw-meta">${esc(d.operator)}</div>` : ''}
+      <div class="ogw-facts">
+        ${row('Type:', d.well_type)}
+        ${row('Formation:', d.producing_formation)}
+        ${row('Depth:', depth)}
+        ${row('Permitted:', d.permit_date)}
+        ${row('Plugged:', d.plugging_date)}
+        ${h2s ? row('H₂S concentration:', h2s) : ''}
+        ${row('API number:', d.api_num)}
+      </div>
+      <div class="ogw-note">EGLE GRMD well record. This dataset has no hydraulic-fracturing flag or fluid-volume field — see the layer info.</div>
+    </div>`;
+  }
+
+  function bindOgwDetail(m, w) {
+    m.on('popupopen', async () => {
+      if (m._ogwLoaded) return;
+      try {
+        let d = state.oilGas._detail[w.id];
+        if (!d) {
+          d = await api('/api/oil-gas/well/' + encodeURIComponent(w.id));
+          state.oilGas._detail[w.id] = d;
+        }
+        m._ogwLoaded = true;
+        m.setPopupContent(ogwPopupHtml(d, w));
+      } catch (err) {
+        m.setPopupContent('<div class="ogw-popup"><p class="muted small">Could not load the well record.</p></div>');
+      }
+    });
+  }
+
+  function renderOilGasMarkers() {
+    if (state.oilGas.layer) { state.oilGas.layer.remove(); state.oilGas.layer = null; }
+    if (!state.oilGas.showSites) {
+      // Hidden: detach + null the canvas (ghost-canvas guard) so the next show
+      // builds a fresh renderer that repaints without a zoom/pan.
+      removeCanvasRenderer(state.oilGas._canvas);
+      state.oilGas._canvas = null;
+      updateOilGasStats();
+      renderMarkerKeys();
+      return;
+    }
+    const pane = oilGasPane();
+    const renderer = oilGasCanvasRenderer();
+    const grp = L.layerGroup();
+    let n = 0;
+    for (const cat of ['active', 'injection', 'orphan', 'plugged']) {
+      if (!state.oilGas.filters[cat] || !state.oilGas.data[cat]) continue;
+      for (const w of state.oilGas.data[cat]) {
+        if (w.lat == null || w.lng == null) continue;
+        const m = L.circleMarker([w.lat, w.lng], {
+          pane, renderer, radius: 4, weight: 0.8, color: '#0d1117',
+          opacity: 0.85, fillColor: w.color, fillOpacity: 0.85,
+        });
+        m.bindPopup('<div class="ogw-popup"><div class="ogw-loading">Loading well record…</div></div>',
+          { maxWidth: 320, className: 'ogw-popup-wrap' });
+        bindOgwDetail(m, w);
+        grp.addLayer(m);
+        n += 1;
+      }
+    }
+    grp.addTo(state.map);
+    state.oilGas.layer = grp;
+    if (n === 0) {   // empty render: drop the canvas so no blank <canvas> lingers
+      removeCanvasRenderer(state.oilGas._canvas);
+      state.oilGas._canvas = null;
+    }
+    updateOilGasStats();
+    renderMarkerKeys();
+  }
+
+  function updateOilGasStats() {
+    const leg = $('oilgas-legend');
+    if (leg) {
+      leg.innerHTML = (state.oilGas.showSites && state.oilGas.statuses.length)
+        ? state.oilGas.statuses.map((s) =>
+            `<span class="echo-key"><span class="cdot" style="background:${s.color}"></span>${esc(s.label)}</span>`).join('')
+        : '';
+    }
+    const el = $('oilgas-stats');
+    if (!el) return;
+    if (!state.oilGas.showSites) { el.textContent = ''; return; }
+    let n = 0;
+    for (const k of ['active', 'injection', 'orphan', 'plugged']) {
+      if (state.oilGas.filters[k] && state.oilGas.data[k]) n += state.oilGas.data[k].length;
+    }
+    el.textContent = n ? `${n.toLocaleString()} wells shown` : 'No wells in the selected categories';
+  }
+
+  // ---------- Hydraulic-fracturing chemical disclosures (FracFocus) ----------
+  // Separate layer, ~26 wells — small enough for plain divIcon markers (no canvas).
+
+  function fracfocusPane() {
+    if (!state.map.getPane('fracfocus')) {
+      state.map.createPane('fracfocus').style.zIndex = 652;   // above the well layer
+    }
+    return 'fracfocus';
+  }
+
+  async function loadFracfocus() {
+    if (state.fracfocus.loaded) return;
+    const d = await api('/api/oil-gas/fracfocus');
+    state.fracfocus.wells = d.wells || [];
+    state.fracfocus.maskedPct = (d.masked_pct != null ? d.masked_pct : 12.5);
+    state.fracfocus.loaded = true;
+  }
+
+  // A CAS number that FracFocus discloses (not a trade-secret placeholder) links to
+  // PubChem; masked entries are shown verbatim with no link and never guessed.
+  function ffCasHtml(ing) {
+    if (ing.masked) {
+      return `<span class="ff-secret" title="Withheld by the operator as a trade secret — shown verbatim as published, not guessed">${esc(ing.cas || 'Trade secret')}</span>`;
+    }
+    if (ing.cas && /^\d{2,7}-\d{2}-\d$/.test(ing.cas)) {
+      return `<a href="https://pubchem.ncbi.nlm.nih.gov/#query=${encodeURIComponent(ing.cas)}" target="_blank" rel="noopener">${esc(ing.cas)}</a>`;
+    }
+    return ing.cas ? esc(ing.cas) : '';
+  }
+
+  function ffFmtVol(v) {
+    return (v == null || v === '') ? null : `${Math.round(v).toLocaleString()} gal`;
+  }
+
+  function ffPopupHtml(d, w) {
+    const pct = state.fracfocus.maskedPct;
+    const discs = (d.disclosures || []).map((disc) => {
+      const ings = (disc.ingredients || [])
+        .filter((i) => i.name || i.cas)          // skip empty registry rows
+        .map((i) => {
+          const cas = ffCasHtml(i);
+          const p = (i.pct != null && i.pct !== '') ? ` <span class="muted">· ${(+i.pct).toPrecision(3)}% of job</span>` : '';
+          return `<li>${i.name ? esc(i.name) : '<span class="muted">(unnamed)</span>'}${cas ? ` — CAS ${cas}` : ''}${p}</li>`;
+        }).join('');
+      const dates = [disc.job_start, disc.job_end].filter(Boolean).join(' – ');
+      const vol = ffFmtVol(disc.water_volume);
+      return `<div class="ff-disc">
+        ${dates ? `<div class="row"><span class="k">Job:</span> ${esc(dates)}</div>` : ''}
+        ${vol ? `<div class="row"><span class="k">Base water volume:</span> ${esc(vol)}</div>` : ''}
+        <div class="ff-ing-head">Ingredients disclosed (${(disc.ingredients || []).filter((i) => i.name || i.cas).length})</div>
+        <ul class="ff-ings">${ings}</ul>
+      </div>`;
+    }).join('');
+    return `<div class="ff-popup">
+      <h4>${esc((w && w.name) || 'Well')}</h4>
+      ${w && w.operator ? `<div class="ff-meta">${esc(w.operator)}</div>` : ''}
+      <div class="ff-sub">Hydraulic-fracturing chemical disclosure — FracFocus</div>
+      ${discs}
+      <div class="ff-note">Operators may withhold ingredient identities as trade secrets; about ${pct}% of Michigan ingredient records are masked and shown here verbatim as published (never guessed). CAS numbers link to PubChem. Source: FracFocus.</div>
+    </div>`;
+  }
+
+  function bindFfDetail(m, w) {
+    m.on('popupopen', async () => {
+      if (m._ffLoaded) return;
+      try {
+        let d = state.fracfocus._detail[w.api_num];
+        if (!d) {
+          d = await api('/api/oil-gas/fracfocus/' + encodeURIComponent(w.api_num));
+          state.fracfocus._detail[w.api_num] = d;
+        }
+        m._ffLoaded = true;
+        m.setPopupContent(ffPopupHtml(d, w));
+      } catch (err) {
+        m.setPopupContent(`<div class="ff-popup"><h4>${esc(w.name || 'Well')}</h4>`
+          + '<p class="muted small">Could not load the disclosure.</p></div>');
+      }
+    });
+  }
+
+  function renderFracfocus() {
+    if (state.fracfocus.layer) { state.fracfocus.layer.remove(); state.fracfocus.layer = null; }
+    if (!state.fracfocus.showSites) { renderMarkerKeys(); return; }
+    const pane = fracfocusPane();
+    const grp = L.layerGroup();
+    for (const w of state.fracfocus.wells) {
+      if (w.lat == null || w.lng == null) continue;
+      const m = L.marker([w.lat, w.lng], {
+        pane,
+        icon: L.divIcon({
+          className: 'ff-divicon',
+          html: '<div class="ff-marker" title="Hydraulic-fracturing chemical disclosure (FracFocus)">◆</div>',
+          iconSize: [18, 18], iconAnchor: [9, 9],
+        }),
+      });
+      m.bindPopup('<div class="ff-popup"><div class="ogw-loading">Loading disclosure…</div></div>',
+        { maxWidth: 340, className: 'ff-popup-wrap' });
+      bindFfDetail(m, w);
+      grp.addLayer(m);
+    }
+    grp.addTo(state.map);
+    state.fracfocus.layer = grp;
+    renderMarkerKeys();
+  }
+
   function updateLandfillStats() {
     const el = $('landfill-stats');
     if (!el) return;
@@ -5117,6 +5386,48 @@
       });
     });
 
+    // Oil & gas wells (independent overlay) + category sub-toggles.
+    const ogwToggle = $('oilgas-sites');
+    if (ogwToggle) {
+      ogwToggle.addEventListener('change', async (e) => {
+        state.oilGas.showSites = e.target.checked;
+        if (e.target.checked) {
+          await Promise.all(['active', 'injection', 'orphan', 'plugged']
+            .filter((k) => state.oilGas.filters[k]).map((k) => loadOilGas(k)));
+        }
+        renderOilGasMarkers();
+      });
+    }
+    ['active', 'injection', 'orphan', 'plugged'].forEach((k) => {
+      const cb = $(`oilgas-f-${k}`);
+      if (!cb) return;
+      cb.addEventListener('change', async (e) => {
+        // Guard the ~74k plugged/historical slice behind a confirm — real user
+        // clicks only (e.isTrusted); the deep-link decoder's synthetic events
+        // (isTrusted=false) must restore silently.
+        if (k === 'plugged' && e.target.checked && e.isTrusted) {
+          const n = (state.oilGas.counts && state.oilGas.counts.plugged) || 74000;
+          const ok = window.confirm(
+            `Show all ${n.toLocaleString()} plugged / historical wells? Plotting `
+            + 'this many points can slow the map.');
+          if (!ok) { e.target.checked = false; return; }
+        }
+        state.oilGas.filters[k] = e.target.checked;
+        if (e.target.checked && state.oilGas.showSites) await loadOilGas(k);
+        renderOilGasMarkers();
+      });
+    });
+
+    // Hydraulic-fracturing chemical disclosures (FracFocus) — separate overlay.
+    const ffToggle = $('fracfocus-sites');
+    if (ffToggle) {
+      ffToggle.addEventListener('change', async (e) => {
+        state.fracfocus.showSites = e.target.checked;
+        if (e.target.checked) await loadFracfocus();
+        renderFracfocus();
+      });
+    }
+
     // Golf courses (independent overlay) + ownership filters.
     const golfToggle = $('golf-sites');
     if (golfToggle) {
@@ -6791,6 +7102,10 @@
              ['c', 'landfill-f-coal_ash'], ['h', 'landfill-f-hazardous']] },
     { c: 'echo', cb: 'echo-sites', def: 'sv',
       subs: [['s', 'echo-f-snc'], ['v', 'echo-f-violation'], ['a', 'echo-f-all']] },
+    { c: 'ogw', cb: 'oilgas-sites', def: 'aio',
+      subs: [['a', 'oilgas-f-active'], ['i', 'oilgas-f-injection'],
+             ['o', 'oilgas-f-orphan'], ['p', 'oilgas-f-plugged']] },
+    { c: 'ffx', cb: 'fracfocus-sites' },
     { c: 'gf',  cb: 'golf-sites', def: 'mpu',
       subs: [['m', 'golf-f-municipal'], ['p', 'golf-f-private'], ['u', 'golf-f-unknown']] },
     { c: 'pf',  cb: 'pfas-sites', def: 'saw',
