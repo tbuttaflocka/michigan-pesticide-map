@@ -6669,6 +6669,122 @@
         setTimeout(() => { try { state.map.setView([m[0], m[1]], zoom); } catch (e) { /* ignore */ } }, 60);
       }
     }
+
+    // A shared link may have just enabled a layer inside a collapsed section —
+    // reveal it so the user can find the control that turned those markers on.
+    expandSectionsForActiveLayers();
+  }
+
+  // ===================== Collapsible overlay sections =====================
+  // The Overlays panel groups toggles under .overlay-subhead headers (PFAS,
+  // Storage tanks, Land cover, Wind & drift). Each header collapses/expands the
+  // sibling elements that follow it (up to the next header) by toggling a
+  // display:none class — the elements stay in the DOM, so every existing toggle
+  // listener remains wired. State persists in localStorage; on ANY failure we
+  // default to expanded so the sidebar is never left unreadable.
+  const SECTION_LS_KEY = 'pm_overlay_sections_v1';
+  const _sections = [];   // { key, head, members:[el], badge }
+
+  function _readSectionPrefs() {
+    try {
+      const raw = localStorage.getItem(SECTION_LS_KEY);
+      const o = raw ? JSON.parse(raw) : {};
+      return (o && typeof o === 'object') ? o : {};
+    } catch (e) { return {}; }
+  }
+  function _writeSectionPrefs() {
+    try {
+      const o = {};
+      for (const s of _sections) o[s.key] = !s.head.classList.contains('ov-collapsed');
+      localStorage.setItem(SECTION_LS_KEY, JSON.stringify(o));
+    } catch (e) { /* non-persistent is acceptable */ }
+  }
+
+  function _updateSectionBadge(s) {
+    const collapsed = s.head.classList.contains('ov-collapsed');
+    // Count only the ON main layer toggles (not sub-filter checkboxes).
+    let n = 0;
+    for (const el of s.members) {
+      if (el.classList && el.classList.contains('overlay-toggle')) {
+        const inp = el.querySelector('input[type=checkbox]');
+        if (inp && inp.checked) n++;
+      }
+    }
+    if (collapsed && n > 0) {
+      s.badge.textContent = String(n);
+      s.badge.hidden = false;
+      s.badge.title = `${n} active layer${n > 1 ? 's' : ''} in this collapsed section`;
+    } else {
+      s.badge.hidden = true;
+      s.badge.removeAttribute('title');
+    }
+  }
+
+  function _setSectionExpanded(s, expanded) {
+    s.head.classList.toggle('ov-collapsed', !expanded);
+    s.head.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    for (const el of s.members) el.classList.toggle('ov-hidden', !expanded);
+    _updateSectionBadge(s);
+  }
+
+  function initSectionCollapse() {
+    const heads = document.querySelectorAll('.overlay-subhead.ov-sec-head');
+    if (!heads.length) return;
+    const prefs = _readSectionPrefs();
+    heads.forEach((head) => {
+      const members = [];
+      let el = head.nextElementSibling;
+      while (el && !el.classList.contains('overlay-subhead')) {
+        el.classList.add('ov-sec-member');
+        members.push(el);
+        el = el.nextElementSibling;
+      }
+      const s = { key: head.dataset.section, head, members, badge: head.querySelector('.ov-badge') };
+      _sections.push(s);
+
+      const toggle = () => {
+        const willExpand = head.classList.contains('ov-collapsed');   // collapsed -> expand
+        _setSectionExpanded(s, willExpand);
+        _writeSectionPrefs();
+      };
+      head.addEventListener('click', (e) => {
+        if (e.target.closest('.info-i')) return;   // don't collapse when the ℹ tooltip is clicked
+        toggle();
+      });
+      head.addEventListener('keydown', (e) => {
+        if (e.target.closest('.info-i')) return;
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          toggle();
+        }
+      });
+
+      // Restore saved state; default to expanded when absent or unreadable.
+      const saved = prefs[s.key];
+      _setSectionExpanded(s, saved === undefined ? true : !!saved);
+    });
+
+    // Keep the collapsed-section badges accurate as layers toggle on/off.
+    const group = heads[0].closest('.layer-group');
+    if (group) {
+      group.addEventListener('change', () => {
+        for (const s of _sections) _updateSectionBadge(s);
+      });
+    }
+  }
+
+  // Reveal (UI only — does not overwrite the saved preference) any collapsed
+  // section that now contains an active layer, e.g. after a deep link loads.
+  function expandSectionsForActiveLayers() {
+    for (const s of _sections) {
+      if (!s.head.classList.contains('ov-collapsed')) continue;
+      const hasActive = s.members.some((el) => {
+        if (!(el.classList && el.classList.contains('overlay-toggle'))) return false;
+        const inp = el.querySelector('input[type=checkbox]');
+        return inp && inp.checked;
+      });
+      if (hasActive) _setSectionExpanded(s, true);
+    }
   }
 
   async function boot() {
@@ -6922,6 +7038,7 @@
     setupTooltips();
     setupMobileUI();
     setupChemLinks();
+    initSectionCollapse();
     wireIntro();
     maybeShowIntroOnFirstVisit();
     boot();

@@ -1092,6 +1092,48 @@ a:hover { text-decoration: underline; }
   font-style: italic; opacity: .8;
 }
 
+/* Collapsible overlay sections: the .overlay-subhead becomes a toggle button.
+   Members are hidden with display:none (kept in the DOM so listeners survive). */
+.overlay-subhead.ov-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.overlay-subhead.ov-sec-head:hover { color: var(--text); }
+.overlay-subhead.ov-sec-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.ov-chevron {
+  flex: 0 0 auto;
+  width: 0; height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform: rotate(90deg);            /* points down = expanded */
+  transition: transform .15s ease;
+}
+.overlay-subhead.ov-collapsed .ov-chevron { transform: rotate(0deg); }  /* points right */
+.ov-badge {
+  margin-left: auto;
+  flex: 0 0 auto;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  min-width: 15px;
+  text-align: center;
+  border-radius: 8px;
+  padding: 0 5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ov-hidden { display: none !important; }
+
 /* ---------- wind roses / drift arrows / drift zones ---------- */
 /* strip Leaflet's default white divIcon chrome */
 .wind-rose-icon, .drift-arrow-icon {
