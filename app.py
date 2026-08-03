@@ -4322,6 +4322,145 @@ def api_oil_gas_fracfocus_well(api_num: str):
                     "ingredient_total": total, "ingredient_masked": masked})
 
 
+# ---------- Power plants (EIA-860 inventory + EPA CAMD emissions) ----------
+#
+# 289 EIA plants. Grouped into obvious fuel families (fossil / nuclear / renewable
+# / storage / other) from EIA's verbatim energy_source_code — families are for
+# categorical filtering + coloring, NOT a harm ranking. Only the 33 plants that
+# join to CAMD by exact ORIS carry measured emissions; the rest state plainly they
+# do not report to CAMD (and why). No facility-level link to any other layer.
+
+# EIA energy_source_code -> fuel family. Extra codes included defensively so a
+# future refresh never silently drops a fuel into "other".
+_PP_FUEL_FAMILY = {
+    # fossil combustion
+    "NG": "fossil", "DFO": "fossil", "BIT": "fossil", "SUB": "fossil",
+    "LIG": "fossil", "RC": "fossil", "PC": "fossil", "BFG": "fossil",
+    "RFO": "fossil", "KER": "fossil", "JF": "fossil", "WO": "fossil", "SGC": "fossil",
+    # nuclear
+    "NUC": "nuclear",
+    # renewable (incl biomass / waste-to-energy, per EIA's renewable convention)
+    "SUN": "renewable", "WND": "renewable", "WAT": "renewable", "GEO": "renewable",
+    "LFG": "renewable", "WDS": "renewable", "BLQ": "renewable", "OBG": "renewable",
+    "MSW": "renewable", "MSB": "renewable", "AB": "renewable", "OBL": "renewable",
+    "WDL": "renewable", "SLW": "renewable", "WH": "renewable", "OBS": "renewable",
+    # storage
+    "MWH": "storage", "PS": "storage",
+}
+# Non-combustion primary fuels — used only to word the "why no CAMD data" note.
+_PP_NONCOMBUSTION = {"SUN", "WND", "WAT", "NUC", "MWH", "PS", "GEO"}
+# Family display metadata (categorical colors, NOT a severity/harm scale).
+_PP_FAMILY_META = {
+    "fossil":    ("#8c7a6b", "Fossil (coal, gas, oil)"),
+    "nuclear":   ("#845ef7", "Nuclear"),
+    "renewable": ("#2f9e44", "Renewable (wind, solar, hydro, biomass)"),
+    "storage":   ("#1c7ed6", "Storage"),
+    "other":     ("#adb5bd", "Other"),
+}
+
+
+def _pp_family(code):
+    return _PP_FUEL_FAMILY.get(code, "other")
+
+
+@app.route("/api/power-plants")
+def api_power_plants():
+    """One marker per EIA plant (generators grouped by plant_code). Carries the
+    fuel family (for the sub-toggles + categorical color) and in_camd (whether the
+    plant reports measured emissions to CAMD). Full detail is lazy-loaded."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "power_plants"):
+        conn.close()
+        return jsonify({"available": False, "plants": [], "families": [], "counts": {}})
+    rows = conn.execute("SELECT * FROM power_plants").fetchall()
+    conn.close()
+    plants: dict = {}
+    for r in rows:
+        p = plants.setdefault(r["plant_code"], {
+            "code": r["plant_code"], "name": r["plant_name"],
+            "lat": r["latitude"], "lng": r["longitude"], "county": r["county"],
+            "in_camd": bool(r["in_camd"]), "gens": []})
+        if p["lat"] is None and r["latitude"] is not None:
+            p["lat"], p["lng"] = r["latitude"], r["longitude"]
+        if not p["county"] and r["county"]:
+            p["county"] = r["county"]
+        p["gens"].append(r)
+    out = []
+    for p in plants.values():
+        dom = max(p["gens"], key=lambda g: (g["nameplate_capacity_mw"] or 0))
+        fam = _pp_family(dom["energy_source_code"])
+        out.append({
+            "code": p["code"], "name": p["name"], "lat": p["lat"], "lng": p["lng"],
+            "county": p["county"], "family": fam,
+            "color": _PP_FAMILY_META[fam][0],
+            "energy_source": dom["energy_source_desc"],
+            "total_mw": round(sum((g["nameplate_capacity_mw"] or 0) for g in p["gens"]), 1),
+            "in_camd": p["in_camd"]})
+    counts = {"total": len(out), "camd": sum(1 for p in out if p["in_camd"])}
+    for p in out:
+        counts[p["family"]] = counts.get(p["family"], 0) + 1
+    families = [{"key": k, "label": v[1], "color": v[0]}
+                for k, v in _PP_FAMILY_META.items()]
+    return jsonify({"available": True, "plants": out, "families": families,
+                    "counts": counts})
+
+
+@app.route("/api/power-plants/<plant_code>")
+def api_power_plant(plant_code: str):
+    """Full popup detail for one plant: generator attributes, and — only for the
+    plants that join CAMD by exact ORIS — the measured (CEMS, 40 CFR Part 75)
+    annual SO2/NOx/CO2 for the most recent COMPLETE year plus a trend. Never
+    fabricates zeros for non-CAMD plants."""
+    conn = db()
+    if not _table_exists(conn.cursor(), "power_plants"):
+        conn.close()
+        return jsonify({"found": False}), 404
+    gens = conn.execute("SELECT * FROM power_plants WHERE plant_code=?",
+                        (plant_code,)).fetchall()
+    if not gens:
+        conn.close()
+        return jsonify({"found": False}), 404
+    dom = max(gens, key=lambda g: (g["nameplate_capacity_mw"] or 0))
+    fam = _pp_family(dom["energy_source_code"])
+    combustion = dom["energy_source_code"] not in _PP_NONCOMBUSTION
+    in_camd = bool(dom["in_camd"])
+    retires = [g["planned_retirement"] for g in gens if g["planned_retirement"]]
+    payload = {
+        "found": True, "code": plant_code, "name": dom["plant_name"],
+        "operator": dom["entity_name"],
+        "county": next((g["county"] for g in gens if g["county"]), None),
+        "lat": dom["latitude"], "lng": dom["longitude"],
+        "family": fam, "family_label": _PP_FAMILY_META[fam][1],
+        "combustion": combustion, "in_camd": in_camd,
+        "total_mw": round(sum((g["nameplate_capacity_mw"] or 0) for g in gens), 1),
+        "energy_sources": sorted({g["energy_source_desc"] for g in gens if g["energy_source_desc"]}),
+        "statuses": sorted({g["status_description"] for g in gens if g["status_description"]}),
+        "planned_retirement": min(retires) if retires else None,
+        "generators": [{
+            "id": g["generator_id"], "energy_source": g["energy_source_desc"],
+            "technology": g["technology"], "mw": g["nameplate_capacity_mw"],
+            "status": g["status_description"],
+            "planned_retirement": g["planned_retirement"]} for g in gens],
+        "emissions": None,
+    }
+    if in_camd and plant_code.isdigit():
+        erows = conn.execute(
+            """SELECT year, SUM(so2_mass) so2, SUM(nox_mass) nox, SUM(co2_mass) co2
+                 FROM power_plant_emissions WHERE facility_id=?
+             GROUP BY year ORDER BY year""", (int(plant_code),)).fetchall()
+        cur_year = datetime.now(timezone.utc).year
+        allyrs = [{"year": r["year"], "so2": r["so2"], "nox": r["nox"], "co2": r["co2"]}
+                  for r in erows]
+        complete = [y for y in allyrs if y["year"] < cur_year]
+        payload["emissions"] = {
+            "latest": (complete[-1] if complete else (allyrs[-1] if allyrs else None)),
+            "trend": complete,
+            "current_year_partial": any(y["year"] == cur_year for y in allyrs),
+        }
+    conn.close()
+    return jsonify(payload)
+
+
 # ---------- Golf courses overlay (OpenStreetMap) ----------
 
 def _golf_row(r) -> dict:

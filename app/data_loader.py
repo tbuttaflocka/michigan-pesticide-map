@@ -3082,8 +3082,14 @@ def load_power_plants(conn: sqlite3.Connection) -> int:
         return json.loads(http_get(f"{EIA_OGC_URL}?{urllib.parse.urlencode(params)}",
                                    timeout=120))
 
+    # EIA API v2 only returns the data[] columns you request (lat/lon/county/dates
+    # are data columns, not facets — omit them and they come back null).
     base = [("api_key", EIA_API_KEY), ("frequency", "monthly"),
-            ("data[]", "nameplate-capacity-mw"), ("facets[stateid][]", EIA_STATE)]
+            ("data[]", "nameplate-capacity-mw"), ("data[]", "latitude"),
+            ("data[]", "longitude"), ("data[]", "county"),
+            ("data[]", "operating-year-month"),
+            ("data[]", "planned-retirement-year-month"),
+            ("facets[stateid][]", EIA_STATE)]
     try:
         latest = eia(base + [("sort[0][column]", "period"),
                              ("sort[0][direction]", "desc"), ("length", "1")])

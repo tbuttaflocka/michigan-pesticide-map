@@ -235,6 +235,19 @@
       layer: null,                 // L.layerGroup of divIcon markers (small, no canvas)
       _detail: {},                 // api_num -> lazy-loaded disclosures+ingredients
     },
+    powerPlants: {                 // EIA-860 plants (289) + CAMD measured emissions
+      loaded: false,
+      showSites: false,
+      // Fuel-family sub-toggles (all on by default). CAMD-reporting distinction is
+      // a marker style, not a filter.
+      filters: { fossil: true, nuclear: true, renewable: true, storage: true, other: true },
+      plants: [],                  // from /api/power-plants
+      families: [],                // legend [{key,label,color}]
+      counts: {},
+      layer: null,                 // L.layerGroup of circleMarkers
+      _canvas: null,               // dedicated L.canvas() renderer (removed on hide)
+      _detail: {},                 // plant code -> lazy-loaded popup detail
+    },
     golf: {
       loaded: false,
       sites: [],                   // from /api/golf/sites
@@ -3324,6 +3337,184 @@
     renderMarkerKeys();
   }
 
+  // ---------- Power plants (EIA-860 inventory + CAMD measured emissions) ----------
+  //
+  // 289 plants, colored by fuel FAMILY (categorical, not a harm ranking). The
+  // marker's ring distinguishes plants that report measured emissions to CAMD
+  // (solid ring) from those that do not (dashed) — not size or a harm color.
+  // Canvas rule: keep the renderer attached across ordinary re-renders; detach AND
+  // null it on hide/empty so the next show builds a fresh renderer (no ghost).
+
+  function powerPlantsPane() {
+    if (!state.map.getPane('powerplants')) {
+      state.map.createPane('powerplants').style.zIndex = 649;
+    }
+    return 'powerplants';
+  }
+
+  function powerPlantsCanvasRenderer() {
+    if (!state.powerPlants._canvas) {
+      powerPlantsPane();
+      state.powerPlants._canvas = L.canvas({ pane: 'powerplants', padding: 0.5 });
+    }
+    return state.powerPlants._canvas;
+  }
+
+  async function loadPowerPlants() {
+    if (state.powerPlants.loaded) return;
+    const d = await api('/api/power-plants');
+    state.powerPlants.plants = d.plants || [];
+    state.powerPlants.families = d.families || [];
+    state.powerPlants.counts = d.counts || {};
+    state.powerPlants.loaded = true;
+  }
+
+  function ppFmtMass(v) {
+    return v == null ? null : `${Math.round(v).toLocaleString()} tons`;
+  }
+
+  // Sparkline of measured CO2 mass across complete years (purple = nuclear/plant
+  // accent; no harm implication — it's a trend line).
+  function ppSpark(trend) {
+    const pts = (trend || []).filter((t) => t.co2 != null);
+    if (pts.length < 2) return '';
+    const vals = pts.map((t) => t.co2);
+    const max = Math.max(1, ...vals);
+    const w = 150, h = 26, n = vals.length;
+    const poly = vals.map((v, i) =>
+      `${(i / (n - 1) * (w - 2) + 1).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`).join(' ');
+    return `<div class="pp-spark-wrap"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+      + `<polyline points="${poly}" fill="none" stroke="#845ef7" stroke-width="1.5"/></svg>`
+      + `<span class="muted small">CO₂ ${pts[0].year}–${pts[pts.length - 1].year}</span></div>`;
+  }
+
+  function ppEmissionsSection(d) {
+    if (d.in_camd && d.emissions && d.emissions.latest) {
+      const e = d.emissions.latest;
+      const row = (k, v) => v != null
+        ? `<div class="row"><span class="k">${k}</span> <b>${ppFmtMass(v)}</b></div>`
+        : `<div class="row"><span class="k">${k}</span> <span class="muted">not reported this year</span></div>`;
+      const partial = d.emissions.current_year_partial
+        ? ' <span class="muted">(current year is partial — excluded)</span>' : '';
+      return `<div class="pp-emis">
+        <div class="pp-emis-head">Measured air emissions · ${e.year}${partial}</div>
+        ${row('SO₂:', e.so2)}${row('NOₓ:', e.nox)}${row('CO₂:', e.co2)}
+        ${ppSpark(d.emissions.trend)}
+        <div class="pp-emis-note"><b>CEMS stack measurements under 40 CFR Part 75 — measured, not modeled.</b> This is the only measured air-emissions data in this app. Only SO₂, NOₓ and CO₂ (plus heat input and gross load) are reported — no particulate matter, VOCs or hazardous air pollutants, and <b>no mercury mass</b> (mercury is reported separately under MATS, from 2015). Part 75 substitutes conservative values when a monitor is offline, and some smaller units report calculated rather than CEMS values.</div>
+      </div>`;
+    }
+    const why = d.combustion
+      ? "a small fossil-combustion unit below the Clean Air Markets program's size / applicability thresholds"
+      : 'a non-combustion plant — it does not burn fuel, so it emits no SO₂/NOₓ from combustion';
+    return `<div class="pp-nocamd">
+      <div class="pp-emis-head">No measured emissions</div>
+      <p>This plant does <b>not</b> report to EPA's Clean Air Markets program (CAMD): it is ${why}. <b>Absence of emissions data is not evidence of no emissions.</b></p>
+    </div>`;
+  }
+
+  function ppPopupHtml(d, p) {
+    const color = (p && p.color) || '#adb5bd';
+    const row = (k, v) => v ? `<div class="row"><span class="k">${k}</span> ${esc(v)}</div>` : '';
+    const camdBadge = d.in_camd
+      ? '<span class="pp-badge camd" title="Reports measured emissions to EPA Clean Air Markets (CAMD)">CAMD ✓</span>'
+      : '<span class="pp-badge nocamd" title="Does not report to EPA Clean Air Markets">no CAMD</span>';
+    return `<div class="pp-popup">
+      <div class="pp-fam"><span class="cdot" style="background:${color}"></span> ${esc(d.family_label || '')} ${camdBadge}</div>
+      <h4>${esc(d.name || 'Power plant')}</h4>
+      ${d.operator ? `<div class="pp-meta">${esc(d.operator)}</div>` : ''}
+      <div class="pp-facts">
+        ${row('Fuel / energy source:', (d.energy_sources || []).join(', '))}
+        ${d.total_mw != null ? `<div class="row"><span class="k">Nameplate capacity:</span> ${d.total_mw.toLocaleString()} MW</div>` : ''}
+        ${row('Operating status:', (d.statuses || []).join(', '))}
+        ${d.planned_retirement ? row('Planned retirement:', d.planned_retirement) : ''}
+        ${row('County:', d.county)}
+        <div class="row"><span class="k">ORIS code:</span> ${esc(d.code)}</div>
+      </div>
+      ${ppEmissionsSection(d)}
+      <div class="pp-note">Inventory: EIA Form 860.${d.in_camd ? ' Emissions: EPA CAMD (CEMS, 40 CFR Part 75).' : ''}</div>
+    </div>`;
+  }
+
+  function bindPpDetail(m, p) {
+    m.on('popupopen', async () => {
+      if (m._ppLoaded) return;
+      try {
+        let d = state.powerPlants._detail[p.code];
+        if (!d) {
+          d = await api('/api/power-plants/' + encodeURIComponent(p.code));
+          state.powerPlants._detail[p.code] = d;
+        }
+        m._ppLoaded = true;
+        m.setPopupContent(ppPopupHtml(d, p));
+      } catch (err) {
+        m.setPopupContent(`<div class="pp-popup"><h4>${esc(p.name || 'Power plant')}</h4>`
+          + '<p class="muted small">Could not load the plant record.</p></div>');
+      }
+    });
+  }
+
+  function renderPowerPlants() {
+    if (state.powerPlants.layer) { state.powerPlants.layer.remove(); state.powerPlants.layer = null; }
+    if (!state.powerPlants.showSites) {
+      removeCanvasRenderer(state.powerPlants._canvas);
+      state.powerPlants._canvas = null;
+      updatePowerPlantStats();
+      renderMarkerKeys();
+      return;
+    }
+    const pane = powerPlantsPane();
+    const renderer = powerPlantsCanvasRenderer();
+    const grp = L.layerGroup();
+    let n = 0;
+    for (const p of state.powerPlants.plants) {
+      if (p.lat == null || p.lng == null) continue;
+      if (state.powerPlants.filters[p.family] === false) continue;
+      // Ring style — NOT size or a harm color — marks whether the plant reports
+      // measured emissions to CAMD: solid bold ring = yes, dashed thin = no.
+      const camd = p.in_camd;
+      const m = L.circleMarker([p.lat, p.lng], {
+        pane, renderer, radius: 6,
+        color: '#111827', weight: camd ? 2 : 1,
+        dashArray: camd ? null : '2,2',
+        opacity: 0.95, fillColor: p.color, fillOpacity: camd ? 0.9 : 0.5,
+      });
+      m.bindPopup('<div class="pp-popup"><div class="ogw-loading">Loading plant record…</div></div>',
+        { maxWidth: 330, className: 'pp-popup-wrap' });
+      bindPpDetail(m, p);
+      grp.addLayer(m);
+      n += 1;
+    }
+    grp.addTo(state.map);
+    state.powerPlants.layer = grp;
+    if (n === 0) {
+      removeCanvasRenderer(state.powerPlants._canvas);
+      state.powerPlants._canvas = null;
+    }
+    updatePowerPlantStats();
+    renderMarkerKeys();
+  }
+
+  function updatePowerPlantStats() {
+    const leg = $('powerplants-legend');
+    if (leg) {
+      if (state.powerPlants.showSites && state.powerPlants.families.length) {
+        const fams = state.powerPlants.families.map((f) =>
+          `<span class="echo-key"><span class="cdot" style="background:${f.color}"></span>${esc(f.label)}</span>`).join('');
+        leg.innerHTML = fams
+          + '<span class="echo-key"><span class="pp-ring solid"></span>reports to CAMD</span>'
+          + '<span class="echo-key"><span class="pp-ring dashed"></span>no CAMD data</span>';
+      } else {
+        leg.innerHTML = '';
+      }
+    }
+    const el = $('powerplants-stats');
+    if (!el) return;
+    if (!state.powerPlants.showSites) { el.textContent = ''; return; }
+    const shown = state.powerPlants.plants.filter(
+      (p) => state.powerPlants.filters[p.family] !== false).length;
+    el.textContent = shown ? `${shown} of ${state.powerPlants.plants.length} plants shown` : 'No plants in the selected fuels';
+  }
+
   function updateLandfillStats() {
     const el = $('landfill-stats');
     if (!el) return;
@@ -5469,6 +5660,24 @@
       });
     }
 
+    // Power plants (independent overlay) + fuel-family sub-toggles.
+    const ppToggle = $('powerplants-sites');
+    if (ppToggle) {
+      ppToggle.addEventListener('change', async (e) => {
+        state.powerPlants.showSites = e.target.checked;
+        if (e.target.checked) await loadPowerPlants();
+        renderPowerPlants();
+      });
+    }
+    ['fossil', 'nuclear', 'renewable', 'storage', 'other'].forEach((k) => {
+      const cb = $(`powerplants-f-${k}`);
+      if (!cb) return;
+      cb.addEventListener('change', (e) => {
+        state.powerPlants.filters[k] = e.target.checked;
+        renderPowerPlants();
+      });
+    });
+
     // Golf courses (independent overlay) + ownership filters.
     const golfToggle = $('golf-sites');
     if (golfToggle) {
@@ -7147,6 +7356,10 @@
       subs: [['a', 'oilgas-f-active'], ['i', 'oilgas-f-injection'],
              ['o', 'oilgas-f-orphan'], ['p', 'oilgas-f-plugged']] },
     { c: 'ffx', cb: 'fracfocus-sites' },
+    { c: 'ppl', cb: 'powerplants-sites', def: 'fnrso',
+      subs: [['f', 'powerplants-f-fossil'], ['n', 'powerplants-f-nuclear'],
+             ['r', 'powerplants-f-renewable'], ['s', 'powerplants-f-storage'],
+             ['o', 'powerplants-f-other']] },
     { c: 'gf',  cb: 'golf-sites', def: 'mpu',
       subs: [['m', 'golf-f-municipal'], ['p', 'golf-f-private'], ['u', 'golf-f-unknown']] },
     { c: 'pf',  cb: 'pfas-sites', def: 'saw',

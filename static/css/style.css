@@ -2160,6 +2160,44 @@ a:hover { text-decoration: underline; }
   font-size: 10.5px; font-style: italic; color: var(--muted);
 }
 
+/* ----- Power plants ----- */
+.pp-popup { font-size: 12px; line-height: 1.45; max-height: 380px; overflow-y: auto; }
+.pp-popup h4 { margin: 4px 0 2px; font-size: 13.5px; }
+.pp-popup .pp-meta { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+.pp-popup .ogw-loading { color: var(--muted); font-style: italic; padding: 6px 2px; }
+.pp-popup .pp-fam { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+.pp-popup .pp-facts { margin: 6px 0; }
+.pp-popup .row { margin: 2px 0; }
+.pp-popup .row .k { color: var(--muted); font-weight: 600; }
+.pp-badge {
+  display: inline-block; font-weight: 700; font-size: 9.5px; padding: 1px 6px;
+  border-radius: 6px; margin-left: auto;
+}
+.pp-badge.camd  { background: rgba(47,158,68,.18); color: #63e6be; border: 1px solid rgba(47,158,68,.5); }
+.pp-badge.nocamd { background: rgba(139,148,158,.15); color: var(--muted); border: 1px solid var(--line); }
+.pp-emis {
+  margin: 7px 0 4px; padding: 6px 8px; border-radius: 7px;
+  background: rgba(132,94,247,.08); border: 1px solid rgba(132,94,247,.22);
+}
+.pp-emis-head { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+.pp-spark-wrap { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.pp-emis-note, .pp-nocamd p {
+  margin-top: 5px; font-size: 10px; line-height: 1.4; color: var(--muted);
+}
+.pp-nocamd {
+  margin: 7px 0 4px; padding: 6px 8px; border-radius: 7px;
+  background: rgba(139,148,158,.08); border: 1px solid var(--line);
+}
+.pp-nocamd p { font-style: normal; }
+.pp-popup .pp-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
+  font-size: 10.5px; font-style: italic; color: var(--muted);
+}
+/* legend: solid vs dashed CAMD ring */
+.pp-ring { width: 11px; height: 11px; border-radius: 50%; display: inline-block; box-sizing: border-box; }
+.pp-ring.solid  { border: 2px solid var(--text); }
+.pp-ring.dashed { border: 1px dashed var(--muted); }
+
 /* county-panel landfill list */
 .landfill-county-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
 .landfill-li {
