@@ -126,6 +126,31 @@ CENSUS_GAZ_CACHE_DIR = DATA_DIR / "gazetteer"
 NASS_API_KEY = os.environ.get("NASS_API_KEY", "").strip()
 NASS_API_URL = "https://quickstats.nass.usda.gov/api/api_GET/"
 
+# EPA CAMD / Clean Air Markets (CAMPD) API key — free from api.data.gov (register
+# via epa.gov/power-sector/cam-api-portal). Powers the power_plant_emissions
+# source. Loaders that need it skip cleanly when it is unset.
+CAMD_API_KEY = os.environ.get("CAMD_API_KEY", "").strip()
+# U.S. EIA Open Data API key — free from eia.gov/opendata. Powers the EIA Form
+# 860 power_plants inventory source.
+EIA_API_KEY = os.environ.get("EIA_API_KEY", "").strip()
+
+# ---- Power plants: EPA CAMD (CAMPD) emissions + EIA-860 inventory ----
+# CAMD "easey" API: facilities (ORIS-keyed), facility attributes (lat/lon, county,
+# controls, operating status — NOT on the emissions rows), and annual apportioned
+# emissions (CEMS SO2/NOx/CO2 under 40 CFR Part 75). Emissions require a `year`;
+# attributes are paginated (page/perPage 1-500). SO2/NOx/CO2 reporting began 1995
+# for the largest coal EGUs and 2000 for the remaining fossil EGUs.
+CAMD_BASE = "https://api.epa.gov/easey"
+CAMD_FACILITIES_URL = CAMD_BASE + "/facilities-mgmt/facilities"
+CAMD_FAC_ATTRIBUTES_URL = CAMD_BASE + "/facilities-mgmt/facilities/attributes"
+CAMD_EMISSIONS_ANNUAL_URL = CAMD_BASE + "/streaming-services/emissions/apportioned/annual"
+CAMD_EMISSIONS_START_YEAR = 1995
+# EIA Form 860 generator inventory (from EIA-860M) via EIA API v2. plantid = the
+# EIA Plant Code = EPA ORIS code (the exact CAMD join key). Latest monthly
+# snapshot only (the loader resolves the newest period).
+EIA_OGC_URL = "https://api.eia.gov/v2/electricity/operating-generator-capacity/data/"
+EIA_STATE = "MI"
+
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8080"))
 

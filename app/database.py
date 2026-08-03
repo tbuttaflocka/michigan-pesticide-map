@@ -789,6 +789,103 @@ CREATE TABLE IF NOT EXISTS fracfocus_ingredients (
 );
 CREATE INDEX IF NOT EXISTS ix_ffi_disc ON fracfocus_ingredients(disclosure_key);
 CREATE INDEX IF NOT EXISTS ix_ffi_cas  ON fracfocus_ingredients(cas_number);
+
+-- ===== Power plants — EIA Form 860 inventory + EPA CAMD emissions =====
+-- EIA-860 (via EIA API v2) is the plant/generator INVENTORY: every Michigan
+-- generator at a plant >=1 MW, all fuels incl nuclear / hydro / wind / solar /
+-- storage. plant_code is the EIA Plant Code = EPA ORIS code (the exact CAMD join
+-- key). One row per generator (latest monthly snapshot). in_camd is set at load
+-- time from the exact ORIS match to a CAMD facility (no name matching).
+CREATE TABLE IF NOT EXISTS power_plants (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    plant_code            TEXT,     -- EIA plantid = ORIS code (join key)
+    plant_name            TEXT,     -- plantName
+    generator_id          TEXT,     -- generatorid
+    entity_name           TEXT,     -- entityName (operator)
+    county                TEXT,
+    latitude              REAL,
+    longitude             REAL,
+    energy_source_code    TEXT,     -- energy_source_code (e.g. WAT, NG, SUB)
+    energy_source_desc    TEXT,     -- energy-source-desc (Water, Natural Gas...)
+    technology            TEXT,     -- technology
+    prime_mover_code      TEXT,     -- prime_mover_code
+    nameplate_capacity_mw REAL,     -- nameplate-capacity-mw
+    status                TEXT,     -- status (OP/SB/OS/...)
+    status_description    TEXT,     -- statusDescription (Operating/Standby/...)
+    operating_year_month  TEXT,     -- operating-year-month
+    planned_retirement    TEXT,     -- planned-retirement-year-month
+    sector_name           TEXT,     -- sectorName
+    balancing_authority   TEXT,     -- balancing_authority_code
+    period                TEXT,     -- EIA snapshot period (YYYY-MM)
+    in_camd               INTEGER DEFAULT 0,   -- 1 if plant_code matched a CAMD ORIS
+    source                TEXT DEFAULT 'EIA_860'
+);
+CREATE INDEX IF NOT EXISTS ix_pp_code   ON power_plants(plant_code);
+CREATE INDEX IF NOT EXISTS ix_pp_fuel   ON power_plants(energy_source_desc);
+CREATE INDEX IF NOT EXISTS ix_pp_incamd ON power_plants(in_camd);
+
+-- CAMD annual apportioned emissions, unit x year. SO2/NOx/CO2 are CEMS STACK
+-- MEASUREMENTS under 40 CFR Part 75 (with Part 75 missing-data substitution when
+-- a monitor is offline; some smaller units report calculated Appendix D/E values
+-- rather than CEMS). Values stored verbatim. Mercury MASS is NOT in this dataset
+-- (only hg_control_info) — Hg is MATS-only, from 2015, reported separately.
+CREATE TABLE IF NOT EXISTS power_plant_emissions (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    facility_id          INTEGER,  -- ORIS (join to power_plants.plant_code)
+    facility_name        TEXT,
+    unit_id              TEXT,     -- unitId (e.g. '1')
+    unit_id_num          INTEGER,  -- unit_id (CAMD internal integer)
+    year                 INTEGER,
+    so2_mass             REAL,     -- so2Mass (tons)
+    so2_rate             REAL,     -- so2Rate (lb/mmBtu)
+    nox_mass             REAL,     -- noxMass (tons)
+    nox_rate             REAL,     -- noxRate (lb/mmBtu)
+    co2_mass             REAL,     -- co2Mass (tons)
+    co2_rate             REAL,     -- co2Rate (short tons/mmBtu)
+    heat_input           REAL,     -- heatInput (mmBtu)
+    gross_load           REAL,     -- grossLoad (MWh)
+    steam_load           REAL,     -- steamLoad
+    count_op_time        REAL,     -- countOpTime
+    sum_op_time          REAL,     -- sumOpTime
+    primary_fuel_info    TEXT,     -- primaryFuelInfo
+    secondary_fuel_info  TEXT,     -- secondaryFuelInfo
+    unit_type            TEXT,     -- unitType
+    so2_control_info     TEXT,     -- so2ControlInfo
+    nox_control_info     TEXT,     -- noxControlInfo
+    pm_control_info      TEXT,     -- pmControlInfo
+    hg_control_info      TEXT,     -- hgControlInfo (control only; no Hg mass here)
+    program_code_info    TEXT,     -- programCodeInfo (ARP, CSAPR, MATS...)
+    associated_stacks    TEXT,     -- associatedStacks
+    source               TEXT DEFAULT 'EPA_CAMD'
+);
+CREATE INDEX IF NOT EXISTS ix_ppe_fac  ON power_plant_emissions(facility_id);
+CREATE INDEX IF NOT EXISTS ix_ppe_year ON power_plant_emissions(year);
+
+-- CAMD facility-level attributes (one row per facility, most-recent attr year).
+-- This is where the lat/lon lives — it is NOT on the emissions rows. in_eia is set
+-- from the exact ORIS match to an EIA plant (no name matching).
+CREATE TABLE IF NOT EXISTS power_plant_camd_facilities (
+    facility_id         INTEGER PRIMARY KEY,   -- ORIS
+    facility_name       TEXT,
+    latitude            REAL,
+    longitude           REAL,
+    county              TEXT,
+    fips_code           TEXT,
+    operating_status    TEXT,     -- operatingStatus
+    owner_operator      TEXT,     -- ownerOperator
+    primary_fuel_info   TEXT,
+    secondary_fuel_info TEXT,
+    so2_control_info    TEXT,
+    nox_control_info    TEXT,
+    pm_control_info     TEXT,
+    hg_control_info     TEXT,
+    program_code_info   TEXT,
+    source_category     TEXT,
+    attr_year           INTEGER,  -- year these attributes were taken from
+    in_eia              INTEGER DEFAULT 0,   -- 1 if ORIS matched an EIA plant
+    source              TEXT DEFAULT 'EPA_CAMD'
+);
+CREATE INDEX IF NOT EXISTS ix_ppcf_ineia ON power_plant_camd_facilities(in_eia);
 """
 
 

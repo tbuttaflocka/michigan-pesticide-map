@@ -304,6 +304,20 @@ SOURCES: list[Source] = [
         coverage=year4_range("oil_gas_wells", "permit_date"),
     ),
     Source(
+        id="power_plants",
+        label="Power plants — EIA-860 inventory + EPA CAMD emissions",
+        # EIA first (the plant inventory / primary target), then CAMD (emissions +
+        # facility attributes), which joins to the just-loaded EIA plants on exact
+        # ORIS. Both APIs are free-key; the annual CAMD pull is small. EIA-860M is
+        # monthly, CAMD refreshes as programs report — a monthly check is plenty.
+        loaders=[dl.load_power_plants, dl.load_power_plant_emissions],
+        targets=["power_plants", "power_plant_emissions",
+                 "power_plant_camd_facilities"],
+        primary_target="power_plants", primary_source_id="eia_860",
+        interval_months=1, min_abs=100, floor_frac=0.5,
+        coverage=year_range("power_plant_emissions", "year"),
+    ),
+    Source(
         id="echo",
         label="EPA ECHO — enforcement & compliance (CAA/CWA/RCRA/SDWA)",
         loaders=[dl.load_echo],

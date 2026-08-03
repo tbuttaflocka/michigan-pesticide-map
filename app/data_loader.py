@@ -68,6 +68,14 @@ from .config import (
     FRACFOCUS_BULK_URL,
     FRACFOCUS_CACHE_DIR,
     FRACFOCUS_STATE_NAME,
+    CAMD_API_KEY,
+    CAMD_FACILITIES_URL,
+    CAMD_FAC_ATTRIBUTES_URL,
+    CAMD_EMISSIONS_ANNUAL_URL,
+    CAMD_EMISSIONS_START_YEAR,
+    EIA_API_KEY,
+    EIA_OGC_URL,
+    EIA_STATE,
 )
 from .wind_data import MI_ASOS_STATIONS, DIRS_16, deg_to_dir16, dir16_to_deg
 from .water_quality import (
@@ -3034,6 +3042,235 @@ def load_fracfocus(conn: sqlite3.Connection) -> int:
         f"api_num = APINumber ({matched} matched).",
     )
     return nd
+
+
+# ---------- Power plants: EIA-860 inventory + EPA CAMD emissions ----------
+#
+# EIA-860 (via EIA API v2) is the plant/generator inventory for ALL Michigan
+# plants >=1 MW (incl nuclear/hydro/wind/solar/storage). CAMD (easey API) adds
+# CEMS-measured SO2/NOx/CO2 for the fossil EGUs it monitors, plus facility
+# attributes (lat/lon — not on the emissions rows). The two join on exact ORIS
+# (EIA plant_code = CAMD facilityId); nothing is name-matched, and there is no
+# link to any other layer.
+
+def _camd_json(url: str, *, attempts: int = 3, backoff: int = 3):
+    """GET + parse a CAMD easey URL with light retries, so a transient error never
+    silently drops a whole year of emissions. Raises after the last attempt."""
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return json.loads(http_get(url, timeout=120))
+        except Exception as e:                        # noqa: BLE001 — retry transient
+            last = e
+            if i < attempts:
+                time.sleep(backoff * i)
+    raise last
+
+
+def load_power_plants(conn: sqlite3.Connection) -> int:
+    """Load the EIA Form 860 Michigan power-plant inventory (latest monthly
+    snapshot, generator-level). plant_code = EIA Plant Code = EPA ORIS code."""
+    log("Loading EIA-860 power-plant inventory (Michigan)...")
+    if not EIA_API_KEY:
+        log("  EIA_API_KEY not set; skipping power_plants", level="warn")
+        record_source(conn, "eia_860", "EIA Form 860 — Michigan power plants",
+                      "https://www.eia.gov/electricity/data/eia860/", "skipped", 0,
+                      "EIA_API_KEY not set")
+        return 0
+
+    def eia(params):
+        return json.loads(http_get(f"{EIA_OGC_URL}?{urllib.parse.urlencode(params)}",
+                                   timeout=120))
+
+    base = [("api_key", EIA_API_KEY), ("frequency", "monthly"),
+            ("data[]", "nameplate-capacity-mw"), ("facets[stateid][]", EIA_STATE)]
+    try:
+        latest = eia(base + [("sort[0][column]", "period"),
+                             ("sort[0][direction]", "desc"), ("length", "1")])
+        period = latest["response"]["data"][0]["period"]
+    except Exception as e:                            # noqa: BLE001
+        log(f"  EIA fetch failed: {e}; keeping existing data", level="warn")
+        record_source(conn, "eia_860", "EIA Form 860 — Michigan power plants",
+                      "https://www.eia.gov/electricity/data/eia860/", "unavailable", 0,
+                      f"fetch failed: {e}")
+        return 0
+
+    rows, offset = [], 0
+    while True:
+        d = eia(base + [("start", period), ("end", period),
+                        ("sort[0][column]", "plantid"), ("sort[0][direction]", "asc"),
+                        ("offset", str(offset)), ("length", "5000")])
+        batch = d["response"]["data"]
+        rows.extend(batch)
+        if len(batch) < 5000:
+            break
+        offset += 5000
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM power_plants")
+    for r in rows:
+        cur.execute(
+            """INSERT INTO power_plants(
+                 plant_code, plant_name, generator_id, entity_name, county,
+                 latitude, longitude, energy_source_code, energy_source_desc,
+                 technology, prime_mover_code, nameplate_capacity_mw, status,
+                 status_description, operating_year_month, planned_retirement,
+                 sector_name, balancing_authority, period, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (r.get("plantid"), r.get("plantName"), r.get("generatorid"),
+             r.get("entityName"), r.get("county"), _to_float(r.get("latitude")),
+             _to_float(r.get("longitude")), r.get("energy_source_code"),
+             r.get("energy-source-desc"), r.get("technology"),
+             r.get("prime_mover_code"), _to_float(r.get("nameplate-capacity-mw")),
+             r.get("status"), r.get("statusDescription"),
+             r.get("operating-year-month"), r.get("planned-retirement-year-month"),
+             r.get("sectorName"), r.get("balancing_authority_code"),
+             r.get("period"), "EIA_860"),
+        )
+    conn.commit()
+    nplants = len({r.get("plantid") for r in rows})
+    log(f"  power_plants: {len(rows)} generators / {nplants} plants (EIA {period})",
+        level="ok" if rows else "warn")
+    record_source(
+        conn, "eia_860",
+        "EIA Form 860 — Michigan power-plant inventory (EIA API v2)",
+        "https://www.eia.gov/electricity/data/eia860/",
+        "ok" if rows else "unavailable", len(rows),
+        f"{nplants} Michigan plants >=1 MW ({len(rows)} generators), EIA-860M "
+        f"snapshot {period}. All fuels incl nuclear/hydro/wind/solar/storage. "
+        f"plant_code = EIA Plant Code = EPA ORIS code (exact CAMD join key).",
+    )
+    return len(rows)
+
+
+def load_power_plant_emissions(conn: sqlite3.Connection) -> int:
+    """Load EPA CAMD annual apportioned emissions (unit x year, all years) and
+    facility attributes (lat/lon), then join to the EIA inventory on exact ORIS.
+    Runs AFTER load_power_plants so the ORIS match can be set both ways."""
+    log("Loading EPA CAMD power-plant emissions + facility attributes (Michigan)...")
+    if not CAMD_API_KEY:
+        log("  CAMD_API_KEY not set; skipping power_plant_emissions", level="warn")
+        record_source(conn, "epa_camd",
+                      "EPA CAMD — Michigan power-plant emissions (CEMS)",
+                      "https://campd.epa.gov/", "skipped", 0, "CAMD_API_KEY not set")
+        return 0
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM power_plant_emissions")
+    cur.execute("DELETE FROM power_plant_camd_facilities")
+    end_year = datetime.now(timezone.utc).year
+
+    # (A) annual apportioned emissions — one call per year (year is required).
+    total, years = 0, set()
+    for y in range(CAMD_EMISSIONS_START_YEAR, end_year + 1):
+        try:
+            d = _camd_json(
+                f"{CAMD_EMISSIONS_ANNUAL_URL}?stateCode=MI&year={y}&api_key={CAMD_API_KEY}")
+        except Exception as e:                        # noqa: BLE001
+            # A persistent failure is logged, never silently dropped.
+            log(f"  CAMD emissions year {y} failed after retries: {e}", level="warn")
+            continue
+        if not isinstance(d, list) or not d:
+            continue                                  # legitimately no data for the year
+        years.add(y)
+        for r in d:
+            cur.execute(
+                """INSERT INTO power_plant_emissions(
+                     facility_id, facility_name, unit_id, unit_id_num, year,
+                     so2_mass, so2_rate, nox_mass, nox_rate, co2_mass, co2_rate,
+                     heat_input, gross_load, steam_load, count_op_time, sum_op_time,
+                     primary_fuel_info, secondary_fuel_info, unit_type,
+                     so2_control_info, nox_control_info, pm_control_info,
+                     hg_control_info, program_code_info, associated_stacks, source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (r.get("facilityId"), r.get("facilityName"), r.get("unitId"),
+                 r.get("unit_id"), r.get("year"),
+                 r.get("so2Mass"), r.get("so2Rate"), r.get("noxMass"), r.get("noxRate"),
+                 r.get("co2Mass"), r.get("co2Rate"), r.get("heatInput"),
+                 r.get("grossLoad"), r.get("steamLoad"), r.get("countOpTime"),
+                 r.get("sumOpTime"), r.get("primaryFuelInfo"),
+                 r.get("secondaryFuelInfo"), r.get("unitType"),
+                 r.get("so2ControlInfo"), r.get("noxControlInfo"),
+                 r.get("pmControlInfo"), r.get("hgControlInfo"),
+                 r.get("programCodeInfo"), r.get("associatedStacks"), "EPA_CAMD"),
+            )
+            total += 1
+    conn.commit()
+
+    # (B) facility attributes for lat/lon — walk years DESCENDING and keep the most
+    # recent attributes per facility, until every emitting facility is covered.
+    fac_ids = {row[0] for row in conn.execute(
+        "SELECT DISTINCT facility_id FROM power_plant_emissions WHERE facility_id IS NOT NULL")}
+    fac_attr: dict = {}
+    for y in range(end_year, CAMD_EMISSIONS_START_YEAR - 1, -1):
+        if fac_ids and fac_ids <= set(fac_attr):
+            break
+        page = 1
+        while True:
+            try:
+                d = _camd_json(
+                    f"{CAMD_FAC_ATTRIBUTES_URL}?stateCode=MI&year={y}&page={page}"
+                    f"&perPage=500&api_key={CAMD_API_KEY}")
+            except Exception:                         # noqa: BLE001
+                break
+            items = d.get("items", []) if isinstance(d, dict) else []
+            if not items:
+                break
+            for r in items:
+                fid = r.get("facilityId")
+                if fid is not None and fid not in fac_attr:
+                    fac_attr[fid] = (r, y)
+            if len(items) < 500:
+                break
+            page += 1
+    for fid, (r, y) in fac_attr.items():
+        cur.execute(
+            """INSERT OR REPLACE INTO power_plant_camd_facilities(
+                 facility_id, facility_name, latitude, longitude, county, fips_code,
+                 operating_status, owner_operator, primary_fuel_info,
+                 secondary_fuel_info, so2_control_info, nox_control_info,
+                 pm_control_info, hg_control_info, program_code_info,
+                 source_category, attr_year, in_eia, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (fid, r.get("facilityName"), _to_float(r.get("latitude")),
+             _to_float(r.get("longitude")), r.get("county"), r.get("fipsCode"),
+             r.get("operatingStatus"), r.get("ownerOperator"),
+             r.get("primaryFuelInfo"), r.get("secondaryFuelInfo"),
+             r.get("so2ControlInfo"), r.get("noxControlInfo"),
+             r.get("pmControlInfo"), r.get("hgControlInfo"),
+             r.get("programCodeInfo"), r.get("sourceCategory"), y, 0, "EPA_CAMD"),
+        )
+    conn.commit()
+
+    # (C) exact ORIS join both ways (EIA plant_code <-> CAMD facilityId). No names.
+    conn.execute(
+        "UPDATE power_plants SET in_camd=1 WHERE plant_code GLOB '[0-9]*' AND "
+        "CAST(plant_code AS INTEGER) IN (SELECT facility_id FROM power_plant_camd_facilities)")
+    conn.execute(
+        "UPDATE power_plant_camd_facilities SET in_eia=1 WHERE facility_id IN "
+        "(SELECT CAST(plant_code AS INTEGER) FROM power_plants WHERE plant_code GLOB '[0-9]*')")
+    conn.commit()
+
+    matched = conn.execute(
+        "SELECT COUNT(*) FROM power_plant_camd_facilities WHERE in_eia=1").fetchone()[0]
+    yspan = f"{min(years)}-{max(years)}" if years else "n/a"
+    log(f"  CAMD: {total} emission rows ({yspan}), {len(fac_attr)} facilities "
+        f"({matched} matched an EIA plant)", level="ok" if total else "warn")
+    record_source(
+        conn, "epa_camd",
+        "EPA CAMD / Clean Air Markets — Michigan power-plant emissions (CEMS)",
+        "https://campd.epa.gov/",
+        "ok" if total else "unavailable", total,
+        f"{total} annual unit-emission rows ({yspan}) + {len(fac_attr)} facility "
+        f"attribute records, Michigan, from EPA CAMD (easey API). SO2/NOx/CO2 are "
+        f"CEMS stack MEASUREMENTS under 40 CFR Part 75 (measured, not modeled); "
+        f"Part 75 missing-data substitution applies when a monitor is offline, and "
+        f"some smaller units report calculated (Appendix D/E) rather than CEMS "
+        f"values. Reporting began 1995 for the largest coal EGUs, 2000 for the "
+        f"remaining fossil EGUs. Mercury MASS is NOT in this dataset (Hg is "
+        f"MATS-only, from 2015, reported separately). Joined to EIA on exact ORIS.",
+    )
+    return total
 
 
 # ---------- Golf courses (OpenStreetMap via Overpass) ----------
