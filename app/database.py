@@ -702,6 +702,93 @@ CREATE INDEX IF NOT EXISTS ix_echo_snc      ON echo_facilities(snc_flag);
 CREATE INDEX IF NOT EXISTS ix_echo_tri_m    ON echo_facilities(matched_tri_ids);
 CREATE INDEX IF NOT EXISTS ix_echo_sems_m   ON echo_facilities(matched_sems_ids);
 CREATE INDEX IF NOT EXISTS ix_echo_rcra_m   ON echo_facilities(matched_rcra_ids);
+
+-- ===== EGLE oil, gas & mineral wells (GrmdOpenData ArcGIS, layer 10) =====
+-- Surface (wellhead) locations for ALL Michigan oil/gas/mineral wells (~92,577),
+-- refreshed weekly from EGLE's GRMD RBDMS database. Fields are stored as EGLE
+-- publishes them — WellType/WellStatus values are kept VERBATIM (never recoded or
+-- grouped). There is NO hydraulic-fracturing flag and NO fluid-volume field here;
+-- High Volume Hydraulic Fracturing is FracFocus-only (see fracfocus_* below) and
+-- EGLE's HVHF map is a separate PDF. county_fips is DERIVED as '26' + the
+-- published 3-digit County_fips purely for county aggregation (a code transform);
+-- there is NO facility-level identifier shared with tri_facility /
+-- contamination_sites / landfill_sites / echo_facilities, so no join to those.
+CREATE TABLE IF NOT EXISTS oil_gas_wells (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    pkey                INTEGER,   -- RBDMS PKey (row identifier)
+    well_id             TEXT,      -- WellID
+    api_num             TEXT,      -- 14-digit API number (join key to FracFocus)
+    permit_number       TEXT,      -- PermitNumber
+    well_name           TEXT,      -- WellName
+    well_number         TEXT,      -- WellNumber
+    well_name_full      TEXT,      -- WellNameFull
+    company_name        TEXT,      -- CompanyName (operator)
+    well_type           TEXT,      -- WellType (VERBATIM)
+    top_well_type       TEXT,      -- TopWellType (VERBATIM)
+    well_status         TEXT,      -- WellStatus (VERBATIM)
+    top_well_status     TEXT,      -- TopWellStatus (VERBATIM)
+    slant               TEXT,      -- Slant
+    wellbore_type       TEXT,      -- WellboreType
+    dtd                 REAL,      -- DTD (drilled total depth, ft)
+    tvd                 REAL,      -- TVD (true vertical depth, ft)
+    producing_formation TEXT,      -- ProducingFormation
+    prod_formation_code TEXT,      -- ProdFormationCode
+    field_name          TEXT,      -- FieldName
+    field_type          TEXT,      -- FieldType
+    permit_date         TEXT,      -- PermitDate (ISO yyyy-mm-dd)
+    plugging_date       TEXT,      -- PluggingDate (ISO yyyy-mm-dd)
+    concentration_h2s   INTEGER,   -- Concentration_H2S
+    county_fips3        TEXT,      -- County_fips as published (3-digit)
+    county_fips         TEXT,      -- derived 5-digit '26'+County_fips (county aggregation)
+    longitude           REAL,      -- X (WGS84)
+    latitude            REAL,      -- Y (WGS84)
+    source              TEXT DEFAULT 'EGLE_GRMD'
+);
+CREATE INDEX IF NOT EXISTS ix_ogw_api    ON oil_gas_wells(api_num);
+CREATE INDEX IF NOT EXISTS ix_ogw_county ON oil_gas_wells(county_fips);
+CREATE INDEX IF NOT EXISTS ix_ogw_type   ON oil_gas_wells(well_type);
+CREATE INDEX IF NOT EXISTS ix_ogw_status ON oil_gas_wells(well_status);
+
+-- ===== FracFocus hydraulic-fracturing chemical disclosures (Michigan) =====
+-- Michigan disclosures from the FracFocus national bulk download. MI required
+-- disclosure only for High Volume Hydraulic Fracturing (100,000+ gal) from April
+-- 2015, so this is the ~30 HVHF wells — NOT the 12,000+ shallow Antrim fracks.
+-- Joined to oil_gas_wells by exact api_num = APINumber (matched_api_num, NULL when
+-- no well matches). Ingredient rows preserve trade-secret masking VERBATIM
+-- ('Proprietary' / 'Trade Secret' / 'TS' / 'Confidential' / 'CBI' in place of a
+-- CAS number); is_masked is an additive flag for reporting the masked share and
+-- never replaces or drops the published value.
+CREATE TABLE IF NOT EXISTS fracfocus_disclosures (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    disclosure_key          TEXT UNIQUE,  -- FracFocus disclosure id (dedupe key)
+    api_number              TEXT,         -- APINumber
+    operator_name           TEXT,         -- OperatorName
+    well_name               TEXT,         -- WellName
+    latitude                REAL,         -- Latitude
+    longitude               REAL,         -- Longitude
+    state_name              TEXT,         -- StateName
+    county_name             TEXT,         -- CountyName
+    total_base_water_volume REAL,         -- TotalBaseWaterVolume (gallons)
+    tvd                     REAL,         -- TVD
+    job_start_date          TEXT,         -- JobStartDate
+    job_end_date            TEXT,         -- JobEndDate
+    matched_api_num         TEXT,         -- oil_gas_wells.api_num exact match, else NULL
+    source                  TEXT DEFAULT 'FracFocus'
+);
+CREATE INDEX IF NOT EXISTS ix_ff_api ON fracfocus_disclosures(api_number);
+
+CREATE TABLE IF NOT EXISTS fracfocus_ingredients (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    disclosure_key   TEXT,       -- -> fracfocus_disclosures.disclosure_key
+    api_number       TEXT,       -- APINumber (denormalized)
+    ingredient_name  TEXT,       -- IngredientName (VERBATIM; may be 'Proprietary' etc.)
+    cas_number       TEXT,       -- CASNumber (VERBATIM; may be 'Trade Secret'/'TS'/'CBI')
+    percent_hf_job   REAL,       -- PercentHFJob
+    mass_ingredient  REAL,       -- MassIngredient
+    is_masked        INTEGER DEFAULT 0   -- 1 if CAS/name is a trade-secret placeholder
+);
+CREATE INDEX IF NOT EXISTS ix_ffi_disc ON fracfocus_ingredients(disclosure_key);
+CREATE INDEX IF NOT EXISTS ix_ffi_cas  ON fracfocus_ingredients(cas_number);
 """
 
 

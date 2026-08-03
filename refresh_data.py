@@ -290,6 +290,20 @@ SOURCES: list[Source] = [
         seed_extra=("tri_facility", "tri_release", "contamination_sites"),
     ),
     Source(
+        id="oil_gas",
+        label="EGLE oil & gas wells + FracFocus HF chemical disclosures",
+        # Two loaders in order: the EGLE well layer first, then FracFocus (which
+        # joins to the just-loaded wells on api_num = APINumber in the same staging
+        # DB). EGLE refreshes weekly; the FracFocus bulk refreshes 5 days/week but
+        # Michigan is effectively static (no HVHF since 2016) so its ~419 MB zip is
+        # cached and reused. A monthly check keeps the well layer current.
+        loaders=[dl.load_oil_gas_wells, dl.load_fracfocus],
+        targets=["oil_gas_wells", "fracfocus_disclosures", "fracfocus_ingredients"],
+        primary_target="oil_gas_wells", primary_source_id="egle_oil_gas_wells",
+        interval_months=1, min_abs=50000, floor_frac=0.5,
+        coverage=year4_range("oil_gas_wells", "permit_date"),
+    ),
+    Source(
         id="echo",
         label="EPA ECHO — enforcement & compliance (CAA/CWA/RCRA/SDWA)",
         loaders=[dl.load_echo],

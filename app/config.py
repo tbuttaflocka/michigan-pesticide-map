@@ -296,6 +296,34 @@ ECHO_COLUMNS = [
     "TRI_IDS", "SEMS_IDS", "RCRA_IDS", "NPDES_IDS",
 ]
 
+# ---- EGLE Oil, Gas & Minerals — well surface locations (ArcGIS) ----
+# EGLE Geologic Resources Management Division (GRMD) publishes the RBDMS well
+# database as ArcGIS "GrmdOpenData" on the same host as the landfills layer.
+# Layer 10 = surface (wellhead) locations for ALL oil/gas/mineral wells
+# (~92,577), refreshed weekly from RBDMS. Fields include api_num (14-digit API),
+# PermitNumber, WellType/WellStatus, ProducingFormation, DTD/TVD, PermitDate/
+# PluggingDate, County_fips (3-digit), and X/Y (WGS84 lon/lat). maxRecordCount is
+# 2000 and the layer supports pagination (see dl._arcgis_all). NOTE: there is NO
+# hydraulic-fracturing flag or fluid-volume field here — HVHF is FracFocus-only.
+EGLE_GRMD_BASE = ("https://gisagoegle.state.mi.us/arcgis/rest/services/"
+                  "EGLE/GrmdOpenData/MapServer")
+EGLE_OIL_GAS_WELLS_LAYER = EGLE_GRMD_BASE + "/10"
+
+# ---- FracFocus — national hydraulic-fracturing chemical disclosure registry ----
+# One national bulk zip (~419 MB), refreshed 5 days/week. Members: DisclosureList_*
+# (one row per disclosure) and FracFocusRegistry_* (denormalized: one row per
+# chemical ingredient with the disclosure header repeated). Michigan required
+# disclosure only for High Volume Hydraulic Fracturing (100,000+ gal) from April
+# 2015, so MI records are few (the ~30 HVHF wells) — the 12,000+ shallow Antrim
+# fracks are NOT here. Trade-secret ingredients appear as literal "Proprietary" /
+# "Trade Secret" / "TS" / "Confidential" / "CBI" in place of a CAS number and are
+# preserved verbatim. Large + mutable, so the zip is cached and only re-downloaded
+# on force-refresh (like the WQP result set).
+FRACFOCUS_BULK_URL = "https://www.fracfocusdata.org/digitaldownload/fracfocuscsv.zip"
+FRACFOCUS_CACHE_DIR = DATA_DIR / "fracfocus"
+FRACFOCUS_STATE_NAME = "Michigan"
+FRACFOCUS_STATE_NUMBER = "26"
+
 # ---- USGS Watershed Boundary Dataset (HUC-8 polygons) ----
 WBD_HUC8_QUERY = (
     "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/4/query"

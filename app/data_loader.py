@@ -64,6 +64,10 @@ from .config import (
     ECHO_GET_DOWNLOAD_URL,
     ECHO_STATE,
     ECHO_COLUMNS,
+    EGLE_OIL_GAS_WELLS_LAYER,
+    FRACFOCUS_BULK_URL,
+    FRACFOCUS_CACHE_DIR,
+    FRACFOCUS_STATE_NAME,
 )
 from .wind_data import MI_ASOS_STATIONS, DIRS_16, deg_to_dir16, dir16_to_deg
 from .water_quality import (
@@ -2770,6 +2774,266 @@ def load_echo(conn: sqlite3.Connection) -> int:
         f"quality prior to Nov 2000 is 'unknown' per EPA.",
     )
     return rows
+
+
+# ---------- EGLE oil & gas wells + FracFocus disclosures ----------
+#
+# EGLE GrmdOpenData layer 10 = surface (wellhead) locations for ALL Michigan
+# oil/gas/mineral wells (~92,577), paginated from the ArcGIS layer. FracFocus =
+# the national hydraulic-fracturing chemical-disclosure bulk download, filtered to
+# Michigan (the ~30 HVHF wells, NOT the 12,000+ shallow Antrim fracks). The two
+# join on exact api_num = APINumber only; there is no shared identifier with any
+# other layer, so no facility-level cross-link is attempted.
+
+def _epoch_ms_to_iso(v):
+    """ArcGIS esriFieldTypeDate value (epoch milliseconds) -> 'YYYY-MM-DD'."""
+    if v in (None, ""):
+        return None
+    try:
+        return datetime.fromtimestamp(int(v) / 1000.0, tz=timezone.utc).date().isoformat()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def load_oil_gas_wells(conn: sqlite3.Connection) -> int:
+    """Load EGLE oil/gas/mineral well surface locations (GrmdOpenData layer 10).
+    WellType/WellStatus stored EXACTLY as EGLE publishes them; county_fips derived
+    as '26' + the published 3-digit County_fips (a code transform for county
+    aggregation only — no facility-level join to any other layer)."""
+    log("Loading EGLE oil & gas wells (GrmdOpenData layer 10, surface locations)...")
+    fields = ("PKey,WellID,api_num,PermitNumber,WellName,WellNumber,WellNameFull,"
+              "CompanyName,WellType,TopWellType,WellStatus,TopWellStatus,Slant,"
+              "WellboreType,DTD,TVD,ProducingFormation,ProdFormationCode,FieldName,"
+              "FieldType,PermitDate,PluggingDate,Concentration_H2S,County_fips,X,Y")
+    try:
+        feats = _arcgis_all(EGLE_OIL_GAS_WELLS_LAYER, fields, where="1=1",
+                            geometry=False, page=2000, cap=200000)
+    except Exception as e:                            # noqa: BLE001
+        log(f"  EGLE well fetch failed: {e}; keeping existing data", level="warn")
+        record_source(conn, "egle_oil_gas_wells",
+                      "EGLE Oil, Gas & Minerals — well surface locations",
+                      EGLE_OIL_GAS_WELLS_LAYER, "unavailable", 0, f"fetch failed: {e}")
+        return 0
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM oil_gas_wells")
+    n = 0
+    for ft in feats:
+        a = ft.get("attributes", {})
+        cf = a.get("County_fips")
+        cf3 = str(cf).strip() if cf not in (None, "") else None
+        cf5 = ("26" + cf3.zfill(3)) if cf3 else None
+        cur.execute(
+            """INSERT INTO oil_gas_wells(
+                 pkey, well_id, api_num, permit_number, well_name, well_number,
+                 well_name_full, company_name, well_type, top_well_type, well_status,
+                 top_well_status, slant, wellbore_type, dtd, tvd, producing_formation,
+                 prod_formation_code, field_name, field_type, permit_date, plugging_date,
+                 concentration_h2s, county_fips3, county_fips, longitude, latitude, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (a.get("PKey"), a.get("WellID"), a.get("api_num"), a.get("PermitNumber"),
+             a.get("WellName"), a.get("WellNumber"), a.get("WellNameFull"),
+             a.get("CompanyName"), a.get("WellType"), a.get("TopWellType"),
+             a.get("WellStatus"), a.get("TopWellStatus"), a.get("Slant"),
+             a.get("WellboreType"), a.get("DTD"), a.get("TVD"),
+             a.get("ProducingFormation"), a.get("ProdFormationCode"),
+             a.get("FieldName"), a.get("FieldType"),
+             _epoch_ms_to_iso(a.get("PermitDate")), _epoch_ms_to_iso(a.get("PluggingDate")),
+             a.get("Concentration_H2S"), cf3, cf5, a.get("X"), a.get("Y"), "EGLE_GRMD"),
+        )
+        n += 1
+    conn.commit()
+    log(f"  oil_gas_wells: {n:,} wells", level="ok" if n else "warn")
+    record_source(
+        conn, "egle_oil_gas_wells",
+        "EGLE Oil, Gas & Minerals — well surface locations (GrmdOpenData)",
+        "https://www.michigan.gov/egle/maps-data/geowebface",
+        "ok" if n else "unavailable", n,
+        f"{n:,} Michigan oil/gas/mineral well surface locations from EGLE GRMD "
+        f"RBDMS (ArcGIS layer 10), refreshed weekly. WellType/WellStatus stored "
+        f"verbatim. No hydraulic-fracturing flag or fluid-volume field in this "
+        f"source; HVHF is FracFocus-only and EGLE's HVHF map is a separate PDF.",
+    )
+    return n
+
+
+# Trade-secret placeholders FracFocus disclosers write in place of a CAS number /
+# ingredient name. Preserved verbatim in the data; matched only to flag the share.
+_FF_TRADE_SECRET = {"proprietary", "trade secret", "trade-secret", "ts",
+                    "confidential", "cbi", "confidential business information"}
+
+
+def _ff_masked(cas, name):
+    return any(v and v.strip().lower() in _FF_TRADE_SECRET for v in (cas, name))
+
+
+def _ff_num(v):
+    if v in (None, ""):
+        return None
+    try:
+        return float(str(v).replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def _ff_date_iso(v):
+    """FracFocus 'M/D/YYYY hh:mm:ss AM' (or ISO) -> 'YYYY-MM-DD'."""
+    if not v:
+        return None
+    s = str(v).strip().split(" ")[0]
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _ff_disclosure_from_row(g):
+    """Build a disclosure dict from a row accessor g(colname)->value|None."""
+    return {
+        "api": g("APINumber"), "op": g("OperatorName"), "well": g("WellName"),
+        "lat": _ff_num(g("Latitude")), "lon": _ff_num(g("Longitude")),
+        "state": g("StateName"), "county": g("CountyName"),
+        "water": _ff_num(g("TotalBaseWaterVolume")), "tvd": _ff_num(g("TVD")),
+        "jstart": _ff_date_iso(g("JobStartDate")), "jend": _ff_date_iso(g("JobEndDate")),
+    }
+
+
+def load_fracfocus(conn: sqlite3.Connection) -> int:
+    """Load Michigan FracFocus disclosures + ingredient records from the national
+    bulk zip, and join to oil_gas_wells on exact api_num = APINumber. Trade-secret
+    masking is preserved verbatim (never dropped or guessed). Must run AFTER
+    load_oil_gas_wells so the well API set is present for the join."""
+    log("Loading FracFocus Michigan disclosures + ingredients (national bulk)...")
+    zip_path = FRACFOCUS_CACHE_DIR / "fracfocuscsv.zip"
+    # Large (~419 MB) but effectively static for MI (no HVHF since 2016), so the
+    # zip is cached and reused; delete it to force a fresh pull.
+    if _need_download(zip_path, 100_000_000, force=False):
+        try:
+            log("  downloading FracFocus bulk (~419 MB; cached thereafter)...")
+            download_stream(FRACFOCUS_BULK_URL, zip_path, timeout=1800,
+                            attempts=4, min_bytes=100_000_000)
+        except Exception as e:                        # noqa: BLE001
+            log(f"  FracFocus download failed: {e}; keeping existing data", level="warn")
+            record_source(conn, "fracfocus",
+                          "FracFocus — hydraulic-fracturing chemical disclosures (Michigan)",
+                          FRACFOCUS_BULK_URL, "unavailable", 0, f"download failed: {e}")
+            return 0
+
+    well_apis = {r[0] for r in conn.execute(
+        "SELECT api_num FROM oil_gas_wells WHERE api_num IS NOT NULL AND api_num != ''")}
+    state = FRACFOCUS_STATE_NAME.lower()
+    disclosures: dict = {}      # DisclosureId -> header dict
+    ingredients: list = []      # (did, api, name, cas, pct, mass, masked)
+
+    def make_accessor(row, idx):
+        def g(k):
+            i = idx.get(k)
+            if i is None or i >= len(row):
+                return None
+            v = row[i]
+            return v.strip() if isinstance(v, str) and v.strip() != "" else None
+        return g
+
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            names = z.namelist()
+            # --- disclosure headers (authoritative MI disclosure set) ---
+            for member in sorted(n for n in names if n.lower().startswith("disclosurelist")):
+                with z.open(member) as f:
+                    rd = csv.reader(io.TextIOWrapper(f, encoding="utf-8-sig", errors="replace"))
+                    hdr = next(rd, None)
+                    if not hdr:
+                        continue
+                    idx = {h: i for i, h in enumerate(hdr)}
+                    si, di = idx.get("StateName"), idx.get("DisclosureId")
+                    for row in rd:
+                        if si is None or si >= len(row) or row[si].strip().lower() != state:
+                            continue
+                        did = row[di].strip() if di is not None and di < len(row) else None
+                        if did:
+                            disclosures[did] = _ff_disclosure_from_row(make_accessor(row, idx))
+            # --- ingredient rows (FracFocusRegistry_*: header repeated per chemical) ---
+            for member in sorted(n for n in names if n.lower().startswith("fracfocusregistry")):
+                with z.open(member) as f:
+                    rd = csv.reader(io.TextIOWrapper(f, encoding="utf-8-sig", errors="replace"))
+                    hdr = next(rd, None)
+                    if not hdr:
+                        continue
+                    idx = {h: i for i, h in enumerate(hdr)}
+                    si = idx.get("StateName")
+                    di, ai = idx.get("DisclosureId"), idx.get("APINumber")
+                    ci, ni = idx.get("CASNumber"), idx.get("IngredientName")
+                    pi, mmi = idx.get("PercentHFJob"), idx.get("MassIngredient")
+                    for row in rd:
+                        if si is None or si >= len(row) or row[si].strip().lower() != state:
+                            continue
+                        g = make_accessor(row, idx)
+                        did = row[di].strip() if di is not None and di < len(row) else None
+                        cas = row[ci].strip() if ci is not None and ci < len(row) and row[ci] != "" else None
+                        name = row[ni].strip() if ni is not None and ni < len(row) and row[ni] != "" else None
+                        ingredients.append((
+                            did, (row[ai].strip() if ai is not None and ai < len(row) else None),
+                            name, cas,
+                            _ff_num(row[pi]) if pi is not None and pi < len(row) else None,
+                            _ff_num(row[mmi]) if mmi is not None and mmi < len(row) else None,
+                            1 if _ff_masked(cas, name) else 0))
+                        if did and did not in disclosures:   # backfill header if missing
+                            disclosures[did] = _ff_disclosure_from_row(g)
+    except Exception as e:                            # noqa: BLE001
+        log(f"  FracFocus parse failed: {e}; keeping existing data", level="warn")
+        record_source(conn, "fracfocus",
+                      "FracFocus — hydraulic-fracturing chemical disclosures (Michigan)",
+                      FRACFOCUS_BULK_URL, "unavailable", 0, f"parse failed: {e}")
+        return 0
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM fracfocus_ingredients")
+    cur.execute("DELETE FROM fracfocus_disclosures")
+    matched = 0
+    for did, d in disclosures.items():
+        api = d.get("api")
+        m_api = api if (api and api in well_apis) else None
+        if m_api:
+            matched += 1
+        cur.execute(
+            """INSERT OR REPLACE INTO fracfocus_disclosures(
+                 disclosure_key, api_number, operator_name, well_name, latitude,
+                 longitude, state_name, county_name, total_base_water_volume, tvd,
+                 job_start_date, job_end_date, matched_api_num, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (did, api, d.get("op"), d.get("well"), d.get("lat"), d.get("lon"),
+             d.get("state"), d.get("county"), d.get("water"), d.get("tvd"),
+             d.get("jstart"), d.get("jend"), m_api, "FracFocus"),
+        )
+    for (did, api, name, cas, pct, mass, masked) in ingredients:
+        cur.execute(
+            """INSERT INTO fracfocus_ingredients(
+                 disclosure_key, api_number, ingredient_name, cas_number,
+                 percent_hf_job, mass_ingredient, is_masked)
+               VALUES (?,?,?,?,?,?,?)""",
+            (did, api, name, cas, pct, mass, masked))
+    conn.commit()
+
+    nd, ni_ = len(disclosures), len(ingredients)
+    nmask = sum(1 for r in ingredients if r[6])
+    log(f"  FracFocus MI: {nd} disclosures, {ni_} ingredient rows "
+        f"({nmask} trade-secret-masked), {matched} disclosures matched a well",
+        level="ok" if nd else "warn")
+    record_source(
+        conn, "fracfocus",
+        "FracFocus — hydraulic-fracturing chemical disclosures (Michigan)",
+        "https://fracfocus.org/",
+        "ok" if nd else "unavailable", nd,
+        f"{nd} Michigan HVHF disclosures ({ni_} ingredient rows, {nmask} trade-"
+        f"secret-masked) from the FracFocus national bulk download (refreshed 5 "
+        f"days/week; MI cached). Only High Volume Hydraulic Fracturing (100,000+ "
+        f"gal) is disclosed here — NOT the 12,000+ shallow Antrim fracks. Trade-"
+        f"secret ingredients preserved verbatim. Joined to oil_gas_wells by exact "
+        f"api_num = APINumber ({matched} matched).",
+    )
+    return nd
 
 
 # ---------- Golf courses (OpenStreetMap via Overpass) ----------
