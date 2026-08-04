@@ -3051,7 +3051,11 @@
         m.bindPopup('<div class="ogw-popup"><div class="ogw-loading">Loading well record…</div></div>',
           { maxWidth: 320, className: 'ogw-popup-wrap' });
         bindOgwDetail(m, w);
-        m._pickName = w.status ? ('Well · ' + w.status) : 'Oil/gas well';
+        // No name in the well feed - label by the verbatim WellStatus so the row
+        // reads e.g. "Oil & gas well · Active". esc() at render turns the & into a
+        // proper entity (renders as a plain ampersand, no literal codes); the file
+        // is served UTF-8 so the middle dot renders as-is.
+        m._pickName = w.status ? ('Oil & gas well · ' + w.status) : 'Oil & gas well';
         grp.addLayer(m);
         n += 1;
       }
