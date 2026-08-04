@@ -1459,15 +1459,6 @@ def load_contamination_data(conn: sqlite3.Connection) -> int:
         conn, "epa_region5",
         "EPA Region 5 — Cleanup Activities", "https://www.epa.gov/aboutepa/epa-region-5",
         "reference", 0, "Regional office overseeing Michigan Superfund cleanups.")
-    record_source(
-        conn, "mdhhs_pbb",
-        "MDHHS — Michigan PBB Registry", "https://www.michigan.gov/pbbregistry",
-        "reference", 0,
-        "Long-term health registry from the 1973 Velsicol PBB contamination event.")
-    record_source(
-        conn, "atsdr",
-        "ATSDR — Toxicological Profiles", "https://www.atsdr.cdc.gov/toxprofiledocs/index.html",
-        "reference", 0, "Health-effects reference for the contaminants listed per site.")
     conn.commit()
     log(f"  contamination sites: {total} ({compiled} compiled + {epa_added} EPA)", level="ok")
     return total
