@@ -6863,8 +6863,10 @@
         _writeSectionPrefs();
       });
 
+      // Layer groups default to COLLAPSED (subhead sections stay expanded, so
+      // layer names remain visible); a saved preference overrides the default.
       const saved = prefs[g.key];
-      _lgSetExpanded(g, saved === undefined ? true : !!saved);
+      _lgSetExpanded(g, saved === undefined ? false : !!saved);
     });
 
     // Keep the "layer on but collapsed" dots accurate as toggles change.
