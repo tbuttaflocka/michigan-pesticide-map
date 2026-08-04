@@ -1324,12 +1324,13 @@ a:hover { text-decoration: underline; }
   border-radius: 50%;
 }
 .intro-card { max-width: 720px; }
-.intro-lead { font-size: 14px; line-height: 1.6; color: var(--text); margin: 4px 0 16px; }
+/* Lead is the visual anchor — the eye lands here first. */
+.intro-lead { font-size: 14.5px; line-height: 1.6; color: var(--text); margin: 2px 0 14px; }
 .intro-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);   /* two equal-weight info cards */
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 @media (max-width: 680px) { .intro-grid { grid-template-columns: 1fr; } }
 .intro-block {
@@ -1341,17 +1342,53 @@ a:hover { text-decoration: underline; }
 .intro-block h3 { margin: 6px 0 4px; font-size: 13.5px; color: var(--text); }
 .intro-block p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .intro-ico { font-size: 20px; }
-.intro-about {
-  font-size: 12.5px;
-  line-height: 1.6;
+
+/* Jump-in starting points: the primary call to action, second in the eye's
+   path after the intro. Equal-weight buttons, existing dark theme. */
+.intro-jump { margin: 0 0 16px; }
+.intro-jump-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .6px;
   color: var(--muted);
-  margin: 0 0 12px;
+}
+.intro-jump-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 8px;
+}
+.intro-jump-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--text);
+  transition: border-color .12s ease, background .12s ease;
+}
+.intro-jump-btn:hover { border-color: var(--accent); background: var(--bg-2); }
+.intro-jump-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ij-title { font-size: 13px; font-weight: 600; line-height: 1.3; }
+.ij-sub { font-size: 11px; color: var(--muted); line-height: 1.35; }
+
+/* About / contact: fine print — smaller and muted, last in the hierarchy. */
+.intro-about {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0 0 8px;
 }
 .intro-about strong { color: var(--text); }
 
 .intro-contact {
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--muted);
   margin: 0 0 12px;
 }

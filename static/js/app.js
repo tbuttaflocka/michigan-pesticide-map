@@ -5471,6 +5471,39 @@
       hide($('intro-modal'));
       openSources();
     });
+
+    // Jump-in starting points. Each builds an encoder-format deep-link URL from
+    // the REAL SHARE_LAYERS codes and navigates to it, so the existing boot path
+    // (applyViewState -> applyViewLayers -> section auto-expand) reproduces the
+    // view exactly like a shared link — no separate mechanism. The address entry
+    // opens the existing report flow instead.
+    const JUMPS = {
+      pfas:    { layers: ['pf'],   ll: '44.46426,-83.53906', z: 11 },
+      coalash: { layers: ['ca'] },
+      echo:    { layers: ['echo'] },
+    };
+    document.querySelectorAll('#intro-modal .intro-jump-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        hide($('intro-modal'));
+        if (btn.dataset.jump === 'address') { openAddressModal(); return; }
+        const spec = JUMPS[btn.dataset.jump];
+        if (spec) location.assign(buildJumpUrl(spec));
+      });
+    });
+  }
+
+  // Build a shareable deep-link URL for a jump-in target using the same query
+  // keys the decoder reads (ly / ll / z) and only layer codes that really exist
+  // in SHARE_LAYERS, so these stay in sync with the encoder rather than being
+  // hand-written strings.
+  function buildJumpUrl(spec) {
+    const q = new URLSearchParams();
+    const codes = (spec.layers || []).filter((c) => SHARE_LAYER_BY_CODE[c]);
+    if (codes.length) q.set('ly', codes.join(','));
+    if (spec.ll) q.set('ll', spec.ll);
+    if (spec.z != null) q.set('z', String(spec.z));
+    const qs = q.toString();
+    return location.origin + location.pathname + (qs ? '?' + qs : '');
   }
   function dismissIntro() {
     // Persist dismissal only if the viewer left "don't show again" checked.
