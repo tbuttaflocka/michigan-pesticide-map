@@ -403,6 +403,117 @@
       }
     });
     state.map.on('popupclose', () => document.body.classList.remove('popup-open'));
+
+    // --- "What's here" cross-layer marker picker -----------------------------
+    // When markers from 2+ different visible layers overlap on screen, the top
+    // pane's marker eats the click and the others are unreachable (coal ash over
+    // power plants, power plants over ECHO, etc.). Rather than reorder panes
+    // (which just moves the problem), intercept the click in the CAPTURE phase on
+    // the map container — before Leaflet's own container-level DOM handler and the
+    // canvas renderer's handler run — and, only when there is a genuine cross-layer
+    // overlap, stop the event and show a chooser instead. Single markers are left
+    // completely untouched: the event propagates and opens the popup as before.
+    state.map.getContainer().addEventListener('click', onMapContainerClickCapture, true);
+  }
+
+  // ~pixel radius around a tap that counts as "on top of" a marker.
+  const PICK_RADIUS_PX = 18;
+
+  // Layers that drop individually-clickable point markers, with the display name
+  // shown in the chooser. Each entry resolves the layer's CURRENT group live
+  // (groups are rebuilt on every render), so hidden layers resolve to null.
+  function pickableLayers() {
+    return [
+      ['Coal ash', state.coalAsh.markers],
+      ['Power plants', state.powerPlants.layer],
+      ['Enforcement & compliance (ECHO)', state.echo.layer],
+      ['TRI industrial facilities', state.tri.markers],
+      ['Contamination sites', state.contam.markers],
+      ['PFAS sites', state.pfas.markers],
+      ['Landfills & waste', state.landfill.markers],
+      ['Underground storage tanks', state.ust.markers],
+      ['Oil & gas wells', state.oilGas.layer],
+      ['Golf courses', state.golf.markers],
+      ['Spraying programs', state.spraying.markers],
+      ['Frac disclosures', state.fracfocus.layer],
+      ['Water-quality sites', state.water.sitesLayer],
+    ];
+  }
+
+  // Collect every individually-visible marker whose PROJECTED screen position is
+  // within PICK_RADIUS_PX of the click point. Hit-testing is done on the marker's
+  // latlng projected to container pixels — identical for DOM divIcons and canvas
+  // circleMarkers, so it works regardless of marker/renderer type and needs no
+  // per-type hit-testing. Markers currently collapsed inside a cluster are skipped
+  // so clicking a cluster still zooms/spiderfies as before.
+  function collectPicksAt(containerPt) {
+    const R = PICK_RADIUS_PX;
+    const map = state.map;
+    // coarse latlng box around the tap to skip far-away markers cheaply before
+    // the (slightly costlier) projection — matters for big layers like ECHO.
+    const box = L.latLngBounds(
+      map.containerPointToLatLng([containerPt.x - R, containerPt.y - R]),
+      map.containerPointToLatLng([containerPt.x + R, containerPt.y + R]));
+    const found = [];
+    for (const [layerName, group] of pickableLayers()) {
+      if (!group || !map.hasLayer(group)) continue;
+      const isCluster = typeof group.getVisibleParent === 'function';
+      group.eachLayer((m) => {
+        if (!m.getLatLng) return;                 // skip polygons / non-point layers
+        const ll = m.getLatLng();
+        if (!box.contains(ll)) return;
+        if (isCluster) {
+          const vis = group.getVisibleParent(m);
+          if (vis && vis !== m) return;           // collapsed into a cluster right now
+        }
+        if (map.latLngToContainerPoint(ll).distanceTo(containerPt) <= R) {
+          found.push({ layer: layerName, name: m._pickName || '(unnamed site)', marker: m });
+        }
+      });
+    }
+    return found;
+  }
+
+  function onMapContainerClickCapture(ev) {
+    // Never intercept clicks on controls, an open popup, the chooser itself, or a
+    // cluster badge (those must keep their normal behavior).
+    if (ev.target.closest &&
+        ev.target.closest('.leaflet-control, .leaflet-popup, .marker-picker, .marker-cluster')) return;
+    const pt = state.map.mouseEventToContainerPoint(ev);
+    const found = collectPicksAt(pt);
+    const layers = new Set(found.map((f) => f.layer));
+    // Only take over when 2+ markers from DIFFERENT layers overlap. One marker (or
+    // several from the same layer, which cluster) falls through to normal handling.
+    if (found.length >= 2 && layers.size >= 2) {
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      showMarkerPicker(found, pt);
+    }
+  }
+
+  function showMarkerPicker(found, containerPt) {
+    const rows = found.map((f, i) =>
+      `<button class="mp-item" type="button" data-i="${i}">`
+      + `<span class="mp-layer">${esc(f.layer)}</span>`
+      + `<span class="mp-name">${esc(f.name)}</span></button>`).join('');
+    const html = `<div class="marker-picker">`
+      + `<div class="mp-head">${found.length} overlapping sites — pick one</div>`
+      + rows + `</div>`;
+    const popup = L.popup({ className: 'marker-picker-popup', maxWidth: 300, closeButton: true, autoPan: true })
+      .setLatLng(state.map.containerPointToLatLng(containerPt))
+      .setContent(html)
+      .openOn(state.map);
+    const el = popup.getElement();
+    if (!el) return;
+    el.querySelectorAll('.mp-item').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const chosen = found[+btn.getAttribute('data-i')];
+        state.map.closePopup(popup);
+        if (chosen && chosen.marker && chosen.marker.openPopup) chosen.marker.openPopup();
+      });
+    });
   }
 
   // Detach a dedicated L.canvas RENDERER from the map. Vector layers that use a
@@ -1320,6 +1431,7 @@
       // detail each time it opens. Leaflet then owns open/close/reopen, so the
       // same marker reopens reliably instead of only working on the first click.
       m.bindPopup('<div class="wq-popup muted">Loading…</div>', { maxWidth: 340 });
+      m._pickName = s.site_name || s.site_id;
       m.on('popupopen', () => openWaterPopup(m, s));
       grp.addLayer(m);
       if (s.severity === 'exceeds_mcl') exceeds++;
@@ -2341,6 +2453,7 @@
       // every click installed a second toggle handler that cancelled the next
       // open, so a closed marker wouldn't reopen until you clicked elsewhere.)
       m.bindPopup(contamPopupHtml(s), { maxWidth: 360, className: 'contam-popup-wrap' });
+      m._pickName = s.site_name || s.company;
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -2544,6 +2657,7 @@
         }),
       });
       m.bindPopup(landfillPopupHtml(s), { maxWidth: 340, className: 'landfill-popup-wrap' });
+      m._pickName = s.name;
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -2786,6 +2900,7 @@
         m.bindPopup('<div class="echo-popup"><div class="echo-loading">Loading compliance record…</div></div>',
           { maxWidth: 330, className: 'echo-popup-wrap' });
         bindEchoDetail(m, f);
+        m._pickName = f.name;
         grp.addLayer(m);
       }
     }
@@ -2936,6 +3051,7 @@
         m.bindPopup('<div class="ogw-popup"><div class="ogw-loading">Loading well record…</div></div>',
           { maxWidth: 320, className: 'ogw-popup-wrap' });
         bindOgwDetail(m, w);
+        m._pickName = w.status ? ('Well · ' + w.status) : 'Oil/gas well';
         grp.addLayer(m);
         n += 1;
       }
@@ -3066,6 +3182,7 @@
       m.bindPopup('<div class="ff-popup"><div class="ogw-loading">Loading disclosure…</div></div>',
         { maxWidth: 340, className: 'ff-popup-wrap' });
       bindFfDetail(m, w);
+      m._pickName = w.name || 'Frac disclosure';
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -3217,6 +3334,7 @@
       m.bindPopup('<div class="pp-popup"><div class="ogw-loading">Loading plant record…</div></div>',
         { maxWidth: 330, className: 'pp-popup-wrap' });
       bindPpDetail(m, p);
+      m._pickName = p.name;
       grp.addLayer(m);
       n += 1;
     }
@@ -3356,6 +3474,7 @@
         }),
       });
       m.bindPopup(html, { maxWidth: 340, className: 'golf-popup-wrap' });
+      m._pickName = s.name;
       grp.addLayer(m);
     }
     polys.addTo(state.map);
@@ -3577,6 +3696,7 @@
           iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
       });
       m.bindPopup(pfasPopupHtml(f), { maxWidth: 340, className: 'pfas-popup-wrap' });
+      m._pickName = f.name;
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -3983,6 +4103,7 @@
             iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
         });
         m.bindPopup(ustPopupHtml(f), { maxWidth: 340, className: 'ust-popup-wrap' });
+        m._pickName = [f.a, f.ci].filter(Boolean).join(', ') || 'Storage-tank site';
         grp.addLayer(m);
       }
     }
@@ -4280,6 +4401,7 @@
         }),
       });
       m.bindPopup(sprayingPopupHtml(p), { maxWidth: 340, className: 'spraying-popup-wrap' });
+      m._pickName = p.name;
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -4365,6 +4487,7 @@
         }),
       });
       m.bindPopup(coalAshPopupHtml(s), { maxWidth: 360, className: 'coalash-popup-wrap' });
+      m._pickName = s.name;                 // for the cross-layer "what's here" picker
       grp.addLayer(m);
     }
     grp.addTo(state.map);
@@ -4561,6 +4684,7 @@
         }),
       });
       m.bindPopup(triFacilityPopupHtml(f), { maxWidth: 340, className: 'tri-popup-wrap' });
+      m._pickName = f.name;
       grp.addLayer(m);
       byId.set(f.facility_id, m);
       shown++;
