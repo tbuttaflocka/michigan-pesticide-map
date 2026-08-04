@@ -2739,20 +2739,29 @@ a:hover { text-decoration: underline; }
          flex items of the header and can each take their own row. --- */
   .app-header { position: relative; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; }
   .header-actions { display: contents; }
-  .branding { order: 0; flex: 1 1 0; min-width: 0; }   /* basis 0 so title shares row 1 with the buttons */
+  /* basis = the title's own width so it reserves room on row 1 (grows to fill
+     the slack, shrinks with ellipsis only in the extreme). This reserved basis
+     is what pushes #open-address / #share-view down to their own row. */
+  .branding { order: 0; flex: 1 1 auto; min-width: 0; }
   .branding h1 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .branding .subtitle { display: none; }
+  /* Explicit source-order across the wrapped header. Row 1: title + the two
+     small icon buttons (branding grows to fill, so it stays readable instead of
+     collapsing to a sliver). Row 2: the two action buttons, two-up. Row 3:
+     search. (The view-switch row is hidden below.) #open-address / #share-view
+     were added after this mobile layout was written and had no order, so they
+     defaulted to order:0 and crowded the title onto row 1 — giving them their
+     own row is the core of this fix. */
   #open-intro { order: 1; }
   #open-sources { order: 2; }
-  #search { order: 3; flex-basis: 100%; width: 100%; padding: 11px 12px; }
+  #open-address { order: 3; flex: 1 1 auto; justify-content: center; }
+  #share-view   { order: 4; flex: 1 1 auto; justify-content: center; }
+  #search { order: 5; flex-basis: 100%; width: 100%; padding: 11px 12px; }
   .search-dropdown { position: absolute; top: 100%; left: 8px; right: 8px; width: auto; margin-top: 4px; }
-  .view-switch {
-    order: 4; flex-basis: 100%; width: 100%;
-    overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .view-switch::-webkit-scrollbar { display: none; }
-  .view-switch button { flex: 0 0 auto; white-space: nowrap; padding: 10px 16px; min-height: 44px; }
+  /* The view switch holds a single, always-active "Heat map" tab (there is no
+     second view), so on phones it's just a wasted full-width row. Hide it to
+     give the map back that vertical space; desktop still shows it. */
+  .view-switch { display: none; }
   #open-intro, #open-sources { min-height: 40px; padding: 8px 12px; }
 
   /* --- map fills the whole view; sidebars leave the flow to become sheets --- */
@@ -2839,6 +2848,9 @@ a:hover { text-decoration: underline; }
   .m-fab #m-fab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .m-fab-ico { font-size: 16px; flex: 0 0 auto; }
   body.m-layers-open .m-fab, body.m-detail-open .m-fab { display: none; }
+  /* While a map popup is open, get the FABs out of the way so they never sit on
+     top of popup text (they return the moment the popup closes). */
+  body.popup-open .m-fab { display: none; }
   /* prominent "Statewide overview" FAB, stacked above the layers FAB (bottom-left,
      clear of the map zoom controls top-left and the attribution bottom-right). */
   .m-fab-summary {

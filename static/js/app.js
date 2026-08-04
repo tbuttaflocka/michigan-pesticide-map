@@ -375,6 +375,34 @@
       if (!state.cdl.on || _cdlClipRAF) return;
       _cdlClipRAF = requestAnimationFrame(() => { _cdlClipRAF = null; updateCdlClip(); });
     });
+
+    // --- Popup fixes (mobile + desktop) --------------------------------------
+    // FIX C: Leaflet's popupPane defaults to z-index 700, below the zoom control
+    // (.leaflet-top, z 1000), so popup titles rendered behind the +/- buttons.
+    // Lift the whole popup pane above the controls. Controls stay fully usable
+    // when no popup is open (nothing in the pane overlaps them then).
+    state.map.getPane('popupPane').style.zIndex = 1100;
+
+    // FIX A: no bindPopup call sets maxHeight, so Leaflet never builds its
+    // scrollable container and tall popups overflowed the screen with no way to
+    // scroll. Size maxHeight to the live MAP height (not a fixed pixel value, so
+    // it adapts to phone and desktop and to orientation changes) at open time,
+    // which makes Leaflet wrap the content in a single scrollable region and also
+    // shrinks the autoPan distance. Recomputed on every open, so rotation/resize
+    // are handled naturally.
+    // FIX B: on mobile the floating FABs (z 1500) sat on top of popup text — mark
+    // the body while a popup is open so CSS can hide them, and clear it on close.
+    state.map.on('popupopen', (e) => {
+      document.body.classList.add('popup-open');
+      const p = e.popup;
+      if (!p || !p.options) return;
+      const max = Math.max(160, Math.round(state.map.getSize().y * 0.72) - 24);
+      if (p.options.maxHeight !== max) {
+        p.options.maxHeight = max;
+        if (p.update) p.update();   // re-lays-out: wraps content + re-runs autoPan
+      }
+    });
+    state.map.on('popupclose', () => document.body.classList.remove('popup-open'));
   }
 
   // Detach a dedicated L.canvas RENDERER from the map. Vector layers that use a
@@ -2437,7 +2465,12 @@
       return L.markerClusterGroup({
         clusterPane: 'landfill', maxClusterRadius: 46, chunkedLoading: true,
         showCoverageOnHover: false, spiderfyOnMaxZoom: true,
-        removeOutsideVisibleBounds: true,
+        // Keep every marker rendered (no off-screen culling). Landfill popups are
+        // tall, so opening one autoPans the map to fit it; with culling ON the
+        // pan can move the popup's source marker out of bounds, markerCluster
+        // removes it, and removing an open popup's marker slams the popup shut
+        // (the reported mobile "opens then instantly closes" bug). Matches coalash.
+        removeOutsideVisibleBounds: false,
       });
     }
     return L.layerGroup();   // graceful fallback if the cluster plugin didn't load
@@ -3272,7 +3305,10 @@
       return L.markerClusterGroup({
         clusterPane: 'golf', maxClusterRadius: 48, chunkedLoading: true,
         showCoverageOnHover: false, spiderfyOnMaxZoom: true,
-        removeOutsideVisibleBounds: true,
+        // No off-screen culling — same reason as UST/TRI/landfill: culling can
+        // drop an open popup's source marker during autoPan and shut the popup.
+        // Golf popups are short today so it rarely bites, but keep it consistent.
+        removeOutsideVisibleBounds: false,
       });
     }
     return L.layerGroup();   // graceful fallback if the cluster plugin didn't load
@@ -3451,7 +3487,10 @@
       return L.markerClusterGroup({
         clusterPane: 'pfas', maxClusterRadius: 42, chunkedLoading: true,
         showCoverageOnHover: false, spiderfyOnMaxZoom: true,
-        removeOutsideVisibleBounds: true,
+        // No off-screen culling — same reason as UST/TRI/landfill: culling can
+        // drop an open popup's source marker during autoPan and shut the popup.
+        // PFAS site popups are short today so it rarely bites, but keep it consistent.
+        removeOutsideVisibleBounds: false,
       });
     }
     return L.layerGroup();
@@ -3898,7 +3937,10 @@
       return L.markerClusterGroup({
         clusterPane: 'ust', maxClusterRadius: 50, chunkedLoading: true,
         showCoverageOnHover: false, spiderfyOnMaxZoom: true,
-        removeOutsideVisibleBounds: true,
+        // No off-screen culling: UST popups are tall, so opening one autoPans the
+        // map; culling could drop the open popup's source marker mid-pan and shut
+        // the popup instantly (reported mobile bug). See coalash / landfill.
+        removeOutsideVisibleBounds: false,
       });
     }
     return L.layerGroup();
@@ -4204,7 +4246,10 @@
       return L.markerClusterGroup({
         clusterPane: 'spraying', maxClusterRadius: 44, chunkedLoading: true,
         showCoverageOnHover: false, spiderfyOnMaxZoom: true,
-        removeOutsideVisibleBounds: true,
+        // No off-screen culling — same reason as UST/TRI/landfill: culling can
+        // drop an open popup's source marker during autoPan and shut the popup.
+        // Spraying popups are short today so it rarely bites, but keep it consistent.
+        removeOutsideVisibleBounds: false,
       });
     }
     return L.layerGroup();   // graceful fallback if the cluster plugin didn't load
@@ -4432,7 +4477,10 @@
       return L.markerClusterGroup({
         clusterPane: 'tri', maxClusterRadius: 48, chunkedLoading: true,
         showCoverageOnHover: false, spiderfyOnMaxZoom: true,
-        removeOutsideVisibleBounds: true,
+        // No off-screen culling: TRI popups are tall, so opening one autoPans the
+        // map; culling could drop the open popup's source marker mid-pan and shut
+        // the popup instantly (reported mobile bug). See coalash / landfill.
+        removeOutsideVisibleBounds: false,
       });
     }
     return L.layerGroup();
