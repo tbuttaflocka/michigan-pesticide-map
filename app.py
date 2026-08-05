@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import math
 import re
@@ -18,7 +19,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, request, send_from_directory
+from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
 
 from app import database
 from app.water_quality import to_ugl, mcl_for, benchmark_for, AQUATIC_BENCHMARK_SOURCE
@@ -30,6 +31,7 @@ from app import airtoxics_data
 from app import ust_data
 from app import spraying_programs
 from app import coal_ash_data
+from app import county_export
 from app import tri_reference
 from app import pfas_chem
 from app.categories import subtype as compound_subtype
@@ -639,6 +641,30 @@ def api_county(fips: str):
         "mdard_inspector_url":
             "https://www.michigan.gov/en/mdard/plant-pest/Pesticides/Pesticide-Regulatory-Info",
     })
+
+
+@app.route("/api/county/<fips>/export")
+def api_county_export(fips: str):
+    """Build, on request, a ZIP of one CSV per dataset that has rows in this
+    county, plus a README. Generated fresh each time (no caching); see
+    app/county_export.py for the dataset catalogue and provenance handling."""
+    conn = db()
+    try:
+        result = county_export.build_county_zip(
+            conn, fips,
+            geojson_path=GEOJSON_PATH,
+            coal_ash_sites=coal_ash_data.COAL_ASH_SITES,
+            spraying_payload=spraying_programs.programs_payload(),
+            ccr_source=_CCR_DATA_SOURCES[0],
+            now=datetime.now(timezone.utc),
+        )
+    finally:
+        conn.close()
+    if result is None:
+        abort(404, "Unknown county FIPS")
+    data, filename, _stats = result
+    return send_file(io.BytesIO(data), mimetype="application/zip",
+                     as_attachment=True, download_name=filename)
 
 
 # Exact-normalized key (lowercase, strip whitespace + punctuation) — the same

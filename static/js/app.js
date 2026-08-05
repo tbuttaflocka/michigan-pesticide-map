@@ -950,6 +950,41 @@
     hide($('place-context'));
   }
 
+  // Download the per-county data export (a ZIP of one CSV per dataset + README),
+  // built server-side on request. Shows a loading state while the ZIP builds and
+  // surfaces a clear message on failure rather than failing silently.
+  async function downloadCountyExport() {
+    const fips = state.selectedFips;
+    if (!fips) return;
+    const btn = $('county-export');
+    const status = $('county-export-status');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Preparing ZIP…';
+    if (status) { status.className = 'county-export-status'; status.textContent = 'Building your download — this can take a few seconds for large counties.'; }
+    try {
+      const resp = await fetch(`/api/county/${encodeURIComponent(fips)}/export`);
+      if (!resp.ok) throw new Error(`server returned ${resp.status}`);
+      const blob = await resp.blob();
+      // filename from Content-Disposition, falling back to a sensible default
+      let name = `county-${fips}-data.zip`;
+      const cd = resp.headers.get('Content-Disposition') || '';
+      const mm = cd.match(/filename="?([^"]+)"?/i);
+      if (mm) name = mm[1];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      if (status) { status.className = 'county-export-status ok'; status.textContent = `Downloaded ${name} (${(blob.size / 1024).toFixed(0)} KB).`; }
+    } catch (err) {
+      if (status) { status.className = 'county-export-status err'; status.textContent = 'Sorry — the export could not be generated. Please try again in a moment.'; }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
   // Clicking the map polygon toggles selection; search/list clicks call
   // openCounty directly (which also selects).
   function onCountyClick(fips) {
@@ -5580,6 +5615,8 @@
 
     $('county-close').addEventListener('click', closeCountyPanel);
     $('county-back').addEventListener('click', closeCountyPanel);
+    const exportBtn = $('county-export');
+    if (exportBtn) exportBtn.addEventListener('click', downloadCountyExport);
     const shareBtn = $('share-view');
     if (shareBtn) shareBtn.addEventListener('click', shareCurrentView);
     $('open-sources').addEventListener('click', openSources);

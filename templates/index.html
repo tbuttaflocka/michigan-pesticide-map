@@ -433,6 +433,10 @@
       <button id="county-check-address" class="btn-primary county-address-btn" type="button"
         data-tip="Check the documented environmental hazards near a specific address in this county.">🏠 Check an address in this county</button>
 
+      <button id="county-export" class="btn-ghost county-export-btn" type="button"
+        data-tip="Download every dataset for this county as a ZIP of CSV files, one per source, with a README of provenance and caveats.">⬇ Download this county's data (ZIP)</button>
+      <div id="county-export-status" class="county-export-status hidden" role="status" aria-live="polite"></div>
+
       <div class="big-stats county-headline">
         <div id="county-stat-1"><strong id="county-total">—</strong><span id="county-total-label">Pesticide applied (total)</span></div>
         <div id="county-stat-2"><strong id="county-density">—</strong><span id="county-density-label">Pesticide per square mile</span></div>
