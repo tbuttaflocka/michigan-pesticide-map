@@ -1009,6 +1009,49 @@ def api_overview():
                 "source": "EPA Toxics Release Inventory (self-reported)",
                 "target": tgt})
 
+    # ECHO significant noncompliance — the county with the most facilities flagged
+    # SNC (significant noncompliance) or CAA HPV (high-priority violation). Chosen
+    # over the single-facility "most quarters in NC" metric because that ties at
+    # 12/12 across many facilities; the county count is the clearer, navigable
+    # fact and parallels the UST county call-out above.
+    r = _ov_row(cur, "SELECT co.name, co.fips AS fips, COUNT(*) c FROM echo_facilities e "
+                     "JOIN counties co ON co.fips = e.county_fips "
+                     "WHERE e.snc_flag = 'Y' OR e.caa_hpv_flag = 'Y' "
+                     "GROUP BY e.county_fips ORDER BY c DESC, co.name ASC LIMIT 1")
+    if r and r["c"]:
+        notable.append({
+            "label": "Most facilities flagged in significant noncompliance",
+            "value": f"{r['name']} County — {r['c']:,}",
+            "note": "facilities flagged for significant noncompliance (SNC) or a "
+                    "high-priority Clean Air Act violation (HPV) over the trailing "
+                    "12 federal fiscal quarters",
+            "source": "EPA ECHO — EPA/state determinations, alleged not adjudicated",
+            "target": {"kind": "county", "fips": r["fips"], "cb": "echo-sites"}})
+
+    # Orphan oil & gas wells — statewide count plus the county with the most.
+    # Computed live (the sub-toggle label's number is a stale hardcode). The
+    # definition mirrors the app's orphan-well tooltip.
+    ot = _ov_row(cur, "SELECT COUNT(*) c FROM oil_gas_wells WHERE well_status = 'Orphan'")
+    orphan_total = ot["c"] if ot else 0
+    if orphan_total:
+        rc = _ov_row(cur, "SELECT co.name, co.fips AS fips, COUNT(*) c FROM oil_gas_wells w "
+                          "JOIN counties co ON co.fips = w.county_fips "
+                          "WHERE w.well_status = 'Orphan' GROUP BY w.county_fips "
+                          "ORDER BY c DESC, co.name ASC LIMIT 1")
+        value = f"{orphan_total:,} statewide"
+        target = None
+        if rc and rc["c"]:
+            value += f" · most in {rc['name']} County ({rc['c']:,})"
+            target = {"kind": "county", "fips": rc["fips"], "cb": "oilgas-sites"}
+        notable.append({
+            "label": "Orphan oil & gas wells",
+            "value": value,
+            "note": "wells whose responsible operator EGLE has determined is unknown, "
+                    "insolvent, or deceased — so the state's Orphan Well Program "
+                    "(NREPA Part 616) becomes responsible for plugging and cleanup",
+            "source": "Michigan EGLE Orphan Well Program",
+            "target": target})
+
     conn.close()
     return jsonify({"totals": totals, "notable": notable,
                     "as_of_years": {"tri": tri_year, "pesticides": pest_year}})
