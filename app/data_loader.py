@@ -75,6 +75,12 @@ from .config import (
     EIA_API_KEY,
     EIA_OGC_URL,
     EIA_STATE,
+    AQS_MONITORS_URL,
+    AQS_ANNUAL_URL_TMPL,
+    AQS_YEARS,
+    AQS_CACHE_DIR,
+    AQS_ACTIVE_CUTOFF,
+    AQS_AIRDATA_BASE,
 )
 from .wind_data import MI_ASOS_STATIONS, DIRS_16, deg_to_dir16, dir16_to_deg
 from .water_quality import (
@@ -2603,6 +2609,217 @@ def _gaz_cache(url: str) -> Path:
         size = download_to(url, path, timeout=180)
         log(f"  fetched {size/1024:.0f} KB -> {path.name}", level="ok")
     return path
+
+
+# ======================================================================
+# EPA AQS ambient air monitoring — AirData pre-generated files (no API key)
+# ======================================================================
+_AQS_TITLE = "EPA AQS — ambient air monitoring (AirData annual summaries)"
+_AQS_URL = f"{AQS_AIRDATA_BASE}/download_files.html"
+_AQS_NOTES = (
+    "Measured ambient concentrations from EPA's Air Quality System (AQS) via the "
+    "AirData pre-generated files (annual_conc_by_monitor + aqs_monitors), Michigan "
+    "only. DISTINCT from our CAMD measured stack emissions and our NATA/AirToxScreen "
+    "MODELED risk — never rank across them. AirData refreshes twice a year (June = "
+    "complete prior year, December = ozone season); agencies have up to 6 months to "
+    "report, so recent-year data is often NOT yet certified (see certification_"
+    "indicator). NAAQS comparison fields are stored exactly as AQS published them."
+)
+
+# The CURRENT NAAQS per pollutant, keyed by the EXACT AQS 'Pollutant Standard'
+# label so the UI can filter air_monitor_annual to the current standard. Levels
+# from EPA's NAAQS table (https://www.epa.gov/criteria-air-pollutants/naaqs-table);
+# PM2.5 annual is the Feb-2024 revision (9.0 ug/m3).
+_AQS_NAAQS_SRC = "https://www.epa.gov/criteria-air-pollutants/naaqs-table"
+_AQS_NAAQS_CURRENT = [
+    ("44201", "Ozone", "Ozone 8-Hour 2015", "0.070", "ppm", "8-hour",
+     "annual 4th-highest daily max 8-hr, averaged over 3 years"),
+    ("88101", "PM2.5 - Local Conditions", "PM25 Annual 2024", "9.0", "ug/m3", "annual",
+     "annual mean, averaged over 3 years"),
+    ("88101", "PM2.5 - Local Conditions", "PM25 24-hour 2012", "35", "ug/m3", "24-hour",
+     "98th percentile, averaged over 3 years"),
+    ("81102", "PM10 Total 0-10um STP", "PM10 24-hour 2006", "150", "ug/m3", "24-hour",
+     "not to be exceeded >1x/year on average over 3 years"),
+    ("42401", "Sulfur dioxide", "SO2 1-hour 2010", "75", "ppb", "1-hour",
+     "99th percentile of daily max 1-hr, averaged over 3 years"),
+    ("42602", "Nitrogen dioxide (NO2)", "NO2 1-hour 2010", "100", "ppb", "1-hour",
+     "98th percentile of daily max 1-hr, averaged over 3 years"),
+    ("42602", "Nitrogen dioxide (NO2)", "NO2 Annual 1971", "53", "ppb", "annual",
+     "annual mean"),
+    ("42101", "Carbon monoxide", "CO 8-hour 1971", "9", "ppm", "8-hour",
+     "not to be exceeded more than once per year"),
+    ("42101", "Carbon monoxide", "CO 1-hour 1971", "35", "ppm", "1-hour",
+     "not to be exceeded more than once per year"),
+    ("14129", "Lead (TSP) LC", "Lead 3-Month 2009", "0.15", "ug/m3", "rolling 3-month",
+     "not to be exceeded, evaluated over a 3-year period"),
+    ("12128", "Lead PM10 LC FRM/FEM", "Lead 3-Month 2009", "0.15", "ug/m3", "rolling 3-month",
+     "not to be exceeded, evaluated over a 3-year period"),
+]
+
+
+def _aqs_int(v):
+    v = (v or "").strip()
+    if v == "":
+        return None
+    try:
+        return int(float(v))
+    except ValueError:
+        return None
+
+
+def _aqs_extract_csv(url: str, cache_name: str, *, min_bytes: int = 50_000) -> Path:
+    """Download+cache an AirData .zip (force-safe) and return the extracted .csv."""
+    AQS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    zpath = AQS_CACHE_DIR / cache_name
+    if _need_download(zpath, min_bytes, force=FORCE_REFRESH):
+        n = download_stream(url, zpath, min_bytes=min_bytes)
+        log(f"  downloaded {cache_name} ({n:,} bytes)")
+    with zipfile.ZipFile(zpath) as z:
+        member = z.namelist()[0]
+        z.extract(member, AQS_CACHE_DIR)
+    return AQS_CACHE_DIR / member
+
+
+def load_aqs_monitors(conn: sqlite3.Connection) -> int:
+    """air_monitors from AirData aqs_monitors.zip, Michigan (State Code 26) only.
+    Grain: one row per State+County+Site+Parameter+POC (a 'monitor')."""
+    log("Loading EPA AQS monitors (Michigan, AirData aqs_monitors.zip)...")
+    try:
+        csv_path = _aqs_extract_csv(AQS_MONITORS_URL, "aqs_monitors.zip", min_bytes=500_000)
+    except Exception as e:                                   # noqa: BLE001
+        log(f"  AQS monitors fetch failed: {e}; keeping existing data", level="warn")
+        record_source(conn, "epa_aqs", _AQS_TITLE, _AQS_URL, "unavailable", 0,
+                      f"aqs_monitors fetch failed: {e}")
+        return 0
+    cur = conn.cursor()
+    cur.execute("DELETE FROM air_monitors")
+    n = 0
+    with open(csv_path, newline="", encoding="utf-8", errors="replace") as f:
+        for r in csv.DictReader(f):
+            if r["State Code"] != MICHIGAN_STATE_FIPS:
+                continue
+            cc = r["County Code"]
+            cur.execute(
+                """INSERT OR REPLACE INTO air_monitors(
+                    state_code, county_code, site_num, parameter_code, parameter_name,
+                    poc, latitude, longitude, datum, county_fips, county_name, city_name,
+                    local_site_name, address, monitor_type, networks, reporting_agency,
+                    monitoring_objective, measurement_scale, naaqs_primary_monitor,
+                    first_year_of_data, last_sample_date, source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (r["State Code"], cc, r["Site Number"], r["Parameter Code"],
+                 r["Parameter Name"], r["POC"], _to_float(r["Latitude"]),
+                 _to_float(r["Longitude"]), r["Datum"], MICHIGAN_STATE_FIPS + cc,
+                 r["County Name"], r["City Name"], r["Local Site Name"], r["Address"],
+                 r["Monitor Type"], r["Networks"], r["Reporting Agency"],
+                 r["Monitoring Objective"], r["Measurement Scale"],
+                 r["NAAQS Primary Monitor"], _aqs_int(r["First Year of Data"]),
+                 r["Last Sample Date"], "EPA_AQS_AirData"),
+            )
+            n += 1
+    conn.commit()
+    log(f"  air_monitors: {n:,} Michigan monitor records", level="ok" if n else "warn")
+    return n
+
+
+def load_aqs_annual(conn: sqlite3.Connection) -> int:
+    """air_monitor_annual from annual_conc_by_monitor_YYYY, Michigan only, across
+    AQS_YEARS. ROW GRAIN: one row per monitor per pollutant per year PER standard.
+    NAAQS comparison fields are stored verbatim; we never recompute them."""
+    log(f"Loading EPA AQS annual summaries (Michigan, years {AQS_YEARS})...")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM air_monitor_annual")
+    total, per_year = 0, {}
+    for yr in AQS_YEARS:
+        try:
+            csv_path = _aqs_extract_csv(AQS_ANNUAL_URL_TMPL.format(year=yr),
+                                        f"annual_conc_by_monitor_{yr}.zip")
+        except Exception as e:                               # noqa: BLE001
+            log(f"  {yr}: fetch failed: {e}", level="warn")
+            continue
+        yn = 0
+        with open(csv_path, newline="", encoding="utf-8", errors="replace") as f:
+            for r in csv.DictReader(f):
+                if r["State Code"] != MICHIGAN_STATE_FIPS:
+                    continue
+                cc = r["County Code"]
+                cur.execute(
+                    """INSERT INTO air_monitor_annual(
+                        state_code, county_code, site_num, parameter_code, parameter_name,
+                        poc, year, county_fips, county_name, latitude, longitude,
+                        sample_duration, pollutant_standard, metric_used, method_name,
+                        units_of_measure, observation_count, observation_percent,
+                        completeness_indicator, certification_indicator, valid_day_count,
+                        primary_exceedance_count, secondary_exceedance_count, arithmetic_mean,
+                        first_max_value, first_max_datetime, percentile_99, percentile_98,
+                        percentile_95, percentile_90, percentile_75, percentile_50,
+                        percentile_10, source)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (r["State Code"], cc, r["Site Num"], r["Parameter Code"],
+                     r["Parameter Name"], r["POC"], _aqs_int(r["Year"]),
+                     MICHIGAN_STATE_FIPS + cc, r["County Name"], _to_float(r["Latitude"]),
+                     _to_float(r["Longitude"]), r["Sample Duration"], r["Pollutant Standard"],
+                     r["Metric Used"], r["Method Name"], r["Units of Measure"],
+                     _aqs_int(r["Observation Count"]), _to_float(r["Observation Percent"]),
+                     r["Completeness Indicator"], r["Certification Indicator"],
+                     _aqs_int(r["Valid Day Count"]), _aqs_int(r["Primary Exceedance Count"]),
+                     _aqs_int(r["Secondary Exceedance Count"]), _to_float(r["Arithmetic Mean"]),
+                     _to_float(r["1st Max Value"]), r["1st Max DateTime"],
+                     _to_float(r["99th Percentile"]), _to_float(r["98th Percentile"]),
+                     _to_float(r["95th Percentile"]), _to_float(r["90th Percentile"]),
+                     _to_float(r["75th Percentile"]), _to_float(r["50th Percentile"]),
+                     _to_float(r["10th Percentile"]), "EPA_AQS_AirData"),
+                )
+                yn += 1
+        per_year[yr] = yn
+        total += yn
+        log(f"  {yr}: {yn:,} Michigan annual rows")
+    # current-NAAQS reference (exact-string filter key for the UI)
+    cur.execute("DELETE FROM air_naaqs_current")
+    for pc, pn, std, level, units, avg, form in _AQS_NAAQS_CURRENT:
+        cur.execute(
+            """INSERT INTO air_naaqs_current(parameter_code, parameter_name,
+                 pollutant_standard, level, units, averaging_time, form, source_url)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (pc, pn, std, level, units, avg, form, _AQS_NAAQS_SRC))
+    conn.commit()
+    monitors = cur.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT state_code, county_code, site_num, "
+        "parameter_code, poc FROM air_monitor_annual)").fetchone()[0]
+    cov = (str(min(per_year)), str(max(per_year))) if per_year else (None, None)
+    record_source(conn, "epa_aqs", _AQS_TITLE, _AQS_URL, "ok" if total else "unavailable",
+                  total, _AQS_NOTES + f" Loaded {sorted(per_year)}; {total:,} annual rows "
+                  f"across {monitors:,} distinct monitors.",
+                  coverage_start=cov[0], coverage_end=cov[1])
+    log(f"  air_monitor_annual: {total:,} rows / {monitors:,} distinct monitors",
+        level="ok" if total else "warn")
+    return total
+
+
+def load_aqs_coverage(conn: sqlite3.Connection) -> int:
+    """Derived air_county_coverage: which of Michigan's 83 counties have an ACTIVE
+    monitor (Last Sample Date >= AQS_ACTIVE_CUTOFF) and which have none. County FIPS
+    = '26' + 3-digit County Code. County aggregation only — no cross-dataset joins."""
+    cur = conn.cursor()
+    cur.execute("DELETE FROM air_county_coverage")
+    active: dict[str, set] = {}
+    for fips, cc, site, last in cur.execute(
+            "SELECT county_fips, county_code, site_num, last_sample_date FROM air_monitors"):
+        if last and last >= AQS_ACTIVE_CUTOFF:
+            active.setdefault(fips, set()).add((cc, site))
+    n_with = 0
+    for fips, name in cur.execute("SELECT fips, name FROM counties").fetchall():
+        sites = active.get(fips, set())
+        has = 1 if sites else 0
+        n_with += has
+        cur.execute(
+            """INSERT INTO air_county_coverage(county_fips, county_name, has_monitor,
+                 active_site_count, source) VALUES (?,?,?,?,?)""",
+            (fips, name, has, len(sites), "EPA_AQS_AirData (derived)"))
+    conn.commit()
+    log(f"  air_county_coverage: {n_with}/83 Michigan counties have an active monitor "
+        f"({83 - n_with} with none)", level="ok")
+    return n_with
 
 
 def load_places(conn: sqlite3.Connection) -> int:

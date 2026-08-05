@@ -397,6 +397,19 @@ SOURCES: list[Source] = [
                     "water_quality_sites", "water_quality_results",
                     "chemical_reference"),
     ),
+    Source(
+        id="aqs",
+        label="EPA AQS — ambient air monitoring (AirData annual summaries)",
+        # Three loaders in order: the monitor inventory, the multi-year annual
+        # summaries, then the derived county-coverage record (reads air_monitors +
+        # the seeded counties). AirData refreshes twice a year, so a 6-month check.
+        loaders=[dl.load_aqs_monitors, dl.load_aqs_annual, dl.load_aqs_coverage],
+        targets=["air_monitors", "air_monitor_annual", "air_naaqs_current",
+                 "air_county_coverage"],
+        primary_target="air_monitor_annual", primary_source_id="epa_aqs",
+        interval_months=6, min_abs=1000, floor_frac=0.5,
+        coverage=year_range("air_monitor_annual", "year"),
+    ),
 ]
 
 SOURCES_BY_ID = {s.id: s for s in SOURCES}

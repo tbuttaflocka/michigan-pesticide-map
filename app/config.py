@@ -330,6 +330,20 @@ FRACFOCUS_CACHE_DIR = DATA_DIR / "fracfocus"
 FRACFOCUS_STATE_NAME = "Michigan"
 FRACFOCUS_STATE_NUMBER = "26"
 
+# ---- EPA AQS ambient air monitoring (AirData pre-generated files; NO API key) ----
+# Measured ambient concentrations from physical monitors. Distinct from our CAMD
+# stack-emission data and our modeled NATA/AirToxScreen risk. AirData files refresh
+# TWICE a year (June = complete prior year, December = ozone season) and agencies
+# have up to 6 months to report, so the latest COMPLETE annual is 2024.
+AQS_AIRDATA_BASE = "https://aqs.epa.gov/aqsweb/airdata"
+AQS_MONITORS_URL = f"{AQS_AIRDATA_BASE}/aqs_monitors.zip"
+AQS_ANNUAL_URL_TMPL = AQS_AIRDATA_BASE + "/annual_conc_by_monitor_{year}.zip"
+AQS_YEARS = [2020, 2021, 2022, 2023, 2024]   # multiple years so trends are possible
+AQS_CACHE_DIR = DATA_DIR / "aqs"
+# A monitor counts as "active" (for the county-coverage gap) if it reported a
+# sample in the latest complete year or later.
+AQS_ACTIVE_CUTOFF = f"{AQS_YEARS[-1]}-01-01"
+
 # ---- USGS Watershed Boundary Dataset (HUC-8 polygons) ----
 WBD_HUC8_QUERY = (
     "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer/4/query"

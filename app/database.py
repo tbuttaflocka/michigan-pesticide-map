@@ -757,6 +757,111 @@ CREATE TABLE IF NOT EXISTS power_plant_camd_facilities (
     source              TEXT DEFAULT 'EPA_CAMD'
 );
 CREATE INDEX IF NOT EXISTS ix_ppcf_ineia ON power_plant_camd_facilities(in_eia);
+
+-- ===================================================================
+-- EPA AQS ambient air monitoring (AirData pre-generated files; Michigan only).
+-- MEASURED ambient concentrations from physical monitors -- distinct from CAMD
+-- (measured stack emissions) and airtoxics_tracts (modeled NATA/AirToxScreen risk).
+-- NO FRS/TRI identifier exists in AQS; county_fips ('26'||County Code) is the only
+-- shared key (county aggregation only) -- NO joins to tri/echo/power_plants.
+-- ===================================================================
+
+-- One row per Michigan monitor = State+County+Site+Parameter+POC (from aqs_monitors).
+CREATE TABLE IF NOT EXISTS air_monitors (
+    state_code            TEXT,     -- "26" (Michigan)
+    county_code           TEXT,     -- 3-digit AQS county code
+    site_num              TEXT,     -- AQS "Site Number"
+    parameter_code        TEXT,     -- part of the monitor key (site+param+POC)
+    parameter_name        TEXT,
+    poc                   TEXT,     -- Parameter Occurrence Code
+    latitude              REAL,
+    longitude             REAL,
+    datum                 TEXT,
+    county_fips           TEXT,     -- derived: '26' || county_code
+    county_name           TEXT,
+    city_name             TEXT,
+    local_site_name       TEXT,
+    address               TEXT,
+    monitor_type          TEXT,
+    networks              TEXT,
+    reporting_agency      TEXT,
+    monitoring_objective  TEXT,
+    measurement_scale     TEXT,
+    naaqs_primary_monitor TEXT,
+    first_year_of_data    INTEGER,
+    last_sample_date      TEXT,
+    source                TEXT DEFAULT 'EPA_AQS_AirData',
+    PRIMARY KEY (state_code, county_code, site_num, parameter_code, poc)
+);
+CREATE INDEX IF NOT EXISTS ix_air_monitors_fips ON air_monitors(county_fips);
+
+-- Annual summary rows. GRAIN WARNING: one row per monitor per pollutant per year
+-- PER APPLICABLE STANDARD -- count monitors by DISTINCT
+-- state+county+site+parameter+poc, never by row count. NAAQS comparison fields
+-- (pollutant_standard/metric_used/*_exceedance_count) are stored EXACTLY as
+-- published by AQS; we never recompute a standard comparison ourselves.
+CREATE TABLE IF NOT EXISTS air_monitor_annual (
+    state_code                 TEXT,
+    county_code                TEXT,
+    site_num                   TEXT,
+    parameter_code             TEXT,
+    parameter_name             TEXT,
+    poc                        TEXT,
+    year                       INTEGER,
+    county_fips                TEXT,     -- derived: '26' || county_code
+    county_name                TEXT,
+    latitude                   REAL,
+    longitude                  REAL,
+    sample_duration            TEXT,
+    pollutant_standard         TEXT,     -- AQS's standard label; stored verbatim
+    metric_used                TEXT,
+    method_name                TEXT,
+    units_of_measure           TEXT,
+    observation_count          INTEGER,
+    observation_percent        REAL,
+    completeness_indicator     TEXT,
+    certification_indicator    TEXT,
+    valid_day_count            INTEGER,
+    primary_exceedance_count   INTEGER,
+    secondary_exceedance_count INTEGER,
+    arithmetic_mean            REAL,
+    first_max_value            REAL,
+    first_max_datetime         TEXT,
+    percentile_99              REAL,
+    percentile_98              REAL,
+    percentile_95              REAL,
+    percentile_90              REAL,
+    percentile_75              REAL,
+    percentile_50              REAL,
+    percentile_10              REAL,
+    source                     TEXT DEFAULT 'EPA_AQS_AirData'
+);
+CREATE INDEX IF NOT EXISTS ix_air_annual_fips ON air_monitor_annual(county_fips);
+CREATE INDEX IF NOT EXISTS ix_air_annual_param_year ON air_monitor_annual(parameter_code, year);
+CREATE INDEX IF NOT EXISTS ix_air_annual_std ON air_monitor_annual(pollutant_standard);
+
+-- The CURRENT NAAQS per pollutant, sourced from EPA's NAAQS table. `pollutant_standard`
+-- is the EXACT AQS label to filter air_monitor_annual by, so the UI compares a reading
+-- only to its own matched standard/averaging form (never a mismatched one).
+CREATE TABLE IF NOT EXISTS air_naaqs_current (
+    parameter_code      TEXT,
+    parameter_name      TEXT,
+    pollutant_standard  TEXT,     -- exact AQS 'Pollutant Standard' value that is current
+    level               TEXT,
+    units               TEXT,
+    averaging_time      TEXT,
+    form                TEXT,
+    source_url          TEXT
+);
+
+-- Derived: which of Michigan's 83 counties have an ACTIVE monitor and which have none.
+CREATE TABLE IF NOT EXISTS air_county_coverage (
+    county_fips        TEXT PRIMARY KEY,   -- 26XXX
+    county_name        TEXT,
+    has_monitor        INTEGER,            -- 1 if >=1 active monitoring site, else 0
+    active_site_count  INTEGER,
+    source             TEXT DEFAULT 'EPA_AQS_AirData (derived)'
+);
 """
 
 
