@@ -215,6 +215,23 @@
       _canvas: null,               // dedicated L.canvas() renderer (removed on hide)
       _detail: {},                 // plant code -> lazy-loaded popup detail
     },
+    air: {                         // EPA AQS ambient air monitors (MEASURED
+                                   // concentrations — distinct from CAMD stack
+                                   // emissions and airtoxics modeled risk)
+      loaded: false,
+      showSites: false,
+      // Sub-toggles by criteria pollutant (all on by default). A site measuring
+      // several pollutants shows whenever any of its pollutants is toggled on.
+      filters: { pm25: true, so2: true, ozone: true, pm10: true, no2: true, pb: true, co: true },
+      sites: [],                   // from /api/air/sites (criteria-measuring sites)
+      labels: {},                  // pollutant key -> display label
+      layer: null,                 // L.layerGroup of circleMarkers
+      _canvas: null,               // dedicated L.canvas() renderer (removed on hide)
+      _detail: {},                 // site key -> lazy-loaded popup detail
+      coverageByFips: new Map(),   // county_fips -> {has_monitor, active_site_count}
+      coverageLoaded: false,
+      coverageSummary: null,       // {counties_with, counties_without, without_names}
+    },
     golf: {
       loaded: false,
       sites: [],                   // from /api/golf/sites
@@ -433,6 +450,7 @@
       ['Landfills & waste', state.landfill.markers],
       ['Underground storage tanks', state.ust.markers],
       ['Oil & gas wells', state.oilGas.layer],
+      ['Air monitors (EPA AQS)', state.air.layer],
       ['Golf courses', state.golf.markers],
       ['Spraying programs', state.spraying.markers],
       ['Frac disclosures', state.fracfocus.layer],
@@ -829,6 +847,11 @@
           Math.floor(Math.sqrt(v / max) * UST_PALETTE.length));
         return UST_PALETTE[idx];
       }
+      case 'air_coverage': {   // binary: has an air monitor vs the coverage gap
+        const c = state.air.coverageByFips.get(fips);
+        if (!c) return NO_DATA;
+        return c.has_monitor ? AIR_COV_HAS : AIR_COV_NONE;
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         return colorFor(c ? c.value : 0, state.breaks, state.palette);
@@ -1061,6 +1084,13 @@
         const s = c.open_sites ? ` <span class="muted">(${c.open_sites} site${c.open_sites > 1 ? 's' : ''})</span>` : '';
         return `<div><span class="muted">Open leaking UST releases:</span> <span class="v">${c.value}</span>${s}</div>`;
       }
+      case 'air_coverage': {
+        const c = state.air.coverageByFips.get(fips);
+        if (c && c.has_monitor) {
+          return `<div><span class="muted">Air monitors:</span> <span class="v">${c.active_site_count || 1}</span> <span class="muted">active site${(c.active_site_count || 1) > 1 ? 's' : ''}</span></div>`;
+        }
+        return '<div class="muted">No air monitor — this county is not measured</div>';
+      }
       default: {   // pesticide
         const c = state.countyByFips.get(fips);
         if (!c) return '<div class="muted">No pesticide data</div>';
@@ -1103,6 +1133,7 @@
       case 'pfas_density': return 'PFAS site density';
       case 'ust_density': return 'Open leaking storage-tank releases';
       case 'air_toxics': return 'Air toxics cancer risk';
+      case 'air_coverage': return 'Air monitor coverage (which counties are measured)';
       default:       return `Pesticide — ${pestFilterLabel()}`;
     }
   }
@@ -1191,6 +1222,16 @@
           + '(lower → higher) · SCREENING estimate, not measured air';
         break;
       }
+      case 'air_coverage': {
+        el.innerHTML =
+          `<div class="bucket" style="background:${AIR_COV_HAS}">Has monitor</div>`
+          + `<div class="bucket" style="background:${AIR_COV_NONE}">No monitor</div>`;
+        const s = state.air.coverageSummary;
+        note.textContent = s
+          ? `${s.without} of 83 counties have NO air monitor — not measured (a gap, not clean air)`
+          : 'which counties have an air monitor vs. none';
+        break;
+      }
     }
     renderMarkerKeys();
   }
@@ -1205,6 +1246,7 @@
     { on: () => state.coalAsh.showMarkers,   c: '#e3a008', t: 'Coal ash sites (color = closure status; ⚠ = unlined)' },
     { on: () => state.tri.showSites,         c: '#d9772f', t: 'TRI facilities (size/red = more released)' },
     { on: () => state.landfill.showSites,    c: '#d96b35', t: 'Landfills & waste facilities (by type)' },
+    { on: () => state.air.showSites,         c: '#2dd4bf', t: 'Air monitors (EPA AQS — measured concentrations)' },
     { on: () => state.wind.showRoses,        c: '#3fb950', t: 'Wind roses (Apr–Sep)' },
     { on: () => state.wind.showDrift,        c: '#e8873c', t: 'Drift arrows (downwind)' },
   ];
@@ -1353,6 +1395,7 @@
       if (which === 'landfill_density') await loadLandfillDensity();
       if (which === 'pfas_density') await loadPfasDensity();
       if (which === 'ust_density') await loadUstDensity();
+      if (which === 'air_coverage') await loadAirCoverage();
       // Air toxics is a tract-level canvas layer (not county coloring): lazy-load
       // + show it when selected, and detach it whenever another choropleth is.
       if (which === 'air_toxics') { await loadAirToxics(); showAirToxicsLayer(); }
@@ -2248,6 +2291,14 @@
         showCard2(true);
         break;
       }
+      case 'air_coverage': {
+        const c = state.air.coverageByFips.get(fips);
+        const has = c && c.has_monitor;
+        v1.textContent = has ? String(c.active_site_count || 1) : 'None';
+        l1.textContent = has ? 'Active air monitoring sites' : 'No air monitor (not measured)';
+        showCard2(false);
+        break;
+      }
       case 'tri': {
         const c = state.tri.densityByFips.get(fips);
         v1.textContent = (c && c.value) ? fmtLbs(c.value) + '/yr' : '—';
@@ -3121,6 +3172,198 @@
       if (state.oilGas.filters[k] && state.oilGas.data[k]) n += state.oilGas.data[k].length;
     }
     el.textContent = n ? `${n.toLocaleString()} wells shown` : 'No wells in the selected categories';
+  }
+
+  // ---------- Air monitors (EPA AQS ambient monitoring) ----------
+  //
+  // MEASURED ambient concentrations from physical monitors — distinct from the
+  // power-plant CAMD layer (measured STACK emissions) and the air-toxics layer
+  // (MODELED risk); never ranked/compared across the three. 56 of Michigan's 69
+  // AQS sites measure a criteria (NAAQS) pollutant and are shown here; sub-toggles
+  // filter by pollutant, and a site measuring several shows under each. Points
+  // render as circleMarkers on a DEDICATED canvas renderer (same canvas rule as
+  // oil & gas / ECHO: keep it attached across ordinary re-renders; detach AND null
+  // the ref only on hide/empty so the next show builds a fresh renderer).
+  const AIR_MARKER_COLOR = '#2dd4bf';   // teal — "monitoring", not a severity scale
+
+  function airPane() {
+    if (!state.map.getPane('air')) {
+      state.map.createPane('air').style.zIndex = 651;   // among the marker panes
+    }
+    return 'air';
+  }
+
+  function airCanvasRenderer() {
+    if (!state.air._canvas) {
+      airPane();
+      state.air._canvas = L.canvas({ pane: 'air', padding: 0.5 });
+    }
+    return state.air._canvas;
+  }
+
+  async function loadAir() {
+    if (state.air.loaded) return;
+    const d = await api('/api/air/sites');
+    state.air.sites = d.sites || [];
+    state.air.labels = d.pollutant_labels || {};
+    state.air.loaded = true;
+  }
+
+  // A site is visible if any pollutant it measures has its sub-toggle on.
+  function airSiteVisible(s) {
+    return (s.pollutants || []).some((p) => state.air.filters[p]);
+  }
+
+  const _AIR_CERT_NOTE = {
+    'Certified': null,
+    'Certified - QA issues identified': 'certified, QA issues identified',
+    'Requested but not yet concurred': 'requested but NOT yet certified',
+    'Certification not required': 'certification not required',
+    'Was Certified but data changed': 'was certified, data since changed',
+  };
+
+  function airReadingHtml(r) {
+    const val = (r.arithmetic_mean != null)
+      ? `${Number(r.arithmetic_mean).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${esc(r.units_of_measure || '')}`
+      : '—';
+    const exc = r.primary_exceedance_count;
+    const over = (exc != null && exc > 0);
+    // Only state an exceedance in AQS's own terms — never our own comparison.
+    const excLine = (exc == null)
+      ? ''
+      : `<div class="air-rd-exc${over ? ' over' : ''}">Primary exceedances (AQS count): <b>${exc}</b>`
+        + (over ? ` — exceeded <b>${esc(r.pollutant_standard)}</b>`
+                  + (r.naaqs_level ? ` (${esc(r.naaqs_level)} ${esc(r.naaqs_units || '')})` : '')
+                  + (r.naaqs_form ? `; AQS form: ${esc(r.naaqs_form)}` : '') : '')
+        + '</div>';
+    const certNote = _AIR_CERT_NOTE[r.certification_indicator];
+    const cert = r.certification_indicator
+      ? `<div class="air-rd-cert${certNote && /NOT/.test(certNote) ? ' warn' : ''}">Certification: ${esc(r.certification_indicator)}${certNote ? ` (${esc(certNote)})` : ''}</div>`
+      : '';
+    return `<div class="air-rd">
+        <div class="air-rd-poll">${esc(r.parameter_name)} — <b>${esc(String(r.year))}</b></div>
+        <div class="air-rd-val">${val} <span class="muted">· ${esc(r.metric_used || '')}</span></div>
+        <div class="air-rd-std">Measured against: <b>${esc(r.pollutant_standard)}</b>${r.naaqs_level ? ` (current NAAQS ${esc(r.naaqs_level)} ${esc(r.naaqs_units || '')})` : ''}</div>
+        ${excLine}
+        ${cert}
+      </div>`;
+  }
+
+  function airPopupHtml(d) {
+    const row = (k, v) => v ? `<div class="row"><span class="k">${k}</span> ${esc(v)}</div>` : '';
+    const loc = [d.city, d.county ? d.county + ' Co.' : ''].filter(Boolean).join(' · ');
+    const reads = (d.readings || []).length
+      ? `<div class="air-rd-head">Most recent annual reading per pollutant, vs the current NAAQS</div>`
+        + d.readings.map(airReadingHtml).join('')
+      : '<div class="muted small">No criteria-pollutant annual summary on record.</div>';
+    return `<div class="air-popup">
+      <h4>${esc(d.name || 'Air monitoring site')}</h4>
+      ${(d.address || loc) ? `<div class="air-meta">${esc([d.address, loc].filter(Boolean).join(' · '))}</div>` : ''}
+      <div class="air-facts">
+        ${row('Reporting agency:', d.reporting_agency)}
+        ${row('Monitoring objective:', d.monitoring_objective)}
+        ${row('Measurement scale:', d.measurement_scale)}
+        ${row('Measures:', (d.pollutants || []).join(', '))}
+        ${d.first_year ? row('Data since:', String(d.first_year)) : ''}
+        ${row('Last sample:', d.last_sample)}
+      </div>
+      ${reads}
+      <div class="air-note">These are <b>measured</b> ambient concentrations at this monitor's
+        scale &amp; siting objective — a reading does <b>not</b> represent unmonitored surrounding
+        areas. Distinct from power-plant stack emissions (CAMD) and modeled air-toxics risk;
+        never compared across them. Recent-year data may not be certified; agencies have up to
+        6 months to report and AirData refreshes twice a year. Source: EPA AQS (AirData).</div>
+    </div>`;
+  }
+
+  function bindAirDetail(m, s) {
+    m.on('popupopen', async () => {
+      if (m._airLoaded) return;
+      try {
+        let d = state.air._detail[s.key];
+        if (!d) {
+          d = await api('/api/air/site/' + encodeURIComponent(s.key));
+          state.air._detail[s.key] = d;
+        }
+        m._airLoaded = true;
+        m.setPopupContent(airPopupHtml(d));
+      } catch (err) {
+        m.setPopupContent('<div class="air-popup"><p class="muted small">Could not load the monitor record.</p></div>');
+      }
+    });
+  }
+
+  function renderAirMarkers() {
+    if (state.air.layer) { state.air.layer.remove(); state.air.layer = null; }
+    if (!state.air.showSites) {
+      removeCanvasRenderer(state.air._canvas);
+      state.air._canvas = null;
+      updateAirStats();
+      renderMarkerKeys();
+      return;
+    }
+    const pane = airPane();
+    const renderer = airCanvasRenderer();
+    const grp = L.layerGroup();
+    let n = 0;
+    for (const s of state.air.sites) {
+      if (s.lat == null || s.lng == null || !airSiteVisible(s)) continue;
+      const m = L.circleMarker([s.lat, s.lng], {
+        pane, renderer, radius: 6, weight: 1.4, color: '#0d1117',
+        opacity: 0.95, fillColor: AIR_MARKER_COLOR, fillOpacity: 0.9,
+      });
+      m.bindPopup('<div class="air-popup"><div class="ogw-loading">Loading monitor record…</div></div>',
+        { maxWidth: 340, className: 'air-popup-wrap' });
+      bindAirDetail(m, s);
+      m._pickName = s.name || ('Air monitor · ' + s.key);
+      grp.addLayer(m);
+      n += 1;
+    }
+    grp.addTo(state.map);
+    state.air.layer = grp;
+    if (n === 0) {
+      removeCanvasRenderer(state.air._canvas);
+      state.air._canvas = null;
+    }
+    updateAirStats();
+    renderMarkerKeys();
+  }
+
+  function updateAirStats() {
+    const leg = $('air-legend');
+    if (leg) {
+      leg.innerHTML = state.air.showSites
+        ? `<span class="echo-key"><span class="cdot" style="background:${AIR_MARKER_COLOR}"></span>Ambient air monitor</span>`
+        : '';
+    }
+    const el = $('air-stats');
+    if (!el) return;
+    if (!state.air.showSites) { el.textContent = ''; return; }
+    const n = state.air.sites.filter(airSiteVisible).length;
+    el.textContent = n
+      ? `${n} of ${state.air.sites.length} monitoring sites shown (criteria pollutants)`
+      : 'No monitoring sites in the selected pollutants';
+  }
+
+  async function refreshAirSites() {
+    if (state.air.showSites) await loadAir();
+    renderAirMarkers();
+    renderMarkerKeys();
+  }
+
+  // ---- Air-monitor coverage choropleth (which counties have a monitor) ----
+  const AIR_COV_HAS = '#2a9d8f';    // teal: county HAS an active monitor
+  const AIR_COV_NONE = '#c98a2e';   // amber: NO monitor — the gap to make prominent
+
+  async function loadAirCoverage() {
+    if (state.air.coverageLoaded) return;
+    const d = await api('/api/air/coverage');
+    state.air.coverageByFips = new Map();
+    for (const c of (d.counties || [])) state.air.coverageByFips.set(c.county_fips, c);
+    state.air.coverageSummary = {
+      with: d.counties_with, without: d.counties_without, without_names: d.without_names || [],
+    };
+    state.air.coverageLoaded = true;
   }
 
   // ---------- Hydraulic-fracturing chemical disclosures (FracFocus) ----------
@@ -5544,6 +5787,24 @@
       });
     }
 
+    // Air monitors (EPA AQS, independent overlay) + criteria-pollutant sub-toggles.
+    const airToggle = $('air-sites');
+    if (airToggle) {
+      airToggle.addEventListener('change', async (e) => {
+        state.air.showSites = e.target.checked;
+        if (e.target.checked) await loadAir();
+        renderAirMarkers();
+      });
+    }
+    ['pm25', 'so2', 'ozone', 'pm10', 'no2', 'pb', 'co'].forEach((k) => {
+      const cb = $(`air-f-${k}`);
+      if (!cb) return;
+      cb.addEventListener('change', (e) => {
+        state.air.filters[k] = e.target.checked;
+        renderAirMarkers();
+      });
+    });
+
     // Power plants (independent overlay) + fuel-family sub-toggles.
     const ppToggle = $('powerplants-sites');
     if (ppToggle) {
@@ -6727,6 +6988,9 @@
              ['p', 'pfas-f-pws'], ['f', 'pfas-f-fish'], ['t', 'pfas-f-potw']] },
     { c: 'ust', cb: 'ust-sites', def: 'o',
       subs: [['o', 'ust-f-leaking_open'], ['c', 'ust-f-leaking_closed'], ['l', 'ust-f-licensed']] },
+    { c: 'air', cb: 'air-sites', def: 'psonmbc',
+      subs: [['p', 'air-f-pm25'], ['s', 'air-f-so2'], ['o', 'air-f-ozone'],
+             ['m', 'air-f-pm10'], ['n', 'air-f-no2'], ['b', 'air-f-pb'], ['c', 'air-f-co']] },
     { c: 'sp',  cb: 'spraying-programs' },
     { c: 'ca',  cb: 'coal-ash-sites' },
     { c: 'wr',  cb: 'wind-roses' },

@@ -201,6 +201,21 @@ _SQL_DATASETS = [
          desc="IEM ASOS growing-season wind roses by weather station.",
          units="avg_speed_mph (mph); direction_deg (degrees).",
          caveat="Growing season (Apr-Sep) 2021-2023; few stations per county."),
+    dict(file="air_monitors", source_id="epa_aqs", param="fips",
+         sql="SELECT * FROM air_monitors WHERE county_fips=?",
+         desc="EPA AQS ambient air-monitoring sites (measured concentrations) in the county.",
+         units="n/a (monitor inventory).",
+         caveat="MEASURED ambient monitoring - distinct from CAMD stack emissions and modeled "
+                "NATA/AirToxScreen risk. Monitors are sited for specific objectives, not uniform coverage."),
+    dict(file="air_monitor_annual", source_id="epa_aqs", param="fips",
+         sql="SELECT * FROM air_monitor_annual WHERE county_fips=? "
+             "ORDER BY parameter_name, year, pollutant_standard",
+         desc="EPA AQS annual monitor summaries for the county (2020-2024).",
+         units="arithmetic_mean / first_max_value are in the row's units_of_measure; "
+                "exceedance counts are as AQS reports them.",
+         caveat="ONE ROW PER MONITOR PER POLLUTANT PER YEAR PER STANDARD. NAAQS-comparison "
+                "fields (pollutant_standard/metric_used/*_exceedance_count) are verbatim from AQS; "
+                "recent-year rows may be uncertified (see certification_indicator)."),
     # ---- Group C: child tables via a name-joined parent ----
     dict(file="fracfocus_disclosures", source_id="fracfocus", param="name",
          sql="SELECT * FROM fracfocus_disclosures WHERE UPPER(county_name)=UPPER(?)",

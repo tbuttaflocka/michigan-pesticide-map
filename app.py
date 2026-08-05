@@ -689,6 +689,149 @@ def api_county_export(fips: str):
                      as_attachment=True, download_name=filename)
 
 
+# ---------------------------------------------------------------------------
+# EPA AQS ambient air monitoring (measured concentrations from physical monitors).
+# Distinct from CAMD (measured stack emissions) and airtoxics (modeled risk) —
+# never ranked/compared across them. No FRS/TRI id; county_fips only, no joins.
+# ---------------------------------------------------------------------------
+# Criteria-pollutant AQS parameter codes -> a canonical key for the sub-toggles.
+_AIR_CRITERIA = {
+    "44201": "ozone", "88101": "pm25", "88502": "pm25", "81102": "pm10",
+    "42401": "so2", "42602": "no2", "42101": "co",
+    "14129": "pb", "12128": "pb", "85129": "pb",
+}
+_AIR_POLL_ORDER = ["pm25", "so2", "ozone", "pm10", "no2", "pb", "co"]
+_AIR_POLL_LABEL = {"pm25": "PM2.5", "so2": "SO₂", "ozone": "Ozone",
+                   "pm10": "PM10", "no2": "NO₂", "pb": "Lead", "co": "CO"}
+
+
+@app.route("/api/air/sites")
+def api_air_sites():
+    """Distinct Michigan monitoring sites that report a criteria pollutant, with
+    the set of criteria pollutants each measures (for the sub-toggle filter)."""
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "air_monitor_annual"):
+        conn.close()
+        return jsonify({"available": False, "sites": []})
+    rows = cur.execute(
+        """SELECT county_code, site_num, MAX(latitude) lat, MAX(longitude) lng,
+                  MAX(county_fips) county_fips, MAX(county_name) county,
+                  GROUP_CONCAT(DISTINCT parameter_code) params
+             FROM air_monitor_annual
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+            GROUP BY county_code, site_num""").fetchall()
+    sites = []
+    for r in rows:
+        polls, seen = [], set()
+        for pc in (r["params"] or "").split(","):
+            k = _AIR_CRITERIA.get(pc)
+            if k and k not in seen:
+                seen.add(k)
+                polls.append(k)
+        if not polls:
+            continue                       # only criteria-measuring sites are toggle-able
+        nm = cur.execute(
+            "SELECT local_site_name FROM air_monitors WHERE county_code=? AND site_num=? "
+            "AND local_site_name IS NOT NULL AND local_site_name<>'' LIMIT 1",
+            (r["county_code"], r["site_num"])).fetchone()
+        sites.append({
+            "key": f"{r['county_code']}-{r['site_num']}",
+            "lat": r["lat"], "lng": r["lng"], "county_fips": r["county_fips"],
+            "county": r["county"],
+            "name": (nm["local_site_name"] if nm else None) or f"Site {r['county_code']}-{r['site_num']}",
+            "pollutants": sorted(polls, key=_AIR_POLL_ORDER.index),
+        })
+    conn.close()
+    return jsonify({"available": True, "sites": sites,
+                    "pollutant_labels": _AIR_POLL_LABEL, "pollutant_order": _AIR_POLL_ORDER})
+
+
+@app.route("/api/air/site/<key>")
+def api_air_site(key: str):
+    """Popup detail for one monitoring site: metadata + per-pollutant, most-recent-
+    year readings filtered to the CURRENT NAAQS (exact pollutant_standard match)."""
+    parts = key.split("-", 1)
+    if len(parts) != 2:
+        abort(404, "bad site key")
+    cc, site = parts
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "air_monitor_annual"):
+        conn.close()
+        return jsonify({"found": False}), 404
+    meta = cur.execute(
+        """SELECT MAX(local_site_name) name, MAX(address) address, MAX(city_name) city,
+                  MAX(county_name) county, MAX(county_fips) county_fips,
+                  MIN(first_year_of_data) first_year, MAX(last_sample_date) last_sample
+             FROM air_monitors WHERE county_code=? AND site_num=? AND state_code='26'""",
+        (cc, site)).fetchone()
+    rep = cur.execute(
+        """SELECT reporting_agency, monitoring_objective, measurement_scale,
+                  naaqs_primary_monitor
+             FROM air_monitors WHERE county_code=? AND site_num=? AND state_code='26'
+            ORDER BY (monitoring_objective IS NOT NULL AND monitoring_objective<>'') DESC,
+                     last_sample_date DESC LIMIT 1""", (cc, site)).fetchone()
+    polls, seen = [], set()
+    for pr in cur.execute(
+            "SELECT DISTINCT parameter_code FROM air_monitor_annual "
+            "WHERE county_code=? AND site_num=?", (cc, site)).fetchall():
+        k = _AIR_CRITERIA.get(pr["parameter_code"])
+        if k and k not in seen:
+            seen.add(k)
+            polls.append(_AIR_POLL_LABEL[k])
+    reads = cur.execute(
+        """SELECT a.parameter_name, a.year, a.pollutant_standard, a.metric_used,
+                  a.arithmetic_mean, a.units_of_measure, a.primary_exceedance_count,
+                  a.certification_indicator, a.first_max_value,
+                  n.level naaqs_level, n.units naaqs_units, n.form naaqs_form
+             FROM air_monitor_annual a
+             JOIN air_naaqs_current n ON a.pollutant_standard = n.pollutant_standard
+            WHERE a.county_code=? AND a.site_num=?
+              AND a.year=(SELECT MAX(year) FROM air_monitor_annual x
+                           WHERE x.county_code=a.county_code AND x.site_num=a.site_num
+                             AND x.parameter_code=a.parameter_code)
+            ORDER BY a.parameter_name, a.pollutant_standard""", (cc, site)).fetchall()
+    conn.close()
+    if not meta or (meta["county"] is None and not reads):
+        return jsonify({"found": False}), 404
+    return jsonify({
+        "found": True, "key": key,
+        "name": (meta["name"] if meta else None) or f"Site {key}",
+        "address": meta["address"] if meta else None,
+        "city": meta["city"] if meta else None,
+        "county": meta["county"] if meta else None,
+        "county_fips": meta["county_fips"] if meta else None,
+        "reporting_agency": rep["reporting_agency"] if rep else None,
+        "monitoring_objective": rep["monitoring_objective"] if rep else None,
+        "measurement_scale": rep["measurement_scale"] if rep else None,
+        "naaqs_primary": rep["naaqs_primary_monitor"] if rep else None,
+        "first_year": meta["first_year"] if meta else None,
+        "last_sample": meta["last_sample"] if meta else None,
+        "pollutants": polls,
+        "readings": [dict(r) for r in reads],
+    })
+
+
+@app.route("/api/air/coverage")
+def api_air_coverage():
+    """Per-county air-monitor coverage (which counties have a monitor, which don't)."""
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "air_county_coverage"):
+        conn.close()
+        return jsonify({"available": False, "counties": []})
+    rows = cur.execute(
+        "SELECT county_fips, county_name, has_monitor, active_site_count "
+        "FROM air_county_coverage").fetchall()
+    without = sorted(r["county_name"] for r in rows if not r["has_monitor"])
+    with_n = sum(1 for r in rows if r["has_monitor"])
+    conn.close()
+    return jsonify({"available": True, "counties": [dict(r) for r in rows],
+                    "counties_with": with_n, "counties_without": len(without),
+                    "without_names": without})
+
+
 # Exact-normalized key (lowercase, strip whitespace + punctuation) — the same
 # rule used at load time to line NASS crops up with the USGS crop groups.
 def _norm_crop(s: str) -> str:

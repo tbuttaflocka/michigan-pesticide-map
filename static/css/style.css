@@ -1900,6 +1900,31 @@ a:hover { text-decoration: underline; }
 }
 .pp-badge.camd  { background: rgba(47,158,68,.18); color: #63e6be; border: 1px solid rgba(47,158,68,.5); }
 .pp-badge.nocamd { background: rgba(139,148,158,.15); color: var(--muted); border: 1px solid var(--line); }
+
+/* EPA AQS ambient air-monitor popup */
+.air-popup { font-size: 12px; line-height: 1.45; }
+.air-popup .ogw-loading { color: var(--muted); font-style: italic; padding: 6px 2px; }
+.air-popup h4 { margin: 2px 0 2px; font-size: 13.5px; }
+.air-popup .air-meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.air-popup .air-facts { margin: 6px 0; }
+.air-popup .row { margin: 2px 0; }
+.air-popup .row .k { color: var(--muted); font-weight: 600; }
+.air-rd-head { font-weight: 700; font-size: 11.5px; margin: 8px 0 4px; color: var(--accent-2); }
+.air-rd {
+  border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; margin: 0 0 6px;
+  background: rgba(45,212,191,.06);
+}
+.air-rd-poll { font-weight: 700; font-size: 12px; }
+.air-rd-val { font-size: 13px; font-weight: 600; margin: 1px 0; }
+.air-rd-std { font-size: 11px; color: var(--muted); }
+.air-rd-exc { font-size: 11px; margin-top: 2px; }
+.air-rd-exc.over { color: #f6b352; font-weight: 600; }
+.air-rd-cert { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.air-rd-cert.warn { color: #f6b352; }
+.air-note {
+  margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line);
+  font-size: 10.5px; line-height: 1.4; color: var(--muted);
+}
 .pp-emis {
   margin: 7px 0 4px; padding: 6px 8px; border-radius: 7px;
   background: rgba(132,94,247,.08); border: 1px solid rgba(132,94,247,.22);
