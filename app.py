@@ -281,9 +281,31 @@ def estimate_column(estimate: str) -> str:
 
 # ---------- views ----------
 
+def _sublayer_label_counts() -> dict:
+    """Live counts for the oil-gas / ECHO sub-toggle labels, computed at page
+    render so they stay correct after a data refresh instead of drifting from a
+    hardcoded number. The oil-gas counts use the SAME category CASE the map
+    filters by (_OGW_CATEGORY_SQL), so each label matches the markers its toggle
+    actually shows. Returns preformatted strings (empty if a table is absent)."""
+    counts = {"injection": "", "orphan": "", "plugged": "", "echo_all": ""}
+    conn = db()
+    cur = conn.cursor()
+    try:
+        if _table_exists(cur, "oil_gas_wells"):
+            for cat, n in cur.execute(
+                    f"SELECT {_OGW_CATEGORY_SQL} c, COUNT(*) n FROM oil_gas_wells GROUP BY c"):
+                if cat in counts:
+                    counts[cat] = f"{n:,}"
+        if _table_exists(cur, "echo_facilities"):
+            counts["echo_all"] = f"{cur.execute('SELECT COUNT(*) FROM echo_facilities').fetchone()[0]:,}"
+    finally:
+        conn.close()
+    return counts
+
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", layer_counts=_sublayer_label_counts())
 
 
 @app.route("/api/geojson")
@@ -1009,35 +1031,50 @@ def api_overview():
                 "source": "EPA Toxics Release Inventory (self-reported)",
                 "target": tgt})
 
-    # ECHO significant noncompliance — the county with the most facilities flagged
-    # SNC (significant noncompliance) or CAA HPV (high-priority violation). Chosen
-    # over the single-facility "most quarters in NC" metric because that ties at
-    # 12/12 across many facilities; the county count is the clearer, navigable
-    # fact and parallels the UST county call-out above.
-    r = _ov_row(cur, "SELECT co.name, co.fips AS fips, COUNT(*) c FROM echo_facilities e "
-                     "JOIN counties co ON co.fips = e.county_fips "
-                     "WHERE e.snc_flag = 'Y' OR e.caa_hpv_flag = 'Y' "
-                     "GROUP BY e.county_fips ORDER BY c DESC, co.name ASC LIMIT 1")
-    if r and r["c"]:
+    # ECHO significant noncompliance — the county (or counties) with the most
+    # facilities flagged SNC (significant noncompliance) or CAA HPV (high-priority
+    # violation). Chosen over the single-facility "most quarters in NC" metric
+    # because that ties at 12/12 across many facilities; the county count is the
+    # clearer, navigable fact and parallels the UST county call-out above. Ties are
+    # named honestly rather than picking an arbitrary single "winner".
+    echo_rows = cur.execute(
+        "SELECT co.name, co.fips AS fips, COUNT(*) c FROM echo_facilities e "
+        "JOIN counties co ON co.fips = e.county_fips "
+        "WHERE e.snc_flag = 'Y' OR e.caa_hpv_flag = 'Y' "
+        "GROUP BY e.county_fips ORDER BY c DESC, co.name ASC").fetchall()
+    if echo_rows and echo_rows[0]["c"]:
+        top = echo_rows[0]["c"]
+        tied = [r for r in echo_rows if r["c"] == top]
+        names = [r["name"] for r in tied]
+        if len(names) == 1:
+            value = f"{names[0]} County — {top:,}"
+        elif len(names) == 2:
+            value = f"{names[0]} & {names[1]} counties (tied) — {top:,} each"
+        else:
+            value = f"{len(names)} counties tied at {top:,} each ({', '.join(names[:3])}…)"
         notable.append({
             "label": "Most facilities flagged in significant noncompliance",
-            "value": f"{r['name']} County — {r['c']:,}",
+            "value": value,
             "note": "facilities flagged for significant noncompliance (SNC) or a "
                     "high-priority Clean Air Act violation (HPV) over the trailing "
                     "12 federal fiscal quarters",
             "source": "EPA ECHO — EPA/state determinations, alleged not adjudicated",
-            "target": {"kind": "county", "fips": r["fips"], "cb": "echo-sites"}})
+            "target": {"kind": "county", "fips": tied[0]["fips"], "cb": "echo-sites"}})
 
     # Orphan oil & gas wells — statewide count plus the county with the most.
-    # Computed live (the sub-toggle label's number is a stale hardcode). The
-    # definition mirrors the app's orphan-well tooltip.
-    ot = _ov_row(cur, "SELECT COUNT(*) c FROM oil_gas_wells WHERE well_status = 'Orphan'")
+    # Computed live using the SAME orphan category the map filters by
+    # (_OGW_CATEGORY_SQL), so this stays consistent with the orphan sub-toggle's
+    # marker count. (That category count, 214, is smaller than well_status='Orphan'
+    # = 223 because a handful of orphan-status wells are also injection/disposal
+    # wells and are bucketed under Disposal & injection.) Definition mirrors the
+    # app's orphan-well tooltip.
+    ot = _ov_row(cur, f"SELECT COUNT(*) c FROM oil_gas_wells WHERE {_OGW_CATEGORY_SQL} = 'orphan'")
     orphan_total = ot["c"] if ot else 0
     if orphan_total:
-        rc = _ov_row(cur, "SELECT co.name, co.fips AS fips, COUNT(*) c FROM oil_gas_wells w "
-                          "JOIN counties co ON co.fips = w.county_fips "
-                          "WHERE w.well_status = 'Orphan' GROUP BY w.county_fips "
-                          "ORDER BY c DESC, co.name ASC LIMIT 1")
+        rc = _ov_row(cur, f"SELECT co.name, co.fips AS fips, COUNT(*) c FROM oil_gas_wells w "
+                          f"JOIN counties co ON co.fips = w.county_fips "
+                          f"WHERE {_OGW_CATEGORY_SQL} = 'orphan' GROUP BY w.county_fips "
+                          f"ORDER BY c DESC, co.name ASC LIMIT 1")
         value = f"{orphan_total:,} statewide"
         target = None
         if rc and rc["c"]:
