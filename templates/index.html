@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<!-- CARTO basemap key, injected at runtime from the CARTO_API_KEY env var. A
+     meta tag (not an inline <script>) because the CSP forbids inline scripts;
+     app.js reads it to authenticate the basemap tile requests. -->
+<meta name="carto-api-key" content="{{ carto_api_key }}" />
 <title>Michigan Pollution Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />

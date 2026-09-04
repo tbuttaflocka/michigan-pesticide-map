@@ -343,8 +343,12 @@
       maxZoom: 11,
     }).setView([44.7, -85.2], 6);
 
+    // CARTO now requires an API key on its basemap tiles (keyless ones are
+    // watermarked). The key is served at runtime via a <meta> tag, not baked in.
+    const cartoKey = document.querySelector('meta[name="carto-api-key"]')?.content || '';
     L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' +
+        (cartoKey ? '?key=' + encodeURIComponent(cartoKey) : ''),
       {
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +

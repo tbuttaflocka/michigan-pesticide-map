@@ -133,6 +133,12 @@ CAMD_API_KEY = os.environ.get("CAMD_API_KEY", "").strip()
 # U.S. EIA Open Data API key — free from eia.gov/opendata. Powers the EIA Form
 # 860 power_plants inventory source.
 EIA_API_KEY = os.environ.get("EIA_API_KEY", "").strip()
+# CARTO basemap API key — free from carto.com/basemaps/apikey. As of Aug 2026
+# CARTO watermarks keyless basemap tiles ("API KEY REQUIRED"); the key removes
+# it. Served to the frontend at runtime via a <meta> tag (templates/index.html),
+# not hardcoded in app.js — the CSP forbids inline scripts. This is a public,
+# domain-restrictable key, not a server secret.
+CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "").strip()
 
 # ---- Power plants: EPA CAMD (CAMPD) emissions + EIA-860 inventory ----
 # CAMD "easey" API: facilities (ORIS-keyed), facility attributes (lat/lon, county,

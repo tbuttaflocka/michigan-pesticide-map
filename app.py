@@ -37,6 +37,7 @@ from app import pfas_chem
 from app.categories import subtype as compound_subtype
 from app.categories import categorize as _categorize
 from app.config import GEOJSON_PATH, HOST, PORT
+from app.config import CARTO_API_KEY
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
 from app.wind_data import (
@@ -305,7 +306,11 @@ def _sublayer_label_counts() -> dict:
 
 @app.route("/")
 def index():
-    return render_template("index.html", layer_counts=_sublayer_label_counts())
+    return render_template(
+        "index.html",
+        layer_counts=_sublayer_label_counts(),
+        carto_api_key=CARTO_API_KEY,
+    )
 
 
 @app.route("/api/geojson")
