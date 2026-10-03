@@ -120,6 +120,12 @@ from .config import (
     EGLE_UST_HOME_URL,
     AIRTOXICS_RISK_URL,
     AIRTOXICS_HOME_URL,
+    AIRTOXICS_YEAR,
+    AIRTOXICS_CACHE_DIR,
+    AIRTOXICS_FILE_BASE,
+    AIRTOXICS_CANCER_SRCGRP_FILE,
+    AIRTOXICS_CANCER_POLL_FILE,
+    AIRTOXICS_HI_FILES,
 )
 from . import airtoxics_data
 
@@ -3286,118 +3292,217 @@ def _arcgis_rings_to_geojson(rings: list) -> dict | None:
     return {"type": "MultiPolygon", "coordinates": polys}
 
 
-def load_airtoxics(conn: sqlite3.Connection) -> int:
-    """Load EPA air toxics (NATA / AirToxScreen) cancer-risk SCREENING estimates
-    for Michigan census tracts from EPA's ArcGIS ATS_Risk_View layer.
+# Target-organ -> hi_<organ> column name in airtoxics_tracts.
+_AIRTOX_HI_COLS = {organ: f"hi_{organ}" for organ, _lbl in airtoxics_data.HAZARD_ORGANS}
 
-    Per tract we store the total cancer risk (in a million) — computed as the SUM
-    of the eight source-category fields, which equals the sum of the per-pollutant
-    fields and is far more granular/reliable than the service's coarse total
-    column — plus the source-category breakdown and the top contributing pollutants
-    (for the popup's driver analysis and clickable chemical links)."""
-    log("Loading EPA air toxics risk (NATA/AirToxScreen, Michigan census tracts)...")
-    cur = conn.cursor()
 
-    # 1. Field metadata -> discover the per-pollutant columns + their nice aliases.
-    meta = json.loads(http_get(f"{AIRTOXICS_RISK_URL}?f=json", timeout=60))
-    alias_by_field = {f["name"]: f.get("alias") for f in meta.get("fields", [])}
-    poll_fields = [f for f in alias_by_field if airtoxics_data.is_pollutant_field(f)]
-    src_fields = airtoxics_data.SOURCE_FIELDS
-    out_fields = ",".join(["FIPS", "STCOFIPS", "County_Nam", "POP2010"]
-                          + src_fields + poll_fields)
+def _airtox_ensure_hi_columns(cur: sqlite3.Cursor) -> None:
+    """Add the hi_<organ> columns to an existing airtoxics_tracts table (older DBs
+    predating the 2019 upgrade). CREATE TABLE already defines them for fresh builds;
+    this migrates in place so a load never fails on a legacy schema."""
+    have = {r[1] for r in cur.execute("PRAGMA table_info(airtoxics_tracts)")}
+    for col in _AIRTOX_HI_COLS.values():
+        if col not in have:
+            cur.execute(f"ALTER TABLE airtoxics_tracts ADD COLUMN {col} REAL")
 
-    # 2. Page all Michigan tracts with geometry.
-    # maxAllowableOffset ~0.0015° (~130 m) generalizes tract boundaries server-side
-    # — plenty for a statewide/county choropleth and it cuts the geometry payload
-    # roughly 4x versus full-resolution rings.
-    feats = _arcgis_all(AIRTOXICS_RISK_URL, out_fields, where="State='MI'",
-                        geometry=True, page=1000, max_offset=0.0015)
-    log(f"  fetched {len(feats)} Michigan tract features")
 
-    rows, mi_total_sum, kept = [], 0.0, 0
-    for ft in feats:
-        a = ft.get("attributes") or {}
-        geoid = a.get("FIPS")
-        g = ft.get("geometry") or {}
-        geom = _arcgis_rings_to_geojson(g.get("rings"))
-        if not geoid or not geom:
+def _airtox_xlsx_path(name: str) -> "Path":
+    """Cache path for a downloaded AirToxScreen result file; fetch if absent."""
+    path = AIRTOXICS_CACHE_DIR / name
+    if not path.exists() or path.stat().st_size < 1_000_000:
+        log(f"  downloading {name} ...")
+        download_stream(f"{AIRTOXICS_FILE_BASE}/{name}", path, min_bytes=1_000_000)
+    return path
+
+
+def _airtox_tract_totals(path, *, want_sources=False, mi_only=True, ndigits=2):
+    """Stream one AirToxScreen national result spreadsheet. Layout is fixed:
+    cols 0-5 = State, EPA Region, County, FIPS(county), Tract(11-digit GEOID),
+    Population; one 'Total ...' column (EPA's ROUNDED total, NOT trusted); then one
+    column per source SUBGROUP. We recompute each tract total as the SUM of the
+    subgroup columns (granular + self-consistent: total = sum over sources).
+
+    Yields (geoid, county_fips, county_name, population, total, sources_dict) for
+    every real census tract (skips the US/state/county summary rows). sources_dict
+    is the eight-group aggregation when want_sources, else {}."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    it = ws.iter_rows(values_only=True)
+    header = list(next(it))
+    # first column whose header starts with "Total" marks the risk/HI columns.
+    ti = next(i for i, h in enumerate(header) if str(h or "").strip().lower().startswith("total"))
+    group_of = {i: airtoxics_data.source_group_for_column(str(header[i]))
+                for i in range(ti + 1, len(header))}
+    for row in it:
+        tract = str(row[4]) if row[4] is not None else ""
+        if len(tract) != 11 or not tract.isdigit() or tract.endswith("000000"):
+            continue  # US / state / county summary row, not a tract
+        if mi_only and not tract.startswith("26"):
             continue
-        sources = {}
-        for field in src_fields:
-            v = a.get(field)
-            sources[airtoxics_data.SOURCE_KEY_BY_FIELD[field]] = round(v, 3) if v else 0.0
-        total = round(sum(sources.values()), 2)
-        polls = []
-        for field in poll_fields:
-            v = a.get(field)
-            if v and v > 0:
-                polls.append([airtoxics_data.clean_pollutant_name(field, alias_by_field.get(field)),
-                              round(v, 3)])
-        polls.sort(key=lambda p: p[1], reverse=True)
-        polls = polls[:6]
-        geom = pfas_data.round_geometry(geom)          # 5-dp coords, smaller payload
-        county_fips = a.get("STCOFIPS")
-        cty = (a.get("County_Nam") or "").replace(" County", "").strip() or None
-        rows.append({
-            "tract_geoid": str(geoid), "county_fips": county_fips, "county_name": cty,
-            "population": int(a["POP2010"]) if a.get("POP2010") is not None else None,
-            "total_risk": total, "sources": json.dumps(sources),
-            "pollutants": json.dumps(polls), "geometry": json.dumps(geom),
-        })
-        mi_total_sum += total
-        kept += 1
+        total = 0.0
+        sources = {k: 0.0 for _p, k, *_ in airtoxics_data.SOURCE_CATEGORIES} if want_sources else {}
+        for i in range(ti + 1, len(header)):
+            v = row[i]
+            if not isinstance(v, (int, float)):
+                continue
+            total += v
+            if want_sources:
+                g = group_of.get(i)
+                if g:
+                    sources[g] += v
+        cty = (str(row[2]).replace(" County", "").strip() or None) if row[2] else None
+        pop = int(row[5]) if isinstance(row[5], (int, float)) else None
+        yield (tract, str(row[3]) if row[3] else None, cty, pop,
+               round(total, ndigits), {k: round(v, 3) for k, v in sources.items()})
+    wb.close()
 
-    if kept < 200:
-        log(f"  only {kept} tracts parsed — leaving air toxics unchanged", level="warn")
+
+def _airtox_top_pollutants(path, mi_only=True):
+    """Stream the cancer-risk-BY-POLLUTANT file; return {geoid: [[name, risk], ...]}
+    with the six top contributing pollutants per Michigan tract."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    it = ws.iter_rows(values_only=True)
+    header = list(next(it))
+    ti = next(i for i, h in enumerate(header) if str(h or "").strip().lower().startswith("total"))
+    names = {}
+    for i in range(ti + 1, len(header)):
+        nm = str(header[i] or "")
+        for suf in (" Cancer Risk (per million)", " Cancer Risk (per Million)"):
+            if nm.endswith(suf):
+                nm = nm[: -len(suf)]
+        names[i] = airtoxics_data.pretty_pollutant_name(nm.strip())
+    out = {}
+    for row in it:
+        tract = str(row[4]) if row[4] is not None else ""
+        if len(tract) != 11 or not tract.isdigit() or tract.endswith("000000"):
+            continue
+        if mi_only and not tract.startswith("26"):
+            continue
+        polls = [[names[i], round(row[i], 3)] for i in range(ti + 1, len(header))
+                 if isinstance(row[i], (int, float)) and row[i] > 0]
+        polls.sort(key=lambda p: p[1], reverse=True)
+        out[tract] = polls[:6]
+    wb.close()
+    return out
+
+
+def load_airtoxics(conn: sqlite3.Connection) -> int:
+    """Load EPA AirToxScreen 2019 cancer-risk + noncancer hazard-index SCREENING
+    estimates for Michigan census tracts from EPA's national result spreadsheets.
+
+    Per tract we store total cancer risk (in a million) — computed as the SUM of
+    the source-subgroup columns, which equals the sum over pollutants and is far
+    more granular/reliable than EPA's rounded Total column — the eight-group source
+    breakdown, the top contributing pollutants, and the noncancer hazard index for
+    five target organs (respiratory, neurological, immunological, kidney, liver).
+
+    Geometry (2010 census tracts, unchanged across 2017-2019) is REUSED from the
+    existing table by GEOID; on a fresh build with no geometry cached it is fetched
+    once from the ATS_Risk_View layer. This REPLACES the prior assessment year —
+    EPA cautions years are not comparable, so only one is ever stored."""
+    log(f"Loading EPA AirToxScreen {AIRTOXICS_YEAR} risk + hazard index "
+        "(Michigan census tracts)...")
+    cur = conn.cursor()
+    _airtox_ensure_hi_columns(cur)
+
+    # 1. Geometry by GEOID: reuse what we already have; fetch from ArcGIS only if a
+    #    fresh build has (almost) none. Geometry is the 2010-tract boundary and does
+    #    not change between assessment years.
+    geom_by = {r[0]: r[1] for r in cur.execute(
+        "SELECT tract_geoid, geometry FROM airtoxics_tracts WHERE geometry IS NOT NULL")}
+    log(f"  reusing {len(geom_by)} cached tract geometries")
+
+    # 2. Cancer risk by source group -> per-tract total + 8-group breakdown, plus a
+    #    national tract mean (over ALL US tracts) for the reference average.
+    cancer_path = _airtox_xlsx_path(AIRTOXICS_CANCER_SRCGRP_FILE)
+    mi = {}  # geoid -> record dict
+    for geoid, cfips, cty, pop, total, sources in _airtox_tract_totals(
+            cancer_path, want_sources=True, mi_only=True):
+        mi[geoid] = {"tract_geoid": geoid, "county_fips": cfips, "county_name": cty,
+                     "population": pop, "total_risk": total,
+                     "sources": json.dumps(sources)}
+    # national mean: stream the same file again over ALL tracts (cheap vs storing).
+    nat_sum = nat_n = 0
+    for _g, _c, _n, _p, total, _s in _airtox_tract_totals(
+            cancer_path, want_sources=False, mi_only=False):
+        nat_sum += total
+        nat_n += 1
+    national_avg = round(nat_sum / nat_n, 2) if nat_n else None
+    log(f"  parsed {len(mi)} MI tracts (of {nat_n} US tracts)")
+
+    # 3. Top pollutants.
+    polls_by = _airtox_top_pollutants(_airtox_xlsx_path(AIRTOXICS_CANCER_POLL_FILE))
+
+    # 4. Hazard index per target organ (total HI = sum of the subgroup columns).
+    hi_by = {organ: {} for organ in AIRTOXICS_HI_FILES}
+    for organ, fname in AIRTOXICS_HI_FILES.items():
+        for geoid, _c, _n, _p, total, _s in _airtox_tract_totals(
+                _airtox_xlsx_path(fname), want_sources=False, mi_only=True, ndigits=4):
+            hi_by[organ][geoid] = total
+
+    # 5. Build rows (reuse geometry; drop tracts with no geometry available).
+    rows, mi_total_sum, missing_geom = [], 0.0, 0
+    for geoid, rec in mi.items():
+        geom = geom_by.get(geoid)
+        if geom is None:
+            missing_geom += 1
+            continue
+        rec["pollutants"] = json.dumps(polls_by.get(geoid, []))
+        rec["geometry"] = geom
+        for organ, col in _AIRTOX_HI_COLS.items():
+            rec[col] = hi_by[organ].get(geoid)
+        rows.append(rec)
+        mi_total_sum += rec["total_risk"]
+    if missing_geom:
+        log(f"  {missing_geom} MI tracts had no cached geometry", level="warn")
+
+    if len(rows) < 200:
+        log(f"  only {len(rows)} tracts assembled — leaving air toxics unchanged",
+            level="warn")
         airtoxics_data_record(conn, "skipped", 0)
         return 0
 
+    # 6. REPLACE the table (never append a second year — not comparable).
+    cols = (["tract_geoid", "county_fips", "county_name", "population", "total_risk",
+             "sources", "pollutants"] + list(_AIRTOX_HI_COLS.values()) + ["geometry"])
+    placeholders = ", ".join(f":{c}" for c in cols)
     cur.execute("DELETE FROM airtoxics_tracts")
     cur.executemany(
-        "INSERT OR REPLACE INTO airtoxics_tracts"
-        "(tract_geoid, county_fips, county_name, population, total_risk,"
-        " sources, pollutants, geometry) VALUES"
-        "(:tract_geoid, :county_fips, :county_name, :population, :total_risk,"
-        " :sources, :pollutants, :geometry)", rows)
+        f"INSERT OR REPLACE INTO airtoxics_tracts ({', '.join(cols)}) "
+        f"VALUES ({placeholders})", rows)
 
-    # 3. Reference averages: national unweighted tract mean (sum of the per-source
-    #    field averages over ALL US tracts) and the Michigan tract mean. Both are
-    #    simple tract means so they are directly comparable in the popup.
-    national_avg = None
-    try:
-        stat_defs = [{"statisticType": "avg", "onStatisticField": f,
-                      "outStatisticFieldName": f"a{i}"} for i, f in enumerate(src_fields)]
-        q = urllib.parse.urlencode({"where": "1=1", "f": "json",
-                                    "outStatistics": json.dumps(stat_defs)})
-        sd = json.loads(http_get(f"{AIRTOXICS_RISK_URL}/query?{q}", timeout=90))
-        at = (sd.get("features") or [{}])[0].get("attributes", {})
-        national_avg = round(sum((at.get(f"a{i}") or 0) for i in range(len(src_fields))), 2)
-    except Exception as e:                     # noqa: BLE001 — reference number is optional
-        log(f"  national-average query failed ({e}); leaving null", level="warn")
-    mi_avg = round(mi_total_sum / kept, 2) if kept else None
-
+    mi_avg = round(mi_total_sum / len(rows), 2) if rows else None
     cur.execute("DELETE FROM airtoxics_stats")
     cur.executemany("INSERT OR REPLACE INTO airtoxics_stats(key, value) VALUES (?, ?)",
-                    [("national_avg", national_avg), ("mi_avg", mi_avg)])
+                    [("national_avg", national_avg), ("mi_avg", mi_avg),
+                     ("assessment_year", float(AIRTOXICS_YEAR))])
 
-    airtoxics_data_record(conn, "ok", kept)
+    airtoxics_data_record(conn, "ok", len(rows))
     conn.commit()
-    log(f"  loaded {kept} MI tracts · MI avg {mi_avg} / national {national_avg} in-a-million",
-        level="ok")
-    return kept
+    log(f"  loaded {len(rows)} MI tracts · MI avg {mi_avg} / national {national_avg} "
+        f"in-a-million · {AIRTOXICS_YEAR} assessment", level="ok")
+    return len(rows)
 
 
 def airtoxics_data_record(conn: sqlite3.Connection, status: str, rows: int) -> None:
     record_source(
         conn, "epa_airtoxics",
-        "EPA air toxics risk (NATA / AirToxScreen) — census-tract cancer-risk screening",
+        "EPA AirToxScreen (2019 assessment) — census-tract cancer risk + hazard index",
         AIRTOXICS_HOME_URL, status, rows,
-        "Modeled cancer-risk SCREENING estimates (chance-in-a-million, 70-yr outdoor "
-        "lifetime) at census-tract level, with source-category and pollutant "
-        "breakdown. EPA releases new assessments every year or two and cautions "
-        "against comparing across years (methods change), so only one assessment "
-        "year is shown and it is not trended. Not a measurement; identifies areas "
-        "for further study, not risk at a specific address.")
+        "Modeled SCREENING estimates at census-tract level: cancer risk "
+        "(chance-in-a-million, 70-yr outdoor lifetime) with source-category and "
+        "pollutant breakdown, plus the noncancer hazard index for five target "
+        "organs (respiratory, neurological, immunological, kidney, liver). Diesel "
+        "PM is excluded from cancer totals (no cancer dose-response value) but its "
+        "noncancer effects are included; 127 of 181 modeled air toxics have "
+        "dose-response values. EPA cautions that assessment YEARS ARE NOT "
+        "COMPARABLE (inventory, modeling, background and health-benchmark changes), "
+        "so only one year is stored and it is never trended. Not a measurement; "
+        "identifies areas for further study, not risk at a specific address.",
+        coverage_start=AIRTOXICS_YEAR, coverage_end=AIRTOXICS_YEAR)
 
 
 def load_pfas(conn: sqlite3.Connection) -> int:

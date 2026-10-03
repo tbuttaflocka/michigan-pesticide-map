@@ -326,10 +326,18 @@ CREATE TABLE IF NOT EXISTS airtoxics_tracts (
     tract_geoid   TEXT PRIMARY KEY,       -- 11-digit census tract GEOID
     county_fips   TEXT,                   -- 5-digit (STCOFIPS) -> counties.fips
     county_name   TEXT,
-    population    INTEGER,                 -- POP2010 (tract population)
+    population    INTEGER,                 -- tract population (assessment year)
     total_risk    REAL,                    -- total cancer risk, in a million
     sources       TEXT,                    -- JSON {key: risk} for the 8 categories
     pollutants    TEXT,                    -- JSON [[name, risk], ...] top contributors
+    -- Noncancer hazard index (sum of hazard quotients) per target organ. HI <= 1
+    -- indicates negligible risk; HI > 1 warrants case-by-case evaluation. New in
+    -- the AirToxScreen 2019 upgrade; absent in the NATA 2017 release.
+    hi_respiratory    REAL,
+    hi_neurological   REAL,
+    hi_immunological  REAL,
+    hi_kidney         REAL,
+    hi_liver          REAL,
     geometry      TEXT                     -- GeoJSON Polygon/MultiPolygon (simplified)
 );
 CREATE INDEX IF NOT EXISTS ix_airtox_county ON airtoxics_tracts(county_fips);

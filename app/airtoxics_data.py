@@ -1,9 +1,16 @@
 """
 Metadata, styling, parsing, and caveats for the EPA air toxics risk layer.
 
-Source: EPA's National Air Toxics Assessment (NATA) — the predecessor to today's
-AirToxScreen — served at CENSUS-TRACT level from EPA's ArcGIS org (the same org
-this app already uses for contamination data). Michigan has ~2,769 tracts.
+Source: EPA AirToxScreen (successor to NATA), 2019 assessment, CENSUS-TRACT level,
+from EPA's downloadable national result spreadsheets (cancer risk by source group
+and by pollutant, plus the noncancer hazard index for five target organs). The
+2019 release is the newest tract-level assessment (2020+ is census-block level and
+is a separate decision). Michigan has ~2,756 tracts in 2019.
+
+EPA cautions that assessment years are NOT comparable (inventory, modeling,
+background, and health-benchmark changes between releases), so we show ONE year
+and never trend it. This replaced the 2017 NATA snapshot; both are never kept
+side by side in a way that could render as a trend.
 
 WHAT THIS IS (and is NOT), baked in because EPA is emphatic about it:
   - A SCREENING assessment: modeled estimates from emissions inventories and
@@ -31,26 +38,55 @@ ONE assessment year and never trend it.
 """
 from __future__ import annotations
 
-# The eight EPA source categories, in display order. Each maps a raw service
-# field -> (key, short label, color, glossary key). These sum to the tract's total
-# cancer risk. Colors read as "who is responsible": industrial reds/browns for
-# point & nonpoint, blues for mobile, greens for natural, grey for background. The
-# glossary key ties each label to a plain-language definition (see glossary.js),
-# surfaced as a tap-friendly tooltip in the popup and the homebuyer report.
+# The eight EPA source categories, in display order. Each is (column-prefix, key,
+# short label, color, glossary key). These eight groups sum to the tract's total
+# cancer risk. The AirToxScreen 2019 spreadsheets break each group into SUBGROUPS
+# (e.g. on-road by duty/fuel/network; non-road incl. CMV/locomotive/airport/
+# railyard; nonpoint by industrial/oil-gas/residential-wood-combustion/etc.), so
+# the column-prefix below maps every subgroup column back to its top-level group
+# (see source_group_for_column). The eight groups themselves are UNCHANGED from the
+# 2017 layer, so the legend/popup keys stay identical. Colors read as "who is
+# responsible": industrial reds/browns for point & nonpoint, blues for mobile,
+# greens for natural, grey for background.
 SOURCE_CATEGORIES = [
-    ("PT_Stationary_Point", "point",      "Industry (point)",   "#c0553a", "point source"),
-    ("NP_Cancer_Risk",      "nonpoint",   "Area / nonpoint",    "#d98a3d", "nonpoint/area source"),
-    ("OR_Cancer_Risk",      "onroad",     "On-road traffic",    "#4f9dd6", "on-road traffic"),
-    ("NR_Cancer_Risk",      "nonroad",    "Non-road mobile",    "#7b6cd9", "non-road mobile"),
-    ("Fire_Risk",           "fire",       "Fires",              "#e0623c", "fire emissions"),
-    ("Biogenics_Risk",      "biogenic",   "Biogenic",           "#4faa6b", "biogenic emissions"),
-    ("Secondary_Risk",      "secondary",  "Secondary formation", "#9aa63c", "secondary formation"),
-    ("Background_Risk",     "background", "Background",          "#8a94a3", "background concentration"),
+    ("PT",         "point",      "Industry (point)",    "#c0553a", "point source"),
+    ("NP",         "nonpoint",   "Area / nonpoint",     "#d98a3d", "nonpoint/area source"),
+    ("OR",         "onroad",     "On-road traffic",     "#4f9dd6", "on-road traffic"),
+    ("NR",         "nonroad",    "Non-road mobile",     "#7b6cd9", "non-road mobile"),
+    ("FIRE",       "fire",       "Fires",               "#e0623c", "fire emissions"),
+    ("BIOGENICS",  "biogenic",   "Biogenic",            "#4faa6b", "biogenic emissions"),
+    ("SECONDARY",  "secondary",  "Secondary formation", "#9aa63c", "secondary formation"),
+    ("BACKGROUND", "background", "Background",           "#8a94a3", "background concentration"),
 ]
-SOURCE_FIELDS = [f for f, _k, _l, _c, _g in SOURCE_CATEGORIES]
-SOURCE_KEY_BY_FIELD = {f: k for f, k, _l, _c, _g in SOURCE_CATEGORIES}
 SOURCE_META = {k: {"label": lbl, "color": col, "gloss": g}
-               for _f, k, lbl, col, g in SOURCE_CATEGORIES}
+               for _p, k, lbl, col, g in SOURCE_CATEGORIES}
+# longest prefixes first so "BACKGROUND"/"BIOGENICS" never shadow a 2-letter code
+_PREFIX_TO_KEY = sorted(((p.upper(), k) for p, k, *_ in SOURCE_CATEGORIES),
+                        key=lambda t: -len(t[0]))
+
+# Target organs for which AirToxScreen 2019 publishes a noncancer hazard index, in
+# display order. Keys match the hi_<organ> columns in airtoxics_tracts.
+HAZARD_ORGANS = [
+    ("respiratory",   "Respiratory"),
+    ("neurological",  "Neurological"),
+    ("immunological", "Immunological"),
+    ("kidney",        "Kidney"),
+    ("liver",         "Liver"),
+]
+
+
+def source_group_for_column(header: str) -> str | None:
+    """Map a 2019 result-file data column header to one of the eight top-level
+    source groups by its prefix (e.g. 'OR-HeavyDuty-OnNetwork-Diesel Cancer Risk
+    (per million)' -> 'onroad', 'NR- Point-Railyards ...' -> 'nonroad'). Returns
+    None for non-source columns (geographic reference, the rounded Total)."""
+    if not header:
+        return None
+    head = header.split(" ", 1)[0].upper().strip().strip("-")
+    for prefix, key in _PREFIX_TO_KEY:
+        if head.startswith(prefix):
+            return key
+    return None
 
 # Sequential palette for the tract choropleth — deliberately COOL (indigo → teal →
 # green → chartreuse) so it is NOT confused with the warm red/orange scale the
@@ -95,6 +131,21 @@ POLLUTANT_NAMES = {
 }
 
 
+import re as _re
+# Reverse lookup from curated display names, keyed by an alnum-only uppercase
+# fold, so an EPA ALL-CAPS header column ("CARBON TETRACHLORIDE", "BENZOAPYRENE")
+# resolves back to nicely-cased chemistry ("Carbon tetrachloride", "Benzo(a)pyrene")
+# that still matches the chemical/PubChem links.
+_POLL_BY_FOLD = {_re.sub(r"[^A-Z0-9]", "", v.upper()): v for v in POLLUTANT_NAMES.values()}
+
+
+def pretty_pollutant_name(raw: str) -> str:
+    """Normalize a 2019 result-file pollutant column name to a readable display
+    name, preferring the curated spelling and falling back to title case."""
+    hit = _POLL_BY_FOLD.get(_re.sub(r"[^A-Z0-9]", "", (raw or "").upper()))
+    return hit if hit else (raw or "").title()
+
+
 def clean_pollutant_name(field: str, alias: str | None = None) -> str:
     """Human-readable chemical name for a CR_<pollutant> field.
 
@@ -113,12 +164,6 @@ def clean_pollutant_name(field: str, alias: str | None = None) -> str:
             return a
     name = field[3:] if field.startswith("CR_") else field
     return name.replace("_", " ").strip()
-
-
-def is_pollutant_field(field: str) -> bool:
-    """A per-pollutant cancer-risk column (not the coarse total, not a source)."""
-    return (field.startswith("CR_") and field != "CR_Total_Risk"
-            and field not in SOURCE_FIELDS)
 
 
 # ---- caveats (shown prominently in the map popup AND the homebuyer report) ----
@@ -142,8 +187,22 @@ LAYER_CAVEAT = (
     "trended. Nothing here is fabricated."
 )
 
-ASSESSMENT_LABEL = "EPA NATA (2017 assessment)"
+ASSESSMENT_LABEL = "EPA AirToxScreen (2019 assessment)"
 SOURCE_URL = "https://www.epa.gov/AirToxScreen"
+
+# Facts for the caveat text (reported to the user; wired into UI copy in the UI
+# phase). EPA does NOT quantify a cancer risk for diesel particulate matter — only
+# its noncancer effects — because it has no cancer dose-response value; and only a
+# subset of the modeled air toxics have dose-response values at all.
+DIESEL_PM_CANCER_QUANTIFIED = False
+DIESEL_PM_NOTE = (
+    "Diesel particulate matter is NOT included in the cancer-risk totals — EPA has "
+    "not set a cancer dose-response value for diesel PM — but its NONCANCER "
+    "(respiratory) effects are included in the hazard index.")
+# AirToxScreen models 181 air toxics; 127 carry dose-response values and thus
+# contribute to the cancer-risk and hazard-index totals (per EPA's assessment docs).
+AIR_TOXICS_MODELED = 181
+AIR_TOXICS_WITH_DOSE_RESPONSE = 127
 
 
 def legend_payload(national_avg: float | None, mi_avg: float | None) -> dict:

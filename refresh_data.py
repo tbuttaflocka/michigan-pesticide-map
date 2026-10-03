@@ -360,7 +360,7 @@ SOURCES: list[Source] = [
     ),
     Source(
         id="airtoxics",
-        label="EPA air toxics risk (NATA / AirToxScreen) — census-tract cancer-risk screening",
+        label="EPA AirToxScreen (2019) — census-tract cancer risk + noncancer hazard index",
         loaders=[dl.load_airtoxics],
         targets=["airtoxics_tracts", "airtoxics_stats"],
         primary_target="airtoxics_tracts", primary_source_id="epa_airtoxics",
@@ -368,8 +368,9 @@ SOURCES: list[Source] = [
         # annual check is enough to pick up a new one when it lands.
         interval_months=12, min_abs=200, floor_frac=0.6,
         # Assessment year shown in the Data Sources modal (methods differ across
-        # years, so we pin to one assessment and never trend it).
-        coverage=lambda conn: ("2017", "2017"),
+        # years, so we pin to one assessment and never trend it). AirToxScreen
+        # releases are NOT comparable across years.
+        coverage=lambda conn: ("2019", "2019"),
     ),
     Source(
         id="places",

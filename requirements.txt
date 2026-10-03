@@ -3,6 +3,7 @@
 # Install with:  pip install -r requirements.txt
 Flask>=3.0
 waitress>=3.0        # production WSGI server used by serve.py and on Render
+openpyxl>=3.1        # reads EPA AirToxScreen .xlsx result files (load_airtoxics)
 
 # NOTE: Pillow is NOT required to run the app — it is only used by
 # scripts/make_icon.py to regenerate the app icon. Install it separately if you

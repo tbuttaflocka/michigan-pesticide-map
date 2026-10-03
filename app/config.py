@@ -424,8 +424,32 @@ PFAS_POTW_URL = (PFAS_AGO_BASE
 # contamination). ATS_Risk_View exposes tract polygons with total + per-pollutant
 # cancer risk AND the source-category breakdown in a single queryable layer.
 EPA_ATS_ORG = "https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services"
+# ATS_Risk_View is the 2017 NATA tract layer. We no longer read RISK from it, but
+# it is retained as a reproducible GEOMETRY source (2010 census tracts, keyed by
+# FIPS = 11-digit tract GEOID) for fresh builds that have no geometry cached yet.
 AIRTOXICS_RISK_URL = EPA_ATS_ORG + "/ATS_Risk_View/FeatureServer/0"
 AIRTOXICS_HOME_URL = "https://www.epa.gov/AirToxScreen"
+
+# EPA AirToxScreen 2019 national, census-tract result files (the "verify first"
+# source). The service above has no hazard-index fields; these downloadable files
+# carry cancer risk by source subgroup + by pollutant AND the noncancer hazard
+# index for five target organs, all keyed by the 11-digit tract GEOID ("Tract"
+# column). Risk/HI columns beyond the geographic reference sum to the tract total;
+# EPA's own rounded "Total ..." column is NOT trusted (same caveat as NATA 2017).
+# Each file is ~22-62 MB. EPA cautions assessments are NOT comparable across years.
+AIRTOXICS_YEAR = "2019"
+AIRTOXICS_CACHE_DIR = DATA_DIR / "airtoxics"
+AIRTOXICS_FILE_BASE = "https://www.epa.gov/system/files/documents/2022-12"
+AIRTOXICS_CANCER_SRCGRP_FILE = "2019_National_CancerRisk_by_tract_srcgrp.xlsx"
+AIRTOXICS_CANCER_POLL_FILE = "2019_National_CancerRisk_by_tract_poll.xlsx"
+# target-organ key -> noncancer hazard-index-by-source-group file
+AIRTOXICS_HI_FILES = {
+    "respiratory":   "2019_National_RespHI_by_tract_srcgrp.xlsx",
+    "neurological":  "2019_National_NeurHI_by_tract_srcgrp.xlsx",
+    "immunological": "2019_National_ImmuHI_by_tract_srcgrp.xlsx",
+    "kidney":        "2019_National_KidneyHI_by_tract_srcgrp.xlsx",
+    "liver":         "2019_National_LiverHI_by_tract_srcgrp.xlsx",
+}
 
 # Official landing pages (Data Sources modal + popups).
 MPART_HUB_URL = "https://gis-egle.hub.arcgis.com/search?tags=pfas"
