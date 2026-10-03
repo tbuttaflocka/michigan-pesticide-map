@@ -1805,6 +1805,12 @@ a:hover { text-decoration: underline; }
   margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
   font-size: 10.5px; font-style: italic; color: var(--muted);
 }
+/* Multi-facility penalty caveat — shares the same value across sites (e.g. a
+   national corporate settlement). Reads as a warning without hiding the number. */
+.echo-multi-note { margin-top: 3px !important; }
+.echo-multi-note .muted {
+  display: block; font-size: 10.5px; line-height: 1.35; color: #d9a441;
+}
 .echo-county-link {
   font: inherit; color: #58a6ff; background: none; border: none; padding: 0;
   cursor: pointer; text-decoration: underline; text-underline-offset: 2px;

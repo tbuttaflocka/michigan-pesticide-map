@@ -3039,7 +3039,8 @@ _ECHO_COLS = (
     "registry_id, facility_name, compliance_status, caa_compliance_status, "
     "cwa_compliance_status, rcra_compliance_status, sdwa_compliance_status, "
     "snc_flag, caa_hpv_flag, programs_with_snc, qtrs_with_nc, inspection_count, "
-    "date_last_inspection, penalty_count, total_penalties, formal_action_count, "
+    "date_last_inspection, penalty_count, total_penalties, total_penalties_usd, "
+    "formal_action_count, "
     "caa_formal_action_count, cwa_formal_action_count, rcra_formal_action_count, "
     "sdwa_formal_action_count"
 )
@@ -3050,10 +3051,31 @@ def _echo_status_color(status):
         ECHO_STATUS_COLORS.get(status, ECHO_STATUS_NULL_COLOR)
 
 
-def _echo_compliance_payload(r) -> dict:
+def _echo_shared_penalties(conn) -> dict:
+    """Map each non-zero total_penalties_usd value -> the number of MI facilities
+    carrying that EXACT value. FAC_TOTAL_PENALTIES is recorded against every
+    facility named in an enforcement action, so a single multi-facility settlement
+    (e.g. a national corporate case) stamps the same dollar amount onto many
+    distinct FRS records. When a value appears on >1 facility we flag it so the UI
+    can warn that the figure is NOT a penalty against that one site alone. Detection
+    is purely by shared value — no facility- or company-specific rule."""
+    out: dict = {}
+    for row in conn.execute(
+        "SELECT total_penalties_usd AS v, COUNT(*) AS n FROM echo_facilities "
+        "WHERE total_penalties_usd IS NOT NULL AND total_penalties_usd > 0 "
+        "GROUP BY total_penalties_usd HAVING COUNT(*) > 1"):
+        out[row["v"]] = row["n"]
+    return out
+
+
+def _echo_compliance_payload(r, shared: dict = None) -> dict:
     """Shape one echo_facilities row into the compliance object used by both the
     ECHO layer popup and the enrichment section on TRI/Superfund/TSDF popups.
-    Every value is served exactly as EPA stores it — no recoding or ranking."""
+    Every value is served exactly as EPA stores it — no recoding or ranking.
+    `shared` (from _echo_shared_penalties) lets us flag a total_penalties value
+    that is replicated across multiple facilities WITHOUT altering the value."""
+    usd = r["total_penalties_usd"] if "total_penalties_usd" in r.keys() else None
+    shared_n = shared.get(usd) if (shared and usd) else None
     return {
         "registry_id": r["registry_id"], "name": r["facility_name"],
         "compliance_status": r["compliance_status"],
@@ -3069,6 +3091,10 @@ def _echo_compliance_payload(r) -> dict:
         "date_last_inspection": r["date_last_inspection"],
         "penalty_count": r["penalty_count"],
         "total_penalties": r["total_penalties"],
+        # True when this exact penalty total is shared by >1 facility (a single
+        # enforcement action covering multiple sites); value itself is unchanged.
+        "penalty_multi_facility": bool(shared_n),
+        "penalty_facility_count": shared_n,
         "formal_action_count": r["formal_action_count"],
         "caa_formal_action_count": r["caa_formal_action_count"],
         "cwa_formal_action_count": r["cwa_formal_action_count"],
@@ -3084,11 +3110,12 @@ def _echo_enrichment(conn, matched_col: str) -> dict:
     ECHO table is absent so the other layers degrade gracefully (no section)."""
     if not _table_exists(conn.cursor(), "echo_facilities"):
         return {}
+    shared = _echo_shared_penalties(conn)
     out: dict = {}
     for r in conn.execute(
         f"SELECT {_ECHO_COLS}, {matched_col} AS _ids FROM echo_facilities "
         f"WHERE {matched_col} IS NOT NULL AND {matched_col} != ''"):
-        payload = _echo_compliance_payload(r)
+        payload = _echo_compliance_payload(r, shared)
         for our_id in (r["_ids"] or "").split():
             out.setdefault(our_id, payload)
     return out
@@ -3186,7 +3213,7 @@ def api_echo_facility(registry_id: str):
     if not r:
         conn.close()
         return jsonify({"found": False}), 404
-    payload = _echo_compliance_payload(r)
+    payload = _echo_compliance_payload(r, _echo_shared_penalties(conn))
     payload["found"] = True
     payload["county"] = r["county"]
     payload["county_fips"] = r["county_fips"]

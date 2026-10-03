@@ -2842,6 +2842,17 @@
     return '$' + n.toLocaleString('en-US');
   }
 
+  // Warning shown when the SAME penalty total is recorded against more than one
+  // facility — EPA stamps a single multi-site enforcement action's penalty onto
+  // every facility named in it, so the figure overstates what this one site was
+  // fined. The dollar value is still shown unchanged (backend flag only).
+  function echoMultiFacilityNote(d) {
+    if (!d || !d.penalty_multi_facility) return '';
+    const n = d.penalty_facility_count;
+    const scope = n ? `${n} facilities in our data` : 'multiple facilities';
+    return `<div class="row echo-multi-note"><span class="muted">⚠ This amount reflects an enforcement action covering multiple facilities (${scope}), not a penalty against this site alone.</span></div>`;
+  }
+
   function echoFlags(d) {
     const out = [];
     if (d.snc_flag === 'Y') out.push('<span class="echo-flag snc" title="Significant Noncompliance — EPA\'s designation for the most serious or repeated violations (CWA/RCRA/SDWA)">SNC</span>');
@@ -2905,7 +2916,8 @@
         <div class="row"><span class="k">Quarters in noncompliance:</span> ${d.qtrs_with_nc != null ? d.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>
         ${inspCount}
         ${inspDate}
-        <div class="row"><span class="k">Penalties:</span> ${d.penalty_count || 0}${pen ? ` · ${pen}` : ''}</div>
+        <div class="row"><span class="k" title="Total assessed or final MONETARY penalties from formal enforcement actions in the last 5 years (federal + state/local combined). Excludes injunctive relief, compliance costs, and Supplemental Environmental Projects. Source: EPA ECHO.">Penalties (last 5 yrs):</span> ${d.penalty_count || 0}${pen ? ` · ${pen}` : ''}</div>
+        ${echoMultiFacilityNote(d)}
         ${fa.length ? `<div class="row"><span class="k">Formal actions:</span> ${fa.join(' · ')}</div>` : ''}
       </div>
       ${xlinks ? `<div class="echo-xlinks">${xlinks}</div>` : ''}
@@ -2928,7 +2940,11 @@
     if (e.date_last_inspection)
       bits.push(`<div class="row"><span class="k">Last inspection:</span> ${esc(e.date_last_inspection)}</div>`);
     bits.push(`<div class="row"><span class="k">Quarters in noncompliance:</span> ${e.qtrs_with_nc != null ? e.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>`);
-    if (pen) bits.push(`<div class="row"><span class="k">Total penalties:</span> ${pen}</div>`);
+    if (pen) {
+      bits.push(`<div class="row"><span class="k" title="Total assessed or final MONETARY penalties from formal enforcement actions in the last 5 years (federal + state/local combined). Excludes injunctive relief, compliance costs, and Supplemental Environmental Projects. Source: EPA ECHO.">Total penalties (last 5 yrs):</span> ${pen}</div>`);
+      const mf = echoMultiFacilityNote(e);
+      if (mf) bits.push(mf);
+    }
     return `<div class="echo-xsection">
       <div class="echo-xhead">EPA enforcement &amp; compliance <span class="muted">(ECHO)</span></div>
       ${bits.join('')}

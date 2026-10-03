@@ -251,9 +251,16 @@ _SQL_DATASETS = [
 _FALLBACK_DATASETS = [
     dict(file="echo_facilities", source_id="epa_echo", table="echo_facilities",
          desc="EPA ECHO enforcement & compliance facilities.",
-         units="penalty amounts in USD; various compliance/inspection counts.",
+         units="total_penalties / total_penalties_usd are assessed or final MONETARY penalties "
+               "(federal + state/local) over the TRAILING 5 YEARS - NOT lifetime, and excluding "
+               "injunctive relief, compliance costs, and Supplemental Environmental Projects; "
+               "other columns are compliance/inspection counts.",
          caveat="ALLEGED violations, NOT final adjudications. Compliance status covers a 12-quarter "
-                "(3-year) window and can lag reality by up to ~3 months."),
+                "(3-year) window and can lag reality by up to ~3 months. PENALTY NOTE: a single "
+                "enforcement action covering multiple facilities records the SAME penalty total "
+                "against every facility it names, so an identical total_penalties_usd value appearing "
+                "on more than one facility is a multi-site action, not a per-site fine (e.g. one "
+                "corporate settlement replicated across 33 Michigan UPS locations)."),
     dict(file="oil_gas_wells", source_id="egle_oil_gas_wells", table="oil_gas_wells",
          desc="EGLE oil / gas / mineral well surface locations.",
          units="dtd / tvd depths (feet).",
