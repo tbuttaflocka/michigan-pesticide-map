@@ -31,6 +31,7 @@ from app import airtoxics_data
 from app import ust_data
 from app import spraying_programs
 from app import coal_ash_data
+from app import aoc_data
 from app import county_export
 from app import tri_reference
 from app import pfas_chem
@@ -1237,6 +1238,32 @@ def api_overview():
             "source": "Michigan EGLE Orphan Well Program",
             "target": target})
 
+    # Great Lakes restoration progress — statewide BUI counts across all AOCs.
+    # Deliberately a `notable` callout (not a totals-grid card): restoration
+    # progress is real content, but an AOC is a use-impairment STATUS, not a
+    # count that should be ranked beside the measured/inventoried layers in the
+    # grid. The note states that explicitly, and the target just enables the AOC
+    # layer (no false "comparison" with Superfund/TRI/ECHO).
+    if _table_exists(cur, "aoc_bui"):
+        b = _ov_row(cur, "SELECT COUNT(*) total, SUM(status='removed') removed, "
+                         "SUM(status='impaired') impaired FROM aoc_bui")
+        a = _ov_row(cur, "SELECT SUM(status='active') active, SUM(status='delisted') delisted "
+                         "FROM aoc_areas")
+        if b and b["total"]:
+            notable.append({
+                "label": "Great Lakes restoration progress",
+                "value": f"{b['removed'] or 0} of {b['total']} beneficial-use impairments "
+                         f"removed across {(a['active'] or 0) + (a['delisted'] or 0)} "
+                         f"Areas of Concern",
+                "note": f"{b['impaired'] or 0} impairments remain; "
+                        f"{a['delisted'] or 0} AOCs fully delisted. An AOC is a "
+                        "use-impairment STATUS (EPA/EGLE), not a cleanup or emissions "
+                        "metric — not comparable to Superfund, TRI, ECHO or measured "
+                        "data. Delisting means uses restored to non-AOC conditions, "
+                        "not that an area is pristine.",
+                "source": "EPA/EGLE Great Lakes Areas of Concern (BUIs transcribed 2026-10-04)",
+                "target": {"kind": "layer", "cb": "aoc-areas"}})
+
     conn.close()
     return jsonify({"totals": totals, "notable": notable,
                     "as_of_years": {"tri": tri_year, "pesticides": pest_year}})
@@ -1511,6 +1538,25 @@ _SEARCH_ALIASES = {
 }
 
 
+def _search_aocs(cur, q: str, limit: int = 6) -> list[dict]:
+    """Great Lakes Areas of Concern by name. Kept a SEPARATE group from facilities
+    because an AOC is a polygon (or, for two delisted ones, has no geometry at all)
+    — not a point marker — and must stay reachable even without coordinates. Note:
+    this is independent of the contamination/Superfund search, so e.g. the Torch
+    Lake AOC and the Torch Lake Superfund site surface as distinct results."""
+    if not _table_exists(cur, "aoc_areas"):
+        return []
+    like = f"%{q.upper()}%"
+    out = []
+    for r in cur.execute(
+            "SELECT slug, name, status, delisting_date, geometry FROM aoc_areas "
+            "WHERE UPPER(name) LIKE ? ORDER BY status, name LIMIT ?", (like, limit)):
+        out.append({"slug": r["slug"], "name": r["name"], "status": r["status"],
+                    "delisting_date": r["delisting_date"],
+                    "has_geometry": bool(r["geometry"])})
+    return out
+
+
 def _search_facilities(cur, q: str, limit: int = 10) -> list[dict]:
     """Named sites across TRI, Superfund/contamination, landfills, PFAS, UST and
     coal ash — so people who heard about Wurtsmith, Velsicol, Wolverine or Wayne
@@ -1614,9 +1660,11 @@ def api_search():
     )]
     places = _search_places(cur, q)
     facilities = _search_facilities(cur, q)
+    aocs = _search_aocs(cur, q)
     conn.close()
     return lb_jsonify({"places": places, "counties": counties,
-                       "facilities": facilities, "compounds": compounds})
+                       "facilities": facilities, "compounds": compounds,
+                       "aocs": aocs})
 
 
 # ---------- Respiratory endpoints ----------
@@ -3838,6 +3886,141 @@ def api_oil_gas_fracfocus_well(api_num: str):
             "county": d["county_name"], "ingredients": rows})
     return jsonify({"found": True, "api_num": api_num, "disclosures": out,
                     "ingredient_total": total, "ingredient_masked": masked})
+
+
+# ========================================================================
+# Great Lakes Areas of Concern (EPA/EGLE)
+# ========================================================================
+# Polygon overlay of Michigan's 14 AOCs: 10 still Active, 4 Delisted. Active vs
+# delisted is a STATUS distinction, NOT a severity ramp — delisting is a change
+# of status, not a "better score". Two delisted AOCs (White Lake, Muskegon Lake)
+# have NO EPA boundary file, so they carry NULL geometry: they are returned in a
+# separate `no_geometry` list (so the UI can list + search them) and are NEVER
+# drawn or approximated.
+#
+# FRAMING carried to the UI (never dropped):
+#  * Delisting does NOT mean clean — EPA delists when beneficial uses are restored
+#    to conditions comparable to non-AOC Great Lakes waters; residual conditions
+#    (capped sediments, standing fish-consumption advisories) can persist.
+#  * These polygons are EPA drainage-BASIN extents, not the impaired corridor
+#    itself — Saginaw River & Bay spans 24 counties as a watershed.
+#  * Boundaries are a 2020 snapshot (some 2013-2015); BUI status transcribed from
+#    EPA pages on 2026-10-04.
+#  * An AOC is a use-impairment STATUS, not a cleanup metric or emissions measure;
+#    never ranked against Superfund / TRI / ECHO / measured data.
+#  * Torch Lake's EPA page lists only 3 BUIs (possibly incomplete) — surfaced as a
+#    per-AOC caveat (aoc_areas.note), never presented as a definitive set.
+
+_AOC_SNAPSHOT = aoc_data.SNAPSHOT
+_AOC_TRANSCRIBED_ON = aoc_data.TRANSCRIBED_ON
+
+
+def _aoc_counties(raw):
+    try:
+        return json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _aoc_bui_counts(conn):
+    """{slug: (impaired, removed)} across all AOCs in one pass."""
+    out: dict = {}
+    for slug, st, n in conn.execute(
+            "SELECT aoc_slug, status, COUNT(*) FROM aoc_bui GROUP BY aoc_slug, status"):
+        imp, rem = out.get(slug, (0, 0))
+        if st == "removed":
+            rem += n
+        else:                      # 'impaired' (and any 'unconfirmed') count as not-yet-removed
+            imp += n
+        out[slug] = (imp, rem)
+    return out
+
+
+@app.route("/api/aoc/features")
+def api_aoc_features():
+    """AOC polygons (those EPA publishes a boundary for) as GeoJSON, plus a
+    `no_geometry` list for the two with no boundary file, plus statewide BUI
+    restoration totals and the snapshot/transcription provenance."""
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "aoc_areas"):
+        conn.close()
+        return jsonify({"type": "FeatureCollection", "features": [],
+                        "no_geometry": [], "available": False})
+    counts = _aoc_bui_counts(conn)
+    features, no_geometry = [], []
+    for r in conn.execute(
+            "SELECT slug, name, status, delisting_date, counties, geometry, epa_url, note "
+            "FROM aoc_areas ORDER BY status, name"):
+        imp, rem = counts.get(r["slug"], (0, 0))
+        counties = _aoc_counties(r["counties"])
+        summary = {
+            "slug": r["slug"], "name": r["name"], "status": r["status"],
+            "delisting_date": r["delisting_date"],
+            "county_span": len(counties),
+            "counties": [c.get("name") for c in counties],
+            "bui_impaired": imp, "bui_removed": rem, "bui_total": imp + rem,
+            "epa_url": r["epa_url"], "note": r["note"],
+        }
+        geom = None
+        if r["geometry"]:
+            try:
+                geom = json.loads(r["geometry"])
+            except (TypeError, ValueError):
+                geom = None
+        if geom:
+            features.append({"type": "Feature", "geometry": geom, "properties": summary})
+        else:
+            no_geometry.append(summary)
+    tot = conn.execute(
+        "SELECT COUNT(*), SUM(status='removed'), SUM(status='impaired') FROM aoc_bui").fetchone()
+    aoc_n = conn.execute(
+        "SELECT COUNT(*), SUM(status='active'), SUM(status='delisted') FROM aoc_areas").fetchone()
+    conn.close()
+    return jsonify({
+        "type": "FeatureCollection", "features": features, "no_geometry": no_geometry,
+        "available": True,
+        "statewide": {"bui_total": tot[0] or 0, "bui_removed": tot[1] or 0,
+                      "bui_impaired": tot[2] or 0, "aoc_total": aoc_n[0] or 0,
+                      "active": aoc_n[1] or 0, "delisted": aoc_n[2] or 0},
+        "meta": {"snapshot": _AOC_SNAPSHOT, "transcribed_on": _AOC_TRANSCRIBED_ON},
+    })
+
+
+@app.route("/api/aoc/<slug>")
+def api_aoc_detail(slug):
+    """One AOC: status, delisting date, counties, EPA page, per-AOC caveat, and the
+    BUI list split into impaired vs removed (with removal dates where published)."""
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "aoc_areas"):
+        conn.close()
+        return jsonify({"found": False}), 404
+    a = conn.execute(
+        "SELECT slug, name, status, delisting_date, counties, geometry, epa_url, note "
+        "FROM aoc_areas WHERE slug=?", (slug,)).fetchone()
+    if not a:
+        conn.close()
+        return jsonify({"found": False}), 404
+    impaired, removed = [], []
+    for r in conn.execute(
+            "SELECT bui, status, removal_date, note, source_url FROM aoc_bui "
+            "WHERE aoc_slug=? ORDER BY status, bui", (slug,)):
+        item = {"bui": r["bui"], "removal_date": r["removal_date"],
+                "note": r["note"], "source_url": r["source_url"]}
+        (removed if r["status"] == "removed" else impaired).append(item)
+    counties = _aoc_counties(a["counties"])
+    conn.close()
+    return jsonify({
+        "found": True, "slug": a["slug"], "name": a["name"], "status": a["status"],
+        "delisting_date": a["delisting_date"], "has_geometry": bool(a["geometry"]),
+        "counties": [c.get("name") for c in counties], "county_span": len(counties),
+        "epa_url": a["epa_url"], "note": a["note"],
+        "bui_impaired": impaired, "bui_removed": removed,
+        "bui_counts": {"impaired": len(impaired), "removed": len(removed),
+                       "total": len(impaired) + len(removed)},
+        "snapshot": _AOC_SNAPSHOT, "transcribed_on": _AOC_TRANSCRIBED_ON,
+    })
 
 
 # ---------- Power plants (EIA-860 inventory + EPA CAMD emissions) ----------

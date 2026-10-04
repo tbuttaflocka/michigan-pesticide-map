@@ -288,6 +288,18 @@ _MODULE_META = {
         desc="Publicly-documented organized pest-control spraying programs located in the county.",
         units="n/a (program directory).",
         caveat="Statewide-scope programs are excluded from county files (they are not county-specific)."),
+    "areas_of_concern": dict(
+        desc="Great Lakes Areas of Concern (EPA/EGLE) whose drainage basin overlaps this county, "
+             "with beneficial-use-impairment (BUI) counts.",
+        units="bui_total / bui_impaired / bui_removed are COUNTS of the 14 standard IJC/EPA BUIs.",
+        caveat="An AOC is a use-impairment STATUS, not a cleanup metric or emissions measure - never "
+               "rank it against Superfund, TRI, ECHO or measured data. The polygon is EPA's drainage-"
+               "BASIN extent (Saginaw River & Bay spans 24 counties), NOT the impaired corridor, so an "
+               "AOC listed here may be basin-wide rather than local. BUIs are AOC-level (basin-wide), not "
+               "county-specific. DELISTED does NOT mean clean (uses restored to non-AOC conditions; "
+               "residual capped sediments / fish advisories can persist). Boundaries: 2020 EPA snapshot; "
+               "BUI status transcribed from EPA pages 2026-10-04. The two delisted AOCs with no EPA "
+               "boundary file (White Lake, Muskegon Lake) have no county attribution and are not listed."),
 }
 
 _EXCLUDED = [
@@ -303,6 +315,44 @@ _EXCLUDED = [
 # --------------------------------------------------------------------------- #
 # module row builders
 # --------------------------------------------------------------------------- #
+def _aoc_rows(cur, fips):
+    """AOCs whose drainage basin touches this county (membership from the JSON
+    `counties` list on aoc_areas — never a hand list). One row per AOC with its
+    status and BUI counts. BUIs are AOC-level (basin-wide), not county-specific —
+    the caveat says so. The two geometry-less AOCs have no counties and so never
+    appear in a county file; they remain reachable via search and the layer panel."""
+    try:
+        cur.execute("SELECT 1 FROM aoc_areas LIMIT 1")
+    except Exception:
+        return [], []
+    counts = {}
+    for slug, st, n in cur.execute(
+            "SELECT aoc_slug, status, COUNT(*) FROM aoc_bui GROUP BY aoc_slug, status"):
+        imp, rem = counts.get(slug, (0, 0))
+        if st == "removed":
+            rem += n
+        else:
+            imp += n
+        counts[slug] = (imp, rem)
+    cols = ["aoc_slug", "aoc_name", "status", "delisting_date", "counties_in_basin",
+            "bui_total", "bui_impaired", "bui_removed", "epa_url", "note"]
+    rows = []
+    for slug, name, status, delisting, counties_json, epa_url, note in cur.execute(
+            "SELECT slug, name, status, delisting_date, counties, epa_url, note "
+            "FROM aoc_areas ORDER BY status, name"):
+        try:
+            clist = json.loads(counties_json) if counties_json else []
+        except (TypeError, ValueError):
+            clist = []
+        if not any(c.get("fips") == fips for c in clist):
+            continue
+        imp, rem = counts.get(slug, (0, 0))
+        names = "; ".join(c.get("name", "") for c in clist)
+        rows.append([slug, name, status, delisting, names,
+                     imp + rem, imp, rem, epa_url, note])
+    return cols, rows
+
+
 def _coal_ash_rows(sites, county_name):
     cols = list(sites[0].keys()) if sites else []
     key = county_name.strip().lower()
@@ -488,6 +538,11 @@ def build_county_zip(conn, fips, *, geojson_path, coal_ash_sites,
         sp_cols, sp_rows = _spraying_rows(spraying_payload, geom)
         emit("spraying_programs", "spraying_programs", sp_cols, sp_rows,
              meta=_MODULE_META["spraying_programs"])
+
+        # Areas of Concern touching this county (has a data_sources row: epa_aoc)
+        aoc_cols, aoc_rows = _aoc_rows(cur, fips)
+        emit("areas_of_concern", "epa_aoc", aoc_cols, aoc_rows,
+             meta=_MODULE_META["areas_of_concern"])
 
         readme = _readme(county_name, fips, gen_date, included, empty, fallback, meta_by_file)
         zf.writestr("README.txt", readme)

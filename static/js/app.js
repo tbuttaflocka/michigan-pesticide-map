@@ -81,6 +81,16 @@
       matchMain: false,      // mirror main-map compound filter
       compounds: [],         // dropdown options
     },
+    aoc: {                         // Great Lakes Areas of Concern (EPA/EGLE)
+      loaded: false,
+      showAreas: false,
+      layer: null,                 // single persistent L.geoJSON of AOC polygons
+      _renderer: null,             // SVG renderer bound to the 'aoc' pane
+      fc: null,                    // cached /api/aoc/features response
+      byId: {},                    // slug -> polygon layer (for list/search focus)
+      noGeom: [],                  // the two AOCs with no boundary file
+      _detail: {},                 // slug -> lazy-loaded /api/aoc/<slug>
+    },
     contam: {
       loaded: false,
       sites: [],                   // all sites from /api/contamination/sites
@@ -371,6 +381,11 @@
     // the marker panes so point overlays stay clickable on top.
     state.map.createPane('watersheds');
     state.map.getPane('watersheds').style.zIndex = 410;
+
+    // AOC drainage-basin polygons sit just above the watersheds (both are area
+    // overlays above the county choropleth, below the marker panes).
+    state.map.createPane('aoc');
+    state.map.getPane('aoc').style.zIndex = 415;
 
     // Dedicated pane for water-monitoring markers, above the choropleth
     // (overlayPane z400) and default markerPane (z600) so county polygons can
@@ -1326,6 +1341,14 @@
         '<span class="ws-sw" style="background:rgba(248,81,73,0.72)"></span>MCL exc.' +
         '</div>';
     }
+    // AOC key — Active vs Delisted is a STATUS distinction (hue + dashed outline),
+    // deliberately NOT a severity ramp. Delisted is not a "better" color.
+    if (state.aoc.showAreas) {
+      html += '<div class="mk-title" style="margin-top:8px">Areas of Concern · status</div>' +
+        `<div class="mk"><span class="mk-dot" style="background:${AOC_COLOR.active}"></span>Active AOC</div>` +
+        `<div class="mk"><span class="mk-dot" style="background:${AOC_COLOR.delisted};border:1px dashed #cbd5e1"></span>Delisted (status change, not "clean")</div>` +
+        '<div class="mk mk-sub">Shaded area = EPA drainage-basin extent, not the impaired corridor</div>';
+    }
     mk.innerHTML = html;
   }
 
@@ -1668,6 +1691,213 @@
   function refreshAllWaterLayers() {
     refreshWaterSites();
     refreshWaterWatersheds();
+  }
+
+  // ========================================================================
+  // Great Lakes Areas of Concern (EPA/EGLE) — polygon overlay (see /api/aoc/*)
+  // ========================================================================
+  // Active vs Delisted is a STATUS distinction (hue + dashed outline), NOT a
+  // severity ramp — delisting is a change of status, not a better score. Two
+  // delisted AOCs (White Lake, Muskegon Lake) have no EPA boundary file: they are
+  // never drawn, but ARE listed in the panel and searchable, opening a detail
+  // modal that states plainly no boundary exists. Framing (delisting ≠ clean,
+  // basin-extent ≠ impaired corridor, snapshot dates, status-not-a-metric) rides
+  // on every popup/modal and is never dropped.
+  const AOC_COLOR = { active: '#e8873c', delisted: '#8aa0c8' };
+
+  function aocStyle(status) {
+    if (status === 'delisted') {
+      return { color: AOC_COLOR.delisted, weight: 2, dashArray: '5 4',
+               fillColor: AOC_COLOR.delisted, fillOpacity: 0.10 };
+    }
+    return { color: AOC_COLOR.active, weight: 2, dashArray: null,
+             fillColor: AOC_COLOR.active, fillOpacity: 0.18 };
+  }
+
+  async function loadAoc() {
+    if (state.aoc.loaded) return;
+    const d = await api('/api/aoc/features');
+    state.aoc.fc = d;
+    state.aoc.noGeom = d.no_geometry || [];
+    state.aoc.statewide = d.statewide || null;
+    state.aoc.meta = d.meta || null;
+    state.aoc.loaded = true;
+    renderAocList();
+  }
+
+  // Lazy per-AOC detail (BUIs split impaired/removed) loaded on popup open, like
+  // the FracFocus wells — keeps the features payload small.
+  async function aocDetail(slug) {
+    if (state.aoc._detail[slug]) return state.aoc._detail[slug];
+    const d = await api('/api/aoc/' + encodeURIComponent(slug));
+    state.aoc._detail[slug] = d;
+    return d;
+  }
+
+  function _aocStatusChip(d) {
+    if (d.status === 'delisted') {
+      const when = d.delisting_date ? ` ${d.delisting_date}` : '';
+      return `<span class="aoc-chip aoc-chip-delisted">Delisted${when}</span>`;
+    }
+    return `<span class="aoc-chip aoc-chip-active">Active AOC</span>`;
+  }
+
+  function _aocBuiList(items, kind) {
+    if (!items || !items.length) {
+      return `<div class="aoc-bui-none muted">None ${kind === 'removed' ? 'removed yet' : 'still impaired'}.</div>`;
+    }
+    return '<ul class="aoc-bui-list">' + items.map((b) => {
+      const date = kind === 'removed'
+        ? `<span class="aoc-bui-date">${b.removal_date ? 'removed ' + esc(b.removal_date) : 'removed (date not published)'}</span>`
+        : '';
+      const note = b.note ? ` <span class="aoc-bui-note">(${esc(b.note)})</span>` : '';
+      return `<li>${esc(b.bui)}${date}${note}</li>`;
+    }).join('') + '</ul>';
+  }
+
+  // Shared detail markup for both the map popup and the (geometry-less) modal.
+  function aocDetailHtml(d) {
+    const imp = d.bui_impaired || [], rem = d.bui_removed || [];
+    const counties = d.counties || [];
+    // Basin-extent caveat, emphasised for the big multi-county basins.
+    const basin = d.has_geometry
+      ? `<div class="aoc-basin">The shaded area is EPA's <b>drainage-basin extent</b>`
+        + (d.county_span > 1 ? ` spanning <b>${d.county_span} counties</b>` : '')
+        + ` — not the impaired shoreline/corridor itself. A shaded county is within the basin EPA delineated; it does not mean everywhere inside is contaminated.</div>`
+      : `<div class="aoc-basin aoc-nogeom">EPA publishes <b>no boundary file</b> for this AOC in its snapshot, so it is <b>not drawn on the map</b> (and not approximated). Its record and restoration history are shown here.</div>`;
+    // Delisting ≠ clean — EPA's own standard, shown wherever an AOC is delisted.
+    const delistFrame = d.status === 'delisted'
+      ? `<div class="aoc-delist-note"><b>Delisted does not mean clean.</b> EPA delists an AOC when beneficial uses are restored to conditions <i>comparable to non-AOC Great Lakes waters</i>. Residual conditions — capped sediments, standing fish-consumption advisories — can persist.</div>`
+      : '';
+    // Per-AOC transcription caveat (e.g. Torch Lake's possibly-incomplete list).
+    const caveat = d.note ? `<div class="aoc-caveat">⚠ ${esc(d.note)}</div>` : '';
+    const countyLine = counties.length
+      ? `<div class="aoc-counties"><span class="aoc-k">Counties in basin</span> ${counties.map(esc).join(', ')}</div>`
+      : '';
+    const prov = `<div class="aoc-prov">Boundaries: ${esc(d.snapshot || 'EPA GLNPO snapshot')} · BUI status transcribed from EPA pages on ${esc(d.transcribed_on || '')}. `
+      + `An AOC is a use-impairment <b>status</b>, not a cleanup metric or emissions measure — not comparable to Superfund, TRI, ECHO or measured data.</div>`;
+    return `
+      <div class="aoc-detail">
+        <div class="aoc-head"><h3>${esc(d.name)}</h3> ${_aocStatusChip(d)}</div>
+        ${delistFrame}
+        ${caveat}
+        ${basin}
+        ${countyLine}
+        <div class="aoc-bui-head">Beneficial Use Impairments
+          <span class="aoc-bui-counts">${imp.length} impaired · ${rem.length} removed</span></div>
+        <div class="aoc-bui-split">
+          <div class="aoc-bui-col"><div class="aoc-bui-sub impaired">Still impaired (${imp.length})</div>${_aocBuiList(imp, 'impaired')}</div>
+          <div class="aoc-bui-col"><div class="aoc-bui-sub removed">Removed (${rem.length})</div>${_aocBuiList(rem, 'removed')}</div>
+        </div>
+        ${d.epa_url ? `<a class="aoc-epa" href="${esc(d.epa_url)}" target="_blank" rel="noopener">EPA Area of Concern page ↗</a>` : ''}
+        ${prov}
+      </div>`;
+  }
+
+  function bindAocDetail(lyr, slug, name) {
+    lyr.on('popupopen', async () => {
+      if (lyr._aocLoaded) return;
+      try {
+        const d = await aocDetail(slug);
+        lyr._aocLoaded = true;
+        lyr.setPopupContent(aocDetailHtml(d));
+      } catch (e) {
+        lyr.setPopupContent(`<div class="aoc-popup"><h3>${esc(name || 'Area of Concern')}</h3>`
+          + '<p class="muted small">Could not load AOC detail.</p></div>');
+      }
+    });
+  }
+
+  function renderAoc() {
+    if (state.aoc.layer) { state.map.removeLayer(state.aoc.layer); state.aoc.layer = null; }
+    state.aoc.byId = {};
+    if (!state.aoc.showAreas || !state.aoc.fc || !(state.aoc.fc.features || []).length) {
+      renderMarkerKeys();
+      return;
+    }
+    if (!state.aoc._renderer) state.aoc._renderer = L.svg({ pane: 'aoc' });
+    const layer = L.geoJSON(state.aoc.fc, {
+      pane: 'aoc',
+      renderer: state.aoc._renderer,
+      style: (f) => aocStyle(f.properties.status),
+      onEachFeature: (feat, lyr) => {
+        const p = feat.properties;
+        state.aoc.byId[p.slug] = lyr;
+        lyr.bindPopup('<div class="aoc-popup"><div class="ogw-loading">Loading…</div></div>',
+          { maxWidth: 360, className: 'aoc-popup-wrap' });
+        bindAocDetail(lyr, p.slug, p.name);
+        lyr.on('mouseover', () => lyr.setStyle({ weight: 4 }));
+        lyr.on('mouseout', () => { if (state.aoc.layer === layer) layer.resetStyle(lyr); });
+      },
+    });
+    state.aoc.layer = layer;
+    if (state.aoc.showAreas) layer.addTo(state.map);
+    renderMarkerKeys();
+  }
+
+  // Open one AOC by slug (from the panel list, search, or a deep link). A drawn
+  // AOC flies to its polygon and opens the popup; a geometry-less one opens the
+  // detail modal (there is nothing to fly to, and we never approximate one).
+  async function openAocBySlug(slug) {
+    state.aoc._shared = slug;           // remembered for "Share this view"
+    if (!state.aoc.loaded) await loadAoc();
+    const drawn = state.aoc.fc && (state.aoc.fc.features || [])
+      .some((f) => f.properties.slug === slug);
+    if (!drawn) { openAocModal(slug); return; }
+    const cb = $('aoc-areas');
+    if (cb) cb.checked = true;
+    state.aoc.showAreas = true;
+    renderAoc();
+    const lyr = state.aoc.byId[slug];
+    if (lyr) {
+      if (isMobile()) document.body.classList.remove('m-detail-open', 'm-layers-open');
+      try { state.map.fitBounds(lyr.getBounds(), { padding: [30, 30], maxZoom: 11 }); } catch (e) { /* noop */ }
+      lyr.openPopup();
+    }
+    renderMarkerKeys();
+  }
+
+  async function openAocModal(slug) {
+    const modal = $('aoc-modal');
+    const body = $('aoc-modal-body');
+    if (!modal || !body) return;
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    show(modal);
+    try {
+      const d = await aocDetail(slug);
+      body.innerHTML = aocDetailHtml(d);
+    } catch (e) {
+      body.innerHTML = '<p class="muted">Could not load this Area of Concern.</p>';
+    }
+  }
+
+  // The panel list — EVERY AOC incl. the two with no boundary file, so they stay
+  // reachable. Grouped Active / Delisted; geometry-less ones tagged "no map".
+  function renderAocList() {
+    const box = $('aoc-list');
+    if (!box || !state.aoc.fc) return;
+    const items = [];
+    (state.aoc.fc.features || []).forEach((f) => items.push({ ...f.properties, has_geometry: true }));
+    (state.aoc.noGeom || []).forEach((p) => items.push({ ...p, has_geometry: false }));
+    const row = (a) => {
+      const sub = a.status === 'delisted'
+        ? `delisted${a.delisting_date ? ' ' + esc(a.delisting_date) : ''}`
+        : `${a.bui_impaired} of ${a.bui_total} BUIs still impaired`;
+      const noMap = a.has_geometry ? '' : '<span class="aoc-li-tag" title="EPA publishes no boundary file">no map</span>';
+      return `<button type="button" class="aoc-li" data-aoc="${esc(a.slug)}">`
+        + `<span class="aoc-li-dot ${a.status}"></span>`
+        + `<span class="aoc-li-main"><span class="aoc-li-name">${esc(a.name)}</span>`
+        + `<span class="aoc-li-sub">${sub}</span></span>${noMap}</button>`;
+    };
+    const active = items.filter((a) => a.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
+    const delisted = items.filter((a) => a.status === 'delisted').sort((a, b) => a.name.localeCompare(b.name));
+    const sw = state.aoc.statewide;
+    const progress = sw
+      ? `<div class="aoc-progress">${sw.bui_removed} of ${sw.bui_total} beneficial-use impairments removed statewide · ${sw.bui_impaired} remain</div>`
+      : '';
+    box.innerHTML = progress
+      + `<div class="aoc-li-group">Active (${active.length})</div>` + active.map(row).join('')
+      + `<div class="aoc-li-group">Delisted (${delisted.length})</div>` + delisted.map(row).join('');
   }
 
   async function loadWaterCompounds() {
@@ -2114,6 +2344,7 @@
       return { cb: cfg && cfg.cb };
     }
     if (target.kind === 'county') return { cb: target.cb };
+    if (target.kind === 'layer') return { cb: target.cb };
     return {};
   }
 
@@ -2167,6 +2398,14 @@
       }
       zoomToCounty(target.fips);
       selectCounty(target.fips);   // persistent gold outline on the county
+    } else if (target.kind === 'layer') {
+      // Statewide fact that just enables a layer (no single point to fly to),
+      // e.g. the AOC restoration-progress callout. Turning the box on flows
+      // through the layer controls so the panel + grid stay in sync.
+      if (target.cb) {
+        const cb = $(target.cb);
+        if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
     }
     refreshOverviewCardStates();
   }
@@ -5802,6 +6041,30 @@
     $('wq-watersheds').addEventListener('change', (e) => {
       state.water.showWatersheds = e.target.checked; refreshWaterWatersheds(); renderMarkerKeys();
     });
+
+    // Areas of Concern layer toggle + panel list + detail modal.
+    const aocCb = $('aoc-areas');
+    if (aocCb) aocCb.addEventListener('change', async (e) => {
+      state.aoc.showAreas = e.target.checked;
+      const panel = $('aoc-panel');
+      if (panel) panel.classList.toggle('hidden', !e.target.checked);
+      if (e.target.checked) await loadAoc();   // populates the panel list (incl. no-map AOCs)
+      renderAoc(); renderMarkerKeys();
+    });
+    const aocList = $('aoc-list');
+    if (aocList) aocList.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.aoc-li');
+      if (b) openAocBySlug(b.dataset.aoc);
+    });
+    const aocClose = $('aoc-modal-close');
+    if (aocClose) aocClose.addEventListener('click', () => hide($('aoc-modal')));
+    const aocModal = $('aoc-modal');
+    if (aocModal) aocModal.addEventListener('click', (e) => {
+      if (e.target.id === 'aoc-modal') hide($('aoc-modal'));
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && aocModal && !aocModal.classList.contains('hidden')) hide(aocModal);
+    });
     $('wq-compound').addEventListener('change', (e) => {
       state.water.compound = e.target.value;
       // Manually picking turns off match-main to avoid surprise
@@ -6475,6 +6738,16 @@
           `<span class="s-tag">Chemical</span>`;
         return el;
       }, selectCompound);
+
+      addGroup('Areas of Concern', r.aocs, (a) => {
+        const el = document.createElement('div');
+        const sub = a.status === 'delisted'
+          ? `Delisted${a.delisting_date ? ' ' + a.delisting_date : ''}${a.has_geometry ? '' : ' · no map boundary'}`
+          : 'Active AOC';
+        el.innerHTML = `<span class="s-name">${esc(a.name)}</span>` +
+          `<span class="s-tag">AOC</span><span class="s-sub">${esc(sub)}</span>`;
+        return el;
+      }, (a) => openAocBySlug(a.slug));
 
       if (!items.length) {
         out.innerHTML = '<div class="item muted">No matches</div>';
@@ -7292,6 +7565,7 @@
   const SHARE_LAYERS = [
     { c: 'wqs', cb: 'wq-sites' },
     { c: 'wqw', cb: 'wq-watersheds' },
+    { c: 'ao',  cb: 'aoc-areas' },
     { c: 'ct',  cb: 'contam-sites', def: 'ns',
       subs: [['n', 'contam-f-npl'], ['s', 'contam-f-state'], ['d', 'contam-f-deleted']] },
     { c: 'ctz', cb: 'contam-zones' },
@@ -7357,6 +7631,7 @@
     if (state.cdl.crop != null) q.set('cdlc', String(state.cdl.crop));   // CDL crop filter
     const atx = document.querySelector('input[name="airtox-metric"]:checked');
     if (atx && atx.value !== 'cancer') q.set('am', atx.value);
+    if (state.aoc._shared) q.set('aoc', state.aoc._shared);   // last-opened AOC slug
 
     const ly = [];
     for (const L of SHARE_LAYERS) {
@@ -7506,6 +7781,21 @@
         // slight delay so any startup fitBounds has settled first
         setTimeout(() => { try { state.map.setView([m[0], m[1]], zoom); } catch (e) { /* ignore */ } }, 60);
       }
+    }
+
+    // Deep link to a specific AOC (?aoc=<slug>). Validated against the loaded
+    // registry; an unknown/absent slug is simply ignored (same skip discipline
+    // as the unknown-layer-code skip above).
+    const aocSlug = (p.get('aoc') || '').trim().toLowerCase();
+    if (aocSlug && /^[a-z]+$/.test(aocSlug)) {
+      try {
+        await loadAoc();
+        const known = state.aoc.fc && [
+          ...(state.aoc.fc.features || []).map((f) => f.properties.slug),
+          ...(state.aoc.noGeom || []).map((n) => n.slug),
+        ].includes(aocSlug);
+        if (known) setTimeout(() => { openAocBySlug(aocSlug); }, 120);
+      } catch (e) { /* ignore — link still loads the rest of the view */ }
     }
 
     // A shared link may have just enabled a layer inside a collapsed section —
