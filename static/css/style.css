@@ -2979,3 +2979,84 @@ body.search-open .active-layer-badge { display: none; }
   .btn-ghost { min-height: 40px; }
 
 }
+
+/* ============ Cross-layer chemical search ("Trace a chemical") ============ */
+.xchem-card { width: min(760px, 94vw); }
+.xchem-card h2 { margin: 0 0 6px; font-size: 20px; }
+.xchem-intro { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+#xchem-search {
+  width: 100%; padding: 11px 14px; font-size: 15px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+#xchem-search:focus { border-color: var(--accent); outline: none; }
+
+.xchem-suggest { margin-top: 12px; }
+.xc-suggest-head { font-size: 12px; color: var(--muted); margin: 4px 2px 8px; }
+.xc-suggest-none { font-size: 13px; color: var(--muted); padding: 10px 2px; line-height: 1.5; }
+.xc-suggest-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 12px; margin-bottom: 6px; text-align: left; cursor: pointer;
+  background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--text); font-size: 14px;
+}
+.xc-suggest-item:hover { border-color: var(--accent); background: var(--bg-2); }
+.xc-s-name { font-weight: 600; flex: 1 1 auto; }
+.xc-s-cas { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.xc-s-badges { display: flex; gap: 4px; flex-wrap: wrap; }
+.xc-badge {
+  font-size: 10.5px; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  background: var(--bg); border: 1px solid var(--line); color: var(--muted);
+}
+.xc-badge-tri { border-color: #a0522d55; color: #e0a07a; }
+.xc-badge-water { border-color: #58a6ff55; color: #8cc4ff; }
+.xc-badge-pesticide { border-color: #3fb95055; color: #8fe0a0; }
+.xc-badge-fracfocus { border-color: #f0b42955; color: #f0cf7a; }
+
+/* result view */
+.xc-result-head h3 { margin: 4px 0 2px; font-size: 19px; }
+.xc-result-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.xc-desc { font-size: 13px; line-height: 1.55; color: var(--text); margin: 8px 0; }
+.xc-pubchem { font-size: 12px; color: var(--link); display: inline-block; margin: 2px 0 4px; }
+.xc-caveat {
+  font-size: 12px; line-height: 1.5; color: var(--text);
+  background: rgba(240,180,41,.08); border: 1px solid #f0b42955;
+  border-radius: 8px; padding: 10px 12px; margin: 12px 0;
+}
+.xc-cards { display: flex; flex-direction: column; gap: 12px; }
+.xc-card { background: var(--bg-3); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.xc-card-head { display: flex; align-items: baseline; gap: 8px; }
+.xc-card-icon { font-size: 15px; }
+.xc-card-title { font-weight: 600; font-size: 14px; flex: 1 1 auto; }
+.xc-card-count { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.xc-card-unit { font-size: 11.5px; color: var(--muted); margin: 3px 0 9px; }
+.xc-card-unit b { color: var(--text); font-weight: 600; }
+.xc-rows { display: flex; flex-direction: column; }
+.xc-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; border-top: 1px solid var(--line);
+}
+.xc-row:first-child { border-top: none; }
+.xc-row-main { flex: 1 1 auto; min-width: 0; }
+.xc-row-name { display: block; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xc-row-sub { display: block; font-size: 11px; color: var(--muted); }
+.xc-row-metric { font-size: 12.5px; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.xc-row-metric b { color: var(--accent); }
+.xc-row-act { flex: 0 0 auto; }
+.xc-focus {
+  font-size: 11.5px; padding: 4px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+  background: var(--bg); color: var(--link); border: 1px solid var(--line);
+}
+.xc-focus:hover { border-color: var(--link); }
+.xc-more { font-size: 11.5px; color: var(--muted); padding-top: 8px; }
+.xc-airnote {
+  font-size: 11.5px; line-height: 1.5; color: var(--muted);
+  background: var(--bg); border: 1px dashed var(--line);
+  border-radius: 8px; padding: 10px 12px; margin: 14px 0 4px;
+}
+.xc-airnote b { color: var(--text); }
+.xc-back {
+  margin-top: 12px; font-size: 13px; padding: 7px 12px; cursor: pointer;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+}
+.xc-back:hover { border-color: var(--accent); }

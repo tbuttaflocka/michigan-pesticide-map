@@ -398,16 +398,20 @@ SOURCES: list[Source] = [
     ),
     Source(
         id="chemicals", label="PubChem (NCBI) — chemical descriptions & properties",
-        loaders=[chem_ref.load_chemical_reference],
+        loaders=[chem_ref.load_chemical_reference,
+                 chem_ref.load_fracfocus_chemicals],
         targets=["chemical_reference"],
         primary_target="chemical_reference", primary_source_id="pubchem_chem",
         interval_months=12, min_abs=50, floor_frac=0.8,
         coverage=lambda conn: (None, None),
         # Enrichment reads the chemical names from the pesticide/TRI/water tables
         # and appends only the newly-seen chemicals onto the existing cache
-        # (incremental). Parents are seeded before children for FK integrity.
+        # (incremental). load_fracfocus_chemicals then bridges FracFocus's
+        # real-CAS ingredients onto the same cache by pubchem_cid. Parents are
+        # seeded before children for FK integrity.
         seed_extra=("pesticide_use", "tri_facility", "tri_release",
                     "water_quality_sites", "water_quality_results",
+                    "fracfocus_disclosures", "fracfocus_ingredients",
                     "chemical_reference"),
     ),
     Source(

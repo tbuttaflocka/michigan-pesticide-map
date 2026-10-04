@@ -29,6 +29,7 @@
       autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"
       aria-controls="search-results" />
     <div id="search-results" class="search-dropdown hidden"></div>
+    <button id="open-xchem" class="btn-ghost xchem-btn" title="Trace one chemical everywhere it appears — TRI, water, pesticides, FracFocus">🔬 Trace a chemical</button>
     <button id="open-address" class="btn-primary address-btn" title="Check environmental hazards near an address">🏠 Check an address</button>
     <button id="share-view" class="btn-ghost share-btn" title="Copy a link to this exact map view (layers, location, zoom)">🔗 Share this view</button>
     <div id="share-toast" class="share-toast hidden" role="status" aria-live="polite"></div>
@@ -640,6 +641,24 @@
   <div class="modal-card tri-info-card">
     <button class="close" id="tri-info-close" aria-label="Close">×</button>
     <div id="tri-info-body"></div>
+  </div>
+</div>
+
+<!-- ============ Cross-layer chemical search (trace a chemical) ============ -->
+<div id="xchem-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="xchem-title">
+  <div class="modal-card xchem-card">
+    <button class="close" id="xchem-close" aria-label="Close">×</button>
+    <h2 id="xchem-title">Trace a chemical across layers</h2>
+    <p class="xchem-intro">See everywhere one chemical appears in the data —
+      industrial releases (TRI), water-quality detections, agricultural pesticide
+      use, and hydraulic-fracturing disclosures (FracFocus). Chemicals are matched
+      by their PubChem ID, so the same substance is found even when each dataset
+      spells its name differently.</p>
+    <input id="xchem-search" type="search" autocomplete="off"
+      placeholder="Search a chemical — e.g. benzene, atrazine, naphthalene"
+      aria-label="Search a chemical" />
+    <div id="xchem-suggest" class="xchem-suggest" aria-live="polite"></div>
+    <div id="xchem-results" class="xchem-results"></div>
   </div>
 </div>
 

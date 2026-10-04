@@ -36,7 +36,7 @@ from app import tri_reference
 from app import pfas_chem
 from app.categories import subtype as compound_subtype
 from app.categories import categorize as _categorize
-from app.config import GEOJSON_PATH, HOST, PORT
+from app.config import GEOJSON_PATH, HOST, PORT, DB_PATH
 from app.config import CARTO_API_KEY
 from app.config import EPA_SITE_PROFILE
 from app.config import MI_HUC8_GEOJSON_PATH
@@ -2674,6 +2674,380 @@ def api_chemical():
         "pubchem": pubchem,
         "regulatory": regulatory,
         "profile": profile,
+    })
+
+
+# ========================================================================
+# Cross-layer chemical search  (join on pubchem_cid ONLY)
+# ========================================================================
+# A chemical is identified across layers by its PubChem CID — never by name.
+# chemical_reference is the single bridge: it maps every pesticide/TRI/water
+# chemical name (name_key = UPPER(name)) and every resolvable CAS to a CID, and
+# chemical_reference.load_fracfocus_chemicals extends that to FracFocus's
+# real-CAS ingredients. A chemical that doesn't resolve to a CID has no
+# cross-layer identity and never appears here — there is NO name fallback,
+# fuzzy or exact (this is a deliberate standing rule).
+#
+# AirToxScreen is intentionally excluded: its 17 pollutants carry no CAS, and
+# several ("Coke oven emissions", "Arsenic Compounds (Inorganic Including
+# Arsine)") are not single substances, so they can't be keyed to a CID honestly.
+#
+# HARD UNIT RULE: the four layers report four different physical quantities —
+# mass released (lbs), concentration in a sample (µg/L, ng/L, …), mass applied
+# (lbs), and fraction of a frack fluid (%). They are listed side by side, each
+# with its own unit stated, and are NEVER summed, averaged, combined into a
+# total, or ranked against one another. There is no composite score.
+
+_CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
+_XCHEM_LOCK = threading.Lock()
+_XCHEM_CACHE = {"mtime": None, "index": None}
+# Canonical layer order + labels for the UI.
+_XCHEM_LAYERS = ["tri", "water", "pesticide", "fracfocus"]
+
+
+def _looks_like_cas(cas) -> bool:
+    return bool(cas) and bool(_CAS_RE.match(str(cas).strip()))
+
+
+def _pick_display_name(entry) -> str:
+    """Canonical display name for a CID, taken from the names the DATA actually
+    uses — never from the PubChem synonym pool (which is full of brand names like
+    "Aatrex"/"Bravo"). TRI and FracFocus names are already mixed-case EPA/operator
+    names; pesticide/water names are ALL-CAPS systematic strings, title-cased for
+    display. Priority: TRI, then FracFocus, then pesticide, then water."""
+    def pick(names):
+        return min((n for n in names if n), key=lambda n: (len(n), n), default=None)
+
+    tri = pick(entry["tri_names"])
+    if tri:
+        return tri
+    frac = pick(entry["frac_names"])
+    if frac:
+        return frac
+    sysname = pick(entry["pest_names"]) or pick(entry["water_names"])
+    if sysname:
+        return sysname if any(ch.islower() for ch in sysname) else sysname.title()
+    return "?"
+
+
+def _build_xchem_index(conn) -> dict:
+    """cid -> {cid, cas, display, layers:set, match:set(lowercased names),
+    tri_names, water_names, pest_names, frac_cas}. Everything keyed off the
+    chemical_reference CID bridge."""
+    ref_by_name: dict[str, sqlite3.Row] = {}
+    ref_by_cas: dict[str, sqlite3.Row] = {}
+    cid_meta: dict[int, dict] = {}
+    for r in conn.execute(
+            "SELECT name_key, name, cas, pubchem_cid, synonyms FROM chemical_reference "
+            "WHERE pubchem_cid IS NOT NULL"):
+        ref_by_name[r["name_key"]] = r
+        if r["cas"]:
+            ref_by_cas.setdefault(r["cas"].strip(), r)
+        m = cid_meta.setdefault(r["pubchem_cid"], {"names": set(), "cas": None})
+        if r["name"]:
+            m["names"].add(r["name"])
+        if r["cas"] and not m["cas"]:
+            m["cas"] = r["cas"].strip()
+        try:
+            for s in (json.loads(r["synonyms"]) if r["synonyms"] else []):
+                if s:
+                    m["names"].add(s)
+        except (TypeError, ValueError):
+            pass
+
+    index: dict[int, dict] = {}
+
+    def entry(cid: int) -> dict:
+        e = index.get(cid)
+        if e is None:
+            meta = cid_meta.get(cid, {"names": set(), "cas": None})
+            e = index[cid] = {
+                "cid": cid, "cas": meta["cas"],
+                "names": set(meta["names"]), "layers": set(),
+                "tri_names": set(), "water_names": set(),
+                "pest_names": set(), "frac_names": set(), "frac_cas": set(),
+            }
+        return e
+
+    def resolve(name=None, cas=None):
+        if name:
+            r = ref_by_name.get(name.strip().upper())
+            if r:
+                return r
+        if _looks_like_cas(cas):
+            r = ref_by_cas.get(str(cas).strip())
+            if r:
+                return r
+        return None
+
+    for chem, cas in conn.execute(
+            "SELECT DISTINCT chemical, cas FROM tri_release WHERE chemical IS NOT NULL"):
+        r = resolve(chem, cas)
+        if r:
+            e = entry(r["pubchem_cid"]); e["layers"].add("tri")
+            e["tri_names"].add(chem); e["names"].add(chem)
+    # Water membership means DETECTED at least once — the detail view shows
+    # detections (a tested-but-never-found compound has nothing to display).
+    for (cmp,) in conn.execute(
+            "SELECT DISTINCT compound FROM water_quality_results "
+            "WHERE compound IS NOT NULL AND detected = 1"):
+        r = resolve(cmp, None)
+        if r:
+            e = entry(r["pubchem_cid"]); e["layers"].add("water")
+            e["water_names"].add(cmp); e["names"].add(cmp)
+    # Pesticide membership means a positive estimated application.
+    for (cmp,) in conn.execute(
+            "SELECT DISTINCT compound FROM pesticide_use "
+            "WHERE compound IS NOT NULL AND epest_high_kg > 0"):
+        r = resolve(cmp, None)
+        if r:
+            e = entry(r["pubchem_cid"]); e["layers"].add("pesticide")
+            e["pest_names"].add(cmp); e["names"].add(cmp)
+    # FracFocus membership excludes trade-secret-masked rows (never resolved).
+    for name, cas in conn.execute(
+            "SELECT DISTINCT ingredient_name, cas_number FROM fracfocus_ingredients "
+            "WHERE ingredient_name IS NOT NULL AND cas_number IS NOT NULL AND is_masked = 0"):
+        if not _looks_like_cas(cas):     # trade-secret-masked / placeholder — skip
+            continue
+        r = resolve(name, cas)
+        if r:
+            e = entry(r["pubchem_cid"]); e["layers"].add("fracfocus")
+            e["frac_cas"].add(cas.strip()); e["frac_names"].add(name)
+            e["names"].add(name)
+
+    for e in index.values():
+        e["display"] = _pick_display_name(e)
+        e["match"] = {n.lower() for n in e["names"]}
+        if e["cas"]:
+            e["match"].add(e["cas"])
+    return index
+
+
+def _get_xchem(conn) -> dict:
+    """Process-lifetime cache of the CID index, rebuilt when the DB file changes
+    (a data refresh swaps it), mirroring how the rest of the app derives metadata
+    on demand."""
+    try:
+        mtime = DB_PATH.stat().st_mtime
+    except OSError:
+        mtime = None
+    with _XCHEM_LOCK:
+        if _XCHEM_CACHE["index"] is not None and _XCHEM_CACHE["mtime"] == mtime:
+            return _XCHEM_CACHE["index"]
+        idx = _build_xchem_index(conn)
+        _XCHEM_CACHE["mtime"] = mtime
+        _XCHEM_CACHE["index"] = idx
+        return idx
+
+
+def _xchem_layers_sorted(layers) -> list:
+    return [l for l in _XCHEM_LAYERS if l in layers]
+
+
+@app.route("/api/chemical-search")
+def api_chemical_search():
+    """Suggest chemicals for the cross-layer search. With ?q=, substring-matches
+    the query against every name/synonym/CAS a CID is known by (so "benzene"
+    finds it regardless of how each layer spells it). With no q, returns the
+    chemicals that actually span layers. Either way, results are ordered by how
+    many layers they appear in (most first) so the cross-layer ones lead."""
+    q = (request.args.get("q") or "").strip().lower()
+    conn = db()
+    idx = _get_xchem(conn)
+    conn.close()
+    if q:
+        hits = [e for e in idx.values() if any(q in n for n in e["match"])]
+    else:
+        hits = [e for e in idx.values() if len(e["layers"]) >= 2]
+    hits.sort(key=lambda e: (-len(e["layers"]), e["display"].lower()))
+    out = [{
+        "cid": e["cid"], "name": e["display"], "cas": e["cas"],
+        "layers": _xchem_layers_sorted(e["layers"]),
+        "layer_count": len(e["layers"]),
+    } for e in hits[:40]]
+    return jsonify({"q": q, "count": len(hits), "results": out})
+
+
+@app.route("/api/chemical-crosslayer")
+def api_chemical_crosslayer():
+    """Everywhere one chemical (by PubChem CID) appears across the four joinable
+    layers. Each layer is reported with its OWN unit; the four are never combined
+    or ranked against each other (they are four different physical quantities)."""
+    cid = request.args.get("cid", type=int)
+    conn = db()
+    idx = _get_xchem(conn)
+    e = idx.get(cid) if cid else None
+    if not e:
+        conn.close()
+        return jsonify({"found": False, "cid": cid})
+
+    def _in(names):
+        return ",".join("?" for _ in names)
+
+    # --- PubChem header (description, formula, link) --------------------------
+    ref = conn.execute(
+        "SELECT name, cas, pubchem_cid, description, description_source, "
+        "       molecular_formula, molecular_weight FROM chemical_reference "
+        "WHERE pubchem_cid = ? ORDER BY (description IS NULL), LENGTH(name) LIMIT 1",
+        (cid,)).fetchone()
+    pubchem = None
+    if ref:
+        pubchem = {
+            "cid": cid,
+            "description": ref["description"],
+            "description_source": ref["description_source"],
+            "molecular_formula": ref["molecular_formula"],
+            "molecular_weight": ref["molecular_weight"],
+            "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}",
+        }
+
+    # --- TRI: facilities, pounds released, most recent year ------------------
+    tri = None
+    if e["tri_names"]:
+        names = sorted(e["tri_names"])
+        rows = conn.execute(
+            f"""SELECT f.facility_id, f.facility_name, f.county, f.county_fips,
+                       f.latitude, f.longitude, r.year, SUM(r.total_lbs) lbs
+                  FROM tri_release r JOIN tri_facility f ON f.facility_id = r.facility_id
+                 WHERE r.chemical IN ({_in(names)})
+                 GROUP BY f.facility_id, r.year""", names).fetchall()
+        latest = {}   # facility_id -> best (year, lbs, meta)
+        for r in rows:
+            fid = r["facility_id"]
+            cur = latest.get(fid)
+            if cur is None or (r["year"] or 0) > cur["year"]:
+                latest[fid] = {
+                    "facility_id": fid, "name": r["facility_name"],
+                    "county": r["county"], "county_fips": r["county_fips"],
+                    "lat": r["latitude"], "lng": r["longitude"],
+                    "year": r["year"] or 0, "lbs": round(r["lbs"] or 0.0, 1),
+                }
+        facs = sorted(latest.values(), key=lambda x: x["lbs"], reverse=True)
+        if facs:
+            tri = {
+                "unit": "pounds released (to air, water, land or underground)",
+                "unit_short": "lbs",
+                "latest_year": max(f["year"] for f in facs) or None,
+                "facility_count": len(facs),
+                "facilities": facs,
+            }
+
+    # --- Water quality: sites, detections, result value + its OWN unit -------
+    water = None
+    if e["water_names"]:
+        names = sorted(e["water_names"])
+        rows = conn.execute(
+            f"""SELECT s.site_id, s.site_name, s.county, s.latitude, s.longitude,
+                       COUNT(*) samples,
+                       SUM(CASE WHEN r.detected = 1 THEN 1 ELSE 0 END) detections
+                  FROM water_quality_results r
+                  JOIN water_quality_sites s ON s.site_id = r.site_id
+                 WHERE r.compound IN ({_in(names)})
+                 GROUP BY s.site_id
+                HAVING detections > 0""", names).fetchall()
+        sites = []
+        for r in rows:
+            # Highest detected value AT THIS SITE, carrying its own reported unit
+            # (value and unit always come from the same row — never mismatched;
+            # units are not converted or compared across sites).
+            top = conn.execute(
+                f"""SELECT result_value, unit FROM water_quality_results
+                     WHERE site_id = ? AND compound IN ({_in(names)})
+                       AND detected = 1 AND result_value IS NOT NULL
+                     ORDER BY result_value DESC LIMIT 1""",
+                [r["site_id"], *names]).fetchone()
+            sites.append({
+                "site_id": r["site_id"], "name": r["site_name"],
+                "county": r["county"], "lat": r["latitude"], "lng": r["longitude"],
+                "samples": r["samples"], "detections": r["detections"],
+                "value": round(top["result_value"], 4) if top and top["result_value"] is not None else None,
+                "unit": (top["unit"] or "").strip() if top else None,
+            })
+        sites.sort(key=lambda x: (x["detections"] or 0), reverse=True)
+        if sites:
+            water = {
+                "unit": "concentration in a sample (reported units vary by site)",
+                "site_count": len(sites),
+                "sites": sites,
+            }
+
+    # --- Pesticide use: counties, kg applied (served as lbs), latest year ----
+    pesticide = None
+    if e["pest_names"]:
+        names = sorted(e["pest_names"])
+        yr = conn.execute(
+            f"SELECT MAX(year) y FROM pesticide_use WHERE compound IN ({_in(names)})",
+            names).fetchone()
+        latest_year = yr["y"] if yr else None
+        counties = []
+        if latest_year is not None:
+            rows = conn.execute(
+                f"""SELECT pu.county_fips, c.name, SUM(pu.epest_high_kg) kg
+                      FROM pesticide_use pu JOIN counties c ON c.fips = pu.county_fips
+                     WHERE pu.compound IN ({_in(names)}) AND pu.year = ?
+                     GROUP BY pu.county_fips
+                    HAVING kg > 0
+                     ORDER BY kg DESC""", [*names, latest_year]).fetchall()
+            counties = [{
+                "county_fips": r["county_fips"], "name": r["name"],
+                "lbs": round((r["kg"] or 0.0) * KG_TO_LB, 1),
+            } for r in rows]
+        if counties:
+            pesticide = {
+                "unit": "pounds applied to farmland (estimated)",
+                "unit_short": "lbs",
+                "latest_year": latest_year,
+                "county_count": len(counties),
+                "counties": counties,
+            }
+
+    # --- FracFocus: wells, percent of frack job (CAS-bridged only) -----------
+    fracfocus = None
+    if e["frac_cas"]:
+        caslist = sorted(e["frac_cas"])
+        rows = conn.execute(
+            f"""SELECT d.api_number, d.well_name, d.operator_name, d.county_name,
+                       d.latitude, d.longitude, MAX(i.percent_hf_job) pct
+                  FROM fracfocus_ingredients i
+                  JOIN fracfocus_disclosures d ON d.disclosure_key = i.disclosure_key
+                 WHERE i.cas_number IN ({_in(caslist)}) AND i.is_masked = 0
+                 GROUP BY i.disclosure_key""", caslist).fetchall()
+        wells = [{
+            "api_num": r["api_number"],
+            "name": r["well_name"] or r["operator_name"] or "Frac disclosure",
+            "operator": r["operator_name"], "county": r["county_name"],
+            "lat": r["latitude"], "lng": r["longitude"],
+            "percent": round(r["pct"], 4) if r["pct"] is not None else None,
+        } for r in rows]
+        wells.sort(key=lambda x: (x["percent"] or 0), reverse=True)
+        if wells:
+            fracfocus = {
+                "unit": "percent of the hydraulic-fracturing fluid (by mass)",
+                "unit_short": "% of frack job",
+                "well_count": len(wells),
+                "wells": wells,
+            }
+
+    conn.close()
+    # Source of truth for this chemical: the layers whose block actually has
+    # data, so the returned layer list can never claim a layer the UI shows empty.
+    blocks = {"tri": tri, "water": water, "pesticide": pesticide, "fracfocus": fracfocus}
+    present = [l for l in _XCHEM_LAYERS if blocks[l] is not None]
+    return jsonify({
+        "found": True,
+        "cid": cid,
+        "name": e["display"],
+        "cas": e["cas"],
+        "pubchem": pubchem,
+        "layers": present,
+        "layer_count": len(present),
+        "tri": tri,
+        "water": water,
+        "pesticide": pesticide,
+        "fracfocus": fracfocus,
+        # Air toxics is deliberately not searchable here (see note below) — the
+        # frontend surfaces this so the omission is explicit, never silent.
+        "air_excluded": True,
     })
 
 

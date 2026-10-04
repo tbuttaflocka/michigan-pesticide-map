@@ -322,3 +322,89 @@ def load_chemical_reference(conn: sqlite3.Connection, log=print) -> None:
     (incremental). If PubChem is unreachable the run degrades gracefully and the
     already-cached rows are preserved."""
     enrich(conn, log=log)
+
+
+# --------------------------------------------------------------------------- #
+# FracFocus → pubchem_cid bridge                                              #
+# --------------------------------------------------------------------------- #
+# The cross-layer chemical search joins layers ONLY on pubchem_cid. The
+# pesticide/TRI/water layers are already fully covered by chemical_reference
+# (enrich() reads their names). FracFocus is not — but most of its disclosed
+# ingredients carry a real CAS number. This loader maps those onto the same
+# bridge: for each distinct real-CAS ingredient, if chemical_reference already
+# carries that CAS with a CID the bridge already works; otherwise resolve a CID
+# from PubChem (by name, then by CAS xref) and add a row keyed by the ingredient
+# name. Trade-secret-masked ingredients (no valid CAS — "Proprietary",
+# "Confidential", "NA", blanks) are left entirely untouched: never resolved,
+# never guessed, so they simply never appear in cross-layer results.
+
+def _frac_real_cas_ingredients(conn: sqlite3.Connection) -> dict[str, str]:
+    """{normalized-CAS: representative ingredient name} for FracFocus ingredients
+    that disclose a real CAS number. Masked/placeholder CAS values are skipped."""
+    out: dict[str, str] = {}
+    for name, cas in conn.execute(
+            "SELECT DISTINCT ingredient_name, cas_number FROM fracfocus_ingredients "
+            "WHERE ingredient_name IS NOT NULL AND cas_number IS NOT NULL"):
+        cas = (cas or "").strip()
+        if not _looks_like_cas(cas):
+            continue
+        out.setdefault(cas, (name or "").strip())
+    return out
+
+
+def load_fracfocus_chemicals(conn: sqlite3.Connection, log=print) -> dict:
+    """Resolve FracFocus disclosed ingredients (real CAS only) to pubchem_cid via
+    chemical_reference, adding rows where needed. Incremental and re-runnable:
+    CAS numbers already resolvable through the table are left as-is. Returns a
+    summary dict with resolved/unresolved counts (counted over distinct CAS)."""
+    database.init_schema(conn)
+
+    # CAS numbers chemical_reference can already resolve to a CID.
+    cas_has_cid: set[str] = set()
+    for cas, cid in conn.execute(
+            "SELECT cas, pubchem_cid FROM chemical_reference "
+            "WHERE cas IS NOT NULL AND pubchem_cid IS NOT NULL"):
+        cas_has_cid.add(cas.strip())
+
+    ingredients = _frac_real_cas_ingredients(conn)
+    total_cas = len(ingredients)
+    already = sum(1 for cas in ingredients if cas in cas_has_cid)
+    todo = sorted(cas for cas in ingredients if cas not in cas_has_cid)
+    log(f"[fracfocus-chem] {total_cas} distinct disclosed CAS; {already} already "
+        f"bridged, {len(todo)} to resolve from PubChem")
+
+    newly = unresolved = errors = 0
+    for i, cas in enumerate(todo, 1):
+        name = ingredients[cas]
+        try:
+            cid, _ = resolve_cid(name, cas)
+            if cid:
+                props = _properties(cid)
+                desc, dsrc = _description(cid)
+                raw_syn = _fetch_synonyms(cid)
+                syns = _pick_synonyms(raw_syn)
+                _upsert(conn, _norm(name), name, cas, cid, desc, dsrc,
+                        props.get("MolecularFormula"), props.get("MolecularWeight"),
+                        props.get("IUPACName"), syns, "pubchem")
+                cas_has_cid.add(cas)
+                newly += 1
+            else:
+                # Keep the name + CAS so it isn't re-hit every run; no CID means it
+                # stays out of cross-layer results (join is CID-only, by design).
+                _upsert(conn, _norm(name), name, cas, None, None, None,
+                        None, None, None, None, "none")
+                unresolved += 1
+        except Exception as e:
+            errors += 1
+            log(f"  ! {name} ({cas}): {e}")
+        if i % 10 == 0 or i == len(todo):
+            log(f"  resolved {i}/{len(todo)} (new={newly} unresolved={unresolved} err={errors})")
+        conn.commit()
+
+    resolved_total = sum(1 for cas in ingredients if cas in cas_has_cid)
+    log(f"[fracfocus-chem] done — {resolved_total}/{total_cas} disclosed CAS now "
+        f"bridge to a CID ({newly} newly resolved, "
+        f"{total_cas - resolved_total} still unresolved)")
+    return {"distinct_cas": total_cas, "already_bridged": already,
+            "newly_resolved": newly, "unresolved_after": total_cas - resolved_total,
+            "resolved_total": resolved_total, "errors": errors}

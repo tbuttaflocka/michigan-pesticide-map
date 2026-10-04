@@ -5324,6 +5324,214 @@
     `;
   }
 
+  // ========================================================================
+  // Cross-layer chemical search — "Trace a chemical" (see /api/chemical-*)
+  // ========================================================================
+  // One chemical, everywhere it appears across the four joinable layers. Layers
+  // are matched by PubChem CID (never by name); AirToxScreen is excluded (no CAS,
+  // non-single-substance entries). Each layer keeps its OWN unit — the four are
+  // shown side by side and are NEVER summed, averaged, or ranked against each
+  // other (they measure four different things).
+  const _XCHEM_META = {
+    tri:       { icon: '🏭', label: 'Industrial releases (TRI)',            arr: 'facilities', one: 'facility' },
+    water:     { icon: '💧', label: 'Water-quality detections',             arr: 'sites',      one: 'site' },
+    pesticide: { icon: '🌾', label: 'Agricultural pesticide use',           arr: 'counties',   one: 'county' },
+    fracfocus: { icon: '🛢️', label: 'Hydraulic-fracturing fluid (FracFocus)', arr: 'wells',    one: 'well' },
+  };
+  const _XCHEM_ROWCAP = 8;        // rows shown per layer before "+N more"
+  let _xchemT = null;
+
+  function _xchemBadges(layers) {
+    return (layers || []).map((l) => {
+      const m = _XCHEM_META[l];
+      return `<span class="xc-badge xc-badge-${l}" title="${esc(m.label)}">${m.icon} ${esc(m.one)}</span>`;
+    }).join('');
+  }
+
+  function openXchem() {
+    const modal = $('xchem-modal');
+    if (!modal) return;
+    show(modal);
+    const inp = $('xchem-search');
+    $('xchem-results').innerHTML = '';
+    // Seed with the chemicals that actually span layers, so the cross-layer ones
+    // (Naphthalene, Atrazine, 2,4-D, …) are front and centre before any typing.
+    xchemSuggest('');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 30); }
+  }
+
+  function closeXchem() { hide($('xchem-modal')); }
+
+  async function xchemSuggest(q) {
+    const box = $('xchem-suggest');
+    if (!box) return;
+    let d;
+    try { d = await api('/api/chemical-search', { q }); }
+    catch (e) { return; /* transient — keep prior list */ }
+    const rows = d.results || [];
+    const heading = q
+      ? `<div class="xc-suggest-head">${d.count} match${d.count === 1 ? '' : 'es'}${d.count > rows.length ? ` · showing ${rows.length}` : ''}</div>`
+      : `<div class="xc-suggest-head">Chemicals that appear in more than one layer — pick one, or search above</div>`;
+    const list = rows.length
+      ? rows.map((r) =>
+          `<button type="button" class="xc-suggest-item" data-cid="${r.cid}" data-name="${esc(r.name)}">`
+          + `<span class="xc-s-name">${esc(r.name)}</span>`
+          + (r.cas ? `<span class="xc-s-cas">CAS ${esc(r.cas)}</span>` : '')
+          + `<span class="xc-s-badges">${_xchemBadges(r.layers)}</span>`
+          + `</button>`).join('')
+      : `<div class="xc-suggest-none">No chemical in the data matches “${esc(q)}”. The search covers TRI, water quality, pesticide use and FracFocus — not air toxics.</div>`;
+    box.innerHTML = heading + list;
+  }
+
+  async function xchemLoad(cid, name) {
+    const box = $('xchem-results');
+    const sug = $('xchem-suggest');
+    if (!box) return;
+    if (sug) sug.innerHTML = '';
+    box.innerHTML = `<p class="muted">Loading everywhere ${esc(name || 'this chemical')} appears…</p>`;
+    let d;
+    try { d = await api('/api/chemical-crosslayer', { cid }); }
+    catch (e) { box.innerHTML = '<p class="muted">Could not load cross-layer results.</p>'; return; }
+    if (!d || !d.found) { box.innerHTML = '<p class="muted">No cross-layer results for this chemical.</p>'; return; }
+    box.innerHTML = renderXchem(d);
+  }
+
+  function _xchemRowMetric(layer, it) {
+    if (layer === 'tri') {
+      return `<b>${fmtLbs(it.lbs)}</b> released${it.year ? ` · ${it.year}` : ''}`;
+    }
+    if (layer === 'water') {
+      const hi = (it.value != null)
+        ? ` · highest <b>${it.value} ${esc(it.unit || '')}</b>` : '';
+      return `<b>${it.detections}</b> of ${it.samples} samples detected${hi}`;
+    }
+    if (layer === 'pesticide') {
+      return `<b>${fmtLbs(it.lbs)}</b> applied`;
+    }
+    if (layer === 'fracfocus') {
+      return it.percent != null ? `<b>${it.percent}%</b> of frack-fluid mass` : 'disclosed (share not reported)';
+    }
+    return '';
+  }
+
+  function _xchemRowSub(layer, it) {
+    if (layer === 'pesticide') return it.name ? `${esc(it.name)} County` : '';
+    const bits = [];
+    if (layer === 'fracfocus' && it.operator) bits.push(esc(it.operator));
+    if (it.county) bits.push(`${esc(it.county)}${layer === 'pesticide' ? '' : ' Co.'}`);
+    return bits.join(' · ');
+  }
+
+  function _xchemFocusBtn(layer, it) {
+    if (layer === 'pesticide') {
+      return it.county_fips
+        ? `<button type="button" class="xc-focus xc-county" data-fips="${esc(it.county_fips)}">Show county →</button>` : '';
+    }
+    if (it.lat == null || it.lng == null) return '';
+    const id = layer === 'tri' ? it.facility_id : layer === 'water' ? it.site_id
+      : layer === 'fracfocus' ? it.api_num : '';
+    return `<button type="button" class="xc-focus" data-layer="${layer}" data-id="${esc(id)}"`
+      + ` data-lat="${it.lat}" data-lng="${it.lng}">Show on map →</button>`;
+  }
+
+  function _xchemLayerCard(layer, data) {
+    const m = _XCHEM_META[layer];
+    const items = data[m.arr] || [];
+    const shown = items.slice(0, _XCHEM_ROWCAP);
+    const nameOf = (it) => layer === 'pesticide' ? (it.name ? `${it.name} County` : '—')
+      : (it.name || '—');
+    const rows = shown.map((it) => {
+      const metric = _xchemRowMetric(layer, it);
+      const sub = layer === 'pesticide' ? '' : _xchemRowSub(layer, it);
+      return `<div class="xc-row">`
+        + `<div class="xc-row-main"><span class="xc-row-name">${esc(nameOf(it))}</span>`
+        + (sub ? `<span class="xc-row-sub">${sub}</span>` : '')
+        + `</div>`
+        + `<div class="xc-row-metric">${metric}</div>`
+        + `<div class="xc-row-act">${_xchemFocusBtn(layer, it)}</div>`
+        + `</div>`;
+    }).join('');
+    const more = items.length > shown.length
+      ? `<div class="xc-more">+ ${items.length - shown.length} more ${esc(m.one)}${items.length - shown.length === 1 ? '' : 's'} (not shown)</div>` : '';
+    const count = items.length;
+    const latest = data.latest_year ? ` · latest ${data.latest_year}` : '';
+    return `<section class="xc-card xc-card-${layer}">`
+      + `<header class="xc-card-head"><span class="xc-card-icon">${m.icon}</span>`
+      + `<span class="xc-card-title">${esc(m.label)}</span>`
+      + `<span class="xc-card-count">${count} ${esc(m.one)}${count === 1 ? '' : 's'}${latest}</span></header>`
+      + `<div class="xc-card-unit">Measured in: <b>${esc(data.unit)}</b></div>`
+      + `<div class="xc-rows">${rows}</div>${more}</section>`;
+  }
+
+  function renderXchem(d) {
+    const chips = [];
+    const pc = d.pubchem || {};
+    if (pc.molecular_formula) chips.push(`<span class="tci-chip">${esc(pc.molecular_formula)}</span>`);
+    if (d.cas) chips.push(`<span class="tci-chip">CAS ${esc(d.cas)}</span>`);
+    chips.push(`<span class="tci-chip">PubChem CID ${d.cid}</span>`);
+    const desc = pc.description
+      ? `<p class="xc-desc">${esc(pc.description)}</p>` : '';
+    const pub = pc.url
+      ? `<a class="xc-pubchem" href="${esc(pc.url)}" target="_blank" rel="noopener">Full profile on PubChem ↗</a>` : '';
+    const cards = (d.layers || []).map((l) => _xchemLayerCard(l, d[l])).join('');
+    // The hard unit rule, stated where the user sees the numbers.
+    const caveat =
+      `<div class="xc-caveat">⚖️ These are <b>four different measurements</b> — pounds released, `
+      + `concentration in a water sample, pounds applied to farmland, and percent of a frack fluid. `
+      + `They are shown side by side for context and are <b>not comparable</b>: don't add, average, or rank them against each other.</div>`;
+    const airNote =
+      `<div class="xc-airnote"><b>Air toxics is not included in chemical search.</b> `
+      + `The AirToxScreen layer reports 17 pollutants with no CAS numbers, and some entries `
+      + `(e.g. “Coke oven emissions”, “Arsenic Compounds (Inorganic Including Arsine)”) are not single `
+      + `substances — so they can't be matched to one chemical without guessing, and we don't guess.</div>`;
+    return `<div class="xc-result-head">`
+      + `<h3>${esc(d.name)}</h3>`
+      + `<div class="xc-result-sub">Appears in <b>${d.layer_count}</b> of 4 searchable layers</div>`
+      + `<div class="tci-chips">${chips.join('')}</div>${desc}${pub}</div>`
+      + caveat
+      + `<div class="xc-cards">${cards}</div>`
+      + airNote
+      + `<button type="button" class="xc-back">← Back to search</button>`;
+  }
+
+  function setupXchem() {
+    const openBtn = $('open-xchem');
+    if (openBtn) openBtn.addEventListener('click', openXchem);
+    const close = $('xchem-close');
+    if (close) close.addEventListener('click', closeXchem);
+    const modal = $('xchem-modal');
+    if (modal) modal.addEventListener('click', (e) => { if (e.target.id === 'xchem-modal') closeXchem(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) closeXchem();
+    });
+    const inp = $('xchem-search');
+    if (inp) inp.addEventListener('input', () => {
+      clearTimeout(_xchemT);
+      $('xchem-results').innerHTML = '';
+      const q = inp.value.trim();
+      _xchemT = setTimeout(() => xchemSuggest(q), 180);
+    });
+    // Delegated clicks: pick a suggestion, follow a cross-link, or go back.
+    const results = $('xchem-results');
+    const sug = $('xchem-suggest');
+    if (sug) sug.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.xc-suggest-item');
+      if (b) xchemLoad(Number(b.dataset.cid), b.dataset.name);
+    });
+    if (results) results.addEventListener('click', (e) => {
+      const back = e.target.closest && e.target.closest('.xc-back');
+      if (back) { results.innerHTML = ''; xchemSuggest($('xchem-search').value.trim()); return; }
+      const county = e.target.closest && e.target.closest('.xc-county');
+      if (county) { closeXchem(); openCounty(county.dataset.fips); return; }
+      const focus = e.target.closest && e.target.closest('.xc-focus');
+      if (focus) {
+        closeXchem();
+        focusFinding(focus.dataset.layer, focus.dataset.id,
+          parseFloat(focus.dataset.lat), parseFloat(focus.dataset.lng));
+      }
+    });
+  }
+
   // ---------- Wind roses & pesticide-drift overlay ----------
   const DIRS_16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
                    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
@@ -5937,6 +6145,7 @@
     });
 
     setupAddressReport();
+    setupXchem();
 
     // TRI chemical info modal — close via ×, backdrop click, or Escape.
     $('tri-info-close').addEventListener('click', () => hide($('tri-info-modal')));
@@ -6506,6 +6715,9 @@
             subCbs: ['echo-f-snc', 'echo-f-violation'] },
     landfill: { cb: 'landfill-sites', grp: () => state.landfill.markers },
     water: { cb: 'wq-sites', grp: () => state.water.sitesLayer },
+    // FracFocus: enabling the toggle lazy-loads + renders the ◆ markers, then
+    // focusFinding opens the nearest one (no per-well id lookup — matched by latlng).
+    fracfocus: { cb: 'fracfocus-sites', grp: () => state.fracfocus.layer },
     golf: { cb: 'golf-sites', grp: () => state.golf.markers },
     spraying: { cb: 'spraying-programs', grp: () => state.spraying.markers },
     coal_ash: { cb: 'coal-ash-sites', grp: () => state.coalAsh.markers },
