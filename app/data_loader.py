@@ -128,6 +128,7 @@ from .config import (
     AIRTOXICS_HI_FILES,
 )
 from . import airtoxics_data
+from . import aoc_data
 
 
 # ---------- pretty logging ----------
@@ -3507,6 +3508,74 @@ def airtoxics_data_record(conn: sqlite3.Connection, status: str, rows: int) -> N
         "so only one year is stored and it is never trended. Not a measurement; "
         "identifies areas for further study, not risk at a specific address.",
         coverage_start=AIRTOXICS_YEAR, coverage_end=AIRTOXICS_YEAR)
+
+
+def load_aoc(conn: sqlite3.Connection) -> int:
+    """Load Michigan Great Lakes Areas of Concern — boundary polygons + per-AOC
+    Beneficial Use Impairment (BUI) status.
+
+    Data-only: reads the committed boundary snapshot (app/aoc_boundaries.geojson,
+    EPA's frozen 2020 files converted once by scripts/build_aoc.py) and the curated
+    registry/BUIs in app/aoc_data.py (transcribed from EPA AOC pages). `counties`
+    per AOC were derived by intersecting each polygon against michigan_counties.
+    geojson — stored in the GeoJSON properties — never from a hand list. Two AOCs
+    (White Lake, Muskegon Lake) have no published boundary file and are stored with
+    NULL geometry/counties. No identifier joins an AOC to any other table."""
+    log("Loading Great Lakes Areas of Concern (EPA/EGLE)...")
+    cur = conn.cursor()
+    geo: dict[str, dict] = {}
+    gp = Path(__file__).with_name("aoc_boundaries.geojson")
+    if gp.exists():
+        try:
+            fc = json.loads(gp.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            fc = {"features": []}
+        for f in fc.get("features", []):
+            props = f.get("properties") or {}
+            slug = props.get("slug")
+            if slug:
+                geo[slug] = {"geometry": f.get("geometry"),
+                             "counties": props.get("counties") or []}
+
+    cur.execute("DELETE FROM aoc_areas")
+    cur.execute("DELETE FROM aoc_bui")
+    n_area = n_geom = n_bui = 0
+    for slug, name, status, delisting, has_geom, url in aoc_data.AOCS:
+        g = geo.get(slug) if has_geom else None
+        geometry = json.dumps(g["geometry"]) if g and g.get("geometry") else None
+        counties = json.dumps(g["counties"]) if g and g.get("counties") else None
+        if geometry:
+            n_geom += 1
+        cur.execute(
+            "INSERT OR REPLACE INTO aoc_areas(slug, name, status, delisting_date, "
+            "counties, geometry, epa_url, note, source) VALUES (?,?,?,?,?,?,?,?,?)",
+            (slug, name, status, delisting, counties, geometry, url,
+             aoc_data.AOC_NOTES.get(slug), "EPA_EGLE_AOC"))
+        n_area += 1
+        for bui, st, rd, note in aoc_data.BUIS.get(slug, []):
+            cur.execute(
+                "INSERT INTO aoc_bui(aoc_slug, bui, status, removal_date, note, source_url) "
+                "VALUES (?,?,?,?,?,?)", (slug, bui, st, rd, note, url))
+            n_bui += 1
+
+    n_del = sum(1 for a in aoc_data.AOCS if a[2] == "delisted")
+    record_source(
+        conn, "epa_aoc",
+        "EPA/EGLE Great Lakes Areas of Concern — boundaries + beneficial use impairments",
+        "https://www.epa.gov/great-lakes-aocs", "ok", n_area,
+        f"{n_area} Michigan AOCs ({n_area - n_del} active / {n_del} delisted). Boundary "
+        f"polygons are EPA's 2020 snapshot — {n_geom} of {n_area} have a published "
+        f"boundary file (White Lake and Muskegon Lake do not; stored with no geometry, "
+        f"not approximated). Counties are DERIVED from each polygon by intersecting "
+        f"michigan_counties.geojson. BUI status ({n_bui} rows) was transcribed from each "
+        f"AOC's own EPA page on {aoc_data.TRANSCRIBED_ON}; removal dates recorded only "
+        f"where printed on the page. Delisting means all beneficial uses were restored "
+        f"to conditions comparable to non-AOC Great Lakes waters, NOT that the site is "
+        f"clean or contamination-free. No identifier joins an AOC to any other layer.",
+        coverage_start="2020", coverage_end="2020")
+    conn.commit()
+    log(f"  loaded {n_area} AOCs ({n_geom} with geometry) + {n_bui} BUI rows", level="ok")
+    return n_area
 
 
 def load_pfas(conn: sqlite3.Connection) -> int:

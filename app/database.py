@@ -349,6 +349,37 @@ CREATE TABLE IF NOT EXISTS airtoxics_stats (
     value REAL
 );
 
+-- ===== Great Lakes Areas of Concern (EPA/EGLE) =====
+-- 14 Michigan AOCs. Geometry is EPA's frozen 2020 boundary snapshot (NULL for the
+-- two with no published boundary file). `counties` is DERIVED from the polygon by
+-- intersecting it with michigan_counties.geojson (not a hand list). No identifier
+-- joins an AOC to any other table here — AOCs are kept separate from Superfund/TRI.
+CREATE TABLE IF NOT EXISTS aoc_areas (
+    slug           TEXT PRIMARY KEY,
+    name           TEXT,
+    status         TEXT,           -- 'active' | 'delisted'
+    delisting_date TEXT,           -- 'YYYY-MM' for delisted, else NULL
+    counties       TEXT,           -- JSON [{fips,name}] derived from geometry (NULL if no geom)
+    geometry       TEXT,           -- GeoJSON Polygon/MultiPolygon (NULL where EPA has no boundary file)
+    epa_url        TEXT,
+    note           TEXT,           -- AOC-level transcription caveat, if any
+    source         TEXT
+);
+
+-- Beneficial Use Impairments per AOC, transcribed verbatim from each AOC's EPA
+-- page (one of the 14 IJC/EPA standard names). removal_date only where printed on
+-- the page; status is 'impaired' | 'removed' | 'unconfirmed'.
+CREATE TABLE IF NOT EXISTS aoc_bui (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    aoc_slug     TEXT,
+    bui          TEXT,
+    status       TEXT,
+    removal_date TEXT,
+    note         TEXT,
+    source_url   TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_aoc_bui_slug ON aoc_bui(aoc_slug);
+
 -- ===== Underground Storage Tanks (EGLE RRD, regularly updated) =====
 -- The most common near-home contamination source. CRITICAL distinction, carried
 -- in `category`: a licensed Part 211 tank (a working gas station, not

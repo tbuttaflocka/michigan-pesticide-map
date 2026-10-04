@@ -373,6 +373,18 @@ SOURCES: list[Source] = [
         coverage=lambda conn: ("2019", "2019"),
     ),
     Source(
+        id="aoc",
+        label="EPA/EGLE Great Lakes Areas of Concern — boundaries + beneficial use impairments",
+        loaders=[dl.load_aoc],
+        targets=["aoc_areas", "aoc_bui"],
+        primary_target="aoc_areas", primary_source_id="epa_aoc",
+        # Frozen 2020 boundary snapshot + BUI status hand-transcribed from EPA AOC
+        # pages. Not a live feed; a slow check is enough to notice a future change
+        # (e.g. a new delisting). min_abs is small — there are only 14 AOCs.
+        interval_months=12, min_abs=10, floor_frac=0.6,
+        coverage=lambda conn: ("2020", "2020"),
+    ),
+    Source(
         id="places",
         label="US Census TIGER Gazetteer — places, townships & ZIP areas",
         loaders=[dl.load_places],
