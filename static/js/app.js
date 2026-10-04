@@ -6500,6 +6500,10 @@
     contamination: { cb: 'contam-sites', grp: () => state.contam.markers },
     tri: { cb: 'tri-sites', grp: () => state.tri.markers,
            byId: (id) => state.tri.markerById && state.tri.markerById.get(id) },
+    // ECHO: enable the layer + the SNC and Violation-Identified sub-slices (the
+    // report only lists facilities in those slices), then open the nearest marker.
+    echo: { cb: 'echo-sites', grp: () => state.echo.layer,
+            subCbs: ['echo-f-snc', 'echo-f-violation'] },
     landfill: { cb: 'landfill-sites', grp: () => state.landfill.markers },
     water: { cb: 'wq-sites', grp: () => state.water.sitesLayer },
     golf: { cb: 'golf-sites', grp: () => state.golf.markers },
@@ -6593,6 +6597,26 @@
         + `${it.latest_year ? ` (${it.latest_year})` : ''} · ${_TREND[it.trend] || ''}` : ''}`
         + `${it.sector ? ` · ${_rEsc(it.sector)}` : ''}`;
     }
+    if (layer === 'echo') {
+      const flags = [
+        it.snc ? '<span class="rpt-tag" style="background:#b91c1c;color:#fff" title="Significant Noncompliance">SNC</span>' : '',
+        it.hpv ? '<span class="rpt-tag" style="background:#d97706;color:#0d1117" title="Clean Air Act High Priority Violator">CAA HPV</span>' : '',
+      ].filter(Boolean).join(' ');
+      const progs = (it.programs || [])
+        .map((p) => `${_rEsc(p.label)}: ${_rEsc(p.status)}`).join(' · ');
+      const pen = echoFmtPenalty(it.total_penalties);
+      const meta = [
+        `Inspections (last 5 yrs): ${it.inspection_count != null ? it.inspection_count : '—'}`,
+        it.date_last_inspection ? `Most recent inspection: ${_rEsc(it.date_last_inspection)}` : '',
+        it.qtrs_with_nc != null ? `${it.qtrs_with_nc}/12 quarters in noncompliance` : '',
+        `Penalties (last 5 yrs): ${it.penalty_count || 0}${pen ? ` · ${pen}` : ''}`,
+        (it.formal_actions && it.formal_actions.length) ? `Formal actions: ${it.formal_actions.join(' · ')}` : '',
+      ].filter(Boolean).join(' · ');
+      return `${flags ? flags + ' ' : ''}<b>${_rEsc(it.compliance_status || 'Status not reported')}</b>`
+        + `${progs ? `<div class="rpt-echo-progs">${progs}</div>` : ''}`
+        + `<div class="rpt-echo-meta">${meta}</div>`
+        + (it.dfr_url ? `<div class="rpt-echo-dfr"><a href="${_rEsc(it.dfr_url)}" target="_blank" rel="noopener">EPA Detailed Facility Report →</a></div>` : '');
+    }
     if (layer === 'landfill') {
       return `${_rEsc(it.type_label || it.category || '')}${it.status ? ` · ${_rEsc(it.status)}` : ''}`;
     }
@@ -6666,6 +6690,28 @@
     }
     return `<div class="rpt-layer"><div class="rpt-layer-h"><span>${icon} ${label}</span>`
       + `${_ringChips(block.rings)}</div>${body}</div>`;
+  }
+
+  // Required framing for the ECHO section: what the list is, that violations are
+  // ALLEGED (not adjudicated), the trailing-12-quarter window, the ~3-month lag,
+  // and the big blind spot — most facilities are never inspected, so "no
+  // violations" can just mean "never looked at". Qualitative only; no score.
+  function _echoReportNote(block) {
+    if (!block) return '';
+    const hasAny = (block.within && block.within.length) || block.nearest;
+    return `<details class="rpt-ustnote"${hasAny ? ' open' : ''}>
+      <summary><span class="rpt-ustnote-tag">How to read this</span> About the EPA ECHO enforcement data</summary>
+      <div class="rpt-ustnote-body">
+        <p>This lists only facilities with a <b>current violation determination</b> in EPA's ECHO system — Significant Violation / Significant Noncompliance (SNC) / High Priority Violator (HPV), or "Violation Identified". The other ~79,000 routine regulated Michigan facilities with no current violation are not listed here.</p>
+        <ul>
+          <li>These are <b>alleged</b> violations reflecting EPA or state determinations — <b>not final legal adjudications</b>.</li>
+          <li>Compliance status covers the <b>trailing 12 federal fiscal quarters</b> (~3 years), and ECHO can <b>lag the source databases by up to three months</b>.</li>
+          <li><b>76,294 of 81,934</b> Michigan facilities have <b>no recorded inspections in the last five years</b>. A nearby facility showing no violations may simply <b>never have been inspected</b> — absence of a violation here is not evidence of compliance.</li>
+          <li>"Inspections (last 5 yrs)" and "Most recent inspection" are <b>different time windows</b>; penalties shown are a <b>trailing 5-year</b> total (assessed/final monetary penalties only).</li>
+        </ul>
+        <p class="rpt-note muted small">Source: EPA ECHO (Enforcement &amp; Compliance History Online). Alleged violations — EPA/state determinations, not final adjudications.</p>
+      </div>
+    </details>`;
   }
 
   // Plain-language explainer for the UST section of the report: what a leaking
@@ -6881,6 +6927,9 @@
         'No contamination sites within 5 miles.')
       + _nearBlock('tri', 'TRI industrial facilities', '🏭', near.tri,
         'No TRI facilities within 5 miles.')
+      + _nearBlock('echo', 'EPA enforcement & compliance (ECHO)', '⚖', near.echo,
+        'No facilities with a current EPA/state violation determination within 5 miles.')
+      + _echoReportNote(near.echo)
       + _nearBlock('landfill', 'Landfills & waste facilities', '🗑', near.landfill,
         'No active landfills within 5 miles.')
       + _nearBlock('coal_ash', 'Coal ash (CCR) sites', '⚫', near.coal_ash,

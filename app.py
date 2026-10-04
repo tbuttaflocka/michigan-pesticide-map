@@ -4026,6 +4026,7 @@ _REPORT_SOURCES = [
     "US Census Bureau Geocoder / OpenStreetMap Nominatim (address → coordinates)",
     "EPA Superfund (SEMS/NPL) — contamination sites",
     "EPA Toxics Release Inventory (TRI) — industrial releases",
+    "EPA ECHO (Enforcement & Compliance History Online) — facility compliance & enforcement",
     "Michigan EGLE Materials Management — landfills & hazardous-waste facilities",
     "EPA CCR rule / operator CCR pages / EGLE / Earthjustice-EIP Ashtracker — coal ash sites",
     "USGS/EPA Water Quality Portal — water monitoring & pesticide detections",
@@ -4067,6 +4068,44 @@ def _report_near(conn, lat, lng):
                 "latest_release_lbs": round(vals[-1]) if vals else 0,
                 "latest_year": py[-1]["year"] if py else None, "trend": trend}
     tri = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "tri", _tri_build)
+
+    # --- EPA ECHO enforcement & compliance. Only facilities with a CURRENT
+    # violation determination (Significant Violation / SNC / HPV, or "Violation
+    # Identified") — the other ~79k routine, compliant regulated sites are noise in
+    # a homebuyer report. Centroid-parked records with no usable location are
+    # excluded via the shared detector (none carry a violation anyway). ECHO is a
+    # DISPLAYED section only — it is deliberately NOT fed into the qualitative
+    # rating, so it never introduces a numeric score. ---
+    echo_rows = conn.execute(
+        f"SELECT {_ECHO_COLS}, latitude, longitude, county, county_fips "
+        "FROM echo_facilities WHERE latitude IS NOT NULL AND longitude IS NOT NULL "
+        "AND (snc_flag='Y' OR caa_hpv_flag='Y' "
+        "     OR compliance_status IN ('Significant Violation','Violation Identified'))"
+    ).fetchall()
+    _echo_bad = _echo_no_location_coords(conn)
+    echo_rows = [r for r in echo_rows if not _echo_is_no_location(r, _echo_bad)]
+
+    def _echo_build(r, d):
+        progs = [{"label": lbl, "status": r[col]} for col, lbl in (
+            ("caa_compliance_status", "Clean Air Act"),
+            ("cwa_compliance_status", "Clean Water Act"),
+            ("rcra_compliance_status", "RCRA (hazardous waste)"),
+            ("sdwa_compliance_status", "Safe Drinking Water")) if r[col]]
+        fa = [f"{lbl} {r[col]}" for col, lbl in (
+            ("caa_formal_action_count", "CAA"), ("cwa_formal_action_count", "CWA"),
+            ("rcra_formal_action_count", "RCRA"), ("sdwa_formal_action_count", "SDWA"))
+            if r[col]]
+        return {"id": r["registry_id"], "name": r["facility_name"], "county": r["county"],
+                "compliance_status": r["compliance_status"], "programs": progs,
+                "snc": r["snc_flag"] == "Y", "hpv": r["caa_hpv_flag"] == "Y",
+                "qtrs_with_nc": r["qtrs_with_nc"],
+                "inspection_count": r["inspection_count"],
+                "date_last_inspection": r["date_last_inspection"],
+                "penalty_count": r["penalty_count"], "total_penalties": r["total_penalties"],
+                "formal_actions": fa,
+                "dfr_url": "https://echo.epa.gov/detailed-facility-report?fid="
+                           + str(r["registry_id"])}
+    echo = _layer_block(_sorted_by_distance(echo_rows, lat, lng), lat, lng, "echo", _echo_build)
 
     # --- Landfills & waste facilities ---
     rows = conn.execute(
@@ -4158,7 +4197,7 @@ def _report_near(conn, lat, lng):
     ust_other = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
                              "ust_other", _ust_build)
 
-    return {"contamination": contam, "tri": tri, "landfill": landfill,
+    return {"contamination": contam, "tri": tri, "echo": echo, "landfill": landfill,
             "water": water, "golf": golf, "pfas": pfas, "pfas_water": pfas_water,
             "ust_open": ust_open, "ust_other": ust_other}
 

@@ -2388,6 +2388,9 @@ body.search-open .active-layer-badge { display: none; }
 .rpt-dist { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .rpt-item-fig { font-size: 11.8px; color: var(--text); margin-top: 2px; line-height: 1.4; }
 .rpt-comps { margin-top: 2px; font-size: 11.5px; }
+.rpt-echo-progs { margin-top: 2px; font-size: 11.3px; color: var(--text); }
+.rpt-echo-meta { margin-top: 2px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.rpt-echo-dfr { margin-top: 2px; font-size: 11px; }
 .rpt-none { color: var(--muted); font-size: 12px; margin: 4px 0; line-height: 1.45; }
 .rpt-note { color: var(--muted); font-size: 11.5px; margin: 2px 0 4px; }
 
