@@ -1340,9 +1340,12 @@ def _insert_contam(cur, key, rec, source, name_to_fips, desc_source="narrative",
 
 def apply_curated_narratives(conn: sqlite3.Connection) -> int:
     """Write the hand-researched narratives from app/contamination_narratives.py
-    onto matching generated sites (by EPA id). Shared by the loader and the
-    standalone enrich_narratives.py so a full reload never loses enrichment.
-    Only touches desc_source='generated' rows — hardcoded narratives are safe."""
+    onto matching sites (by EPA id). Shared by the loader and the standalone
+    enrich_narratives.py so a full reload never loses enrichment.
+
+    Attaches to a generated NPL-feed row OR a compiled row that has no narrative
+    yet (several compiled sites carry only an unsourced `description`; this adds
+    the sourced `narrative` + refs without clobbering any existing narrative)."""
     from .contamination_narratives import FETCHED_NARRATIVES
     cur = conn.cursor()
     applied = 0
@@ -1354,7 +1357,8 @@ def apply_curated_narratives(conn: sqlite3.Connection) -> int:
         res = cur.execute(
             """UPDATE contamination_sites
                   SET narrative = ?, narrative_refs = ?, narrative_source = 'fetched'
-                WHERE epa_id = ? AND desc_source = 'generated'""",
+                WHERE epa_id = ?
+                  AND (desc_source = 'generated' OR narrative IS NULL OR narrative = '')""",
             (narrative, refs, epa_id),
         )
         applied += res.rowcount

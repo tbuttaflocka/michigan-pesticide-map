@@ -242,5 +242,36 @@
     "refs": [
       {"label": "EPA Superfund Site Profile", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502755"}
     ]
+  },
+  {
+    "epa_id": "MIN000510552",
+    "site_name": "Gelman Sciences Inc. Superfund Site",
+    "narrative": "From 1963 to 1986, Gelman Sciences manufactured medical filters at its plant in Scio Township west of Ann Arbor, discharging wastewater containing the solvent 1,4-dioxane and creating a groundwater plume that EPA describes as roughly three miles long and one mile wide. The city of Ann Arbor closed its Montgomery wellfield in 2001 after 1,4-dioxane reached it. After decades of state-led cleanup, Michigan's environmental agency (EGLE) asked EPA to list the site in 2021; EPA proposed it in March 2024 and formally added the Gelman Sciences site to the Superfund National Priorities List on March 12, 2026. Cleanup continues.",
+    "refs": [
+      {"label": "EPA news release - EPA adds Gelman Sciences to the Superfund NPL", "url": "https://www.epa.gov/newsreleases/epa-adds-gelman-sciences-inc-ann-arbor-michigan-superfund-national-priorities-list"},
+      {"label": "EGLE - EPA adds Gelman plume to the Superfund NPL (Mar 12, 2026)", "url": "https://www.michigan.gov/egle/newsroom/press-releases/2026/03/12/egle-announces-epa-addition-of-gelman-plume-to-superfund-national-priorities-list"},
+      {"label": "EPA Superfund Site Profile - Gelman Sciences", "url": "https://cumulis.epa.gov/supercpad/cursites/csitinfo.cfm?id=0502257"}
+    ]
+  },
+  {
+    "epa_id": "MID980901946",
+    "site_name": "Torch Lake Superfund Site",
+    "narrative": "Copper mining and ore milling on the Keweenaw Peninsula from the 1890s until 1969 dumped an estimated 200 million tons of mill tailings -- locally called stamp sands -- into Torch Lake, filling roughly 20 percent of the lake by volume according to EPA. Shoreline tailings, smelter slag, and associated contaminants led EPA to place the site on the National Priorities List. The long-term remedy capped about 800 acres of stamp sands and slag with soil and vegetation; construction began in September 1998 and the capping was completed in 2005. Operation, maintenance, and long-term monitoring of the lake continue, and Torch Lake is also a federally designated Great Lakes Area of Concern.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile - Torch Lake (cleanup activities)", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0503034"},
+      {"label": "EPA Fifth Five-Year Review Report, Torch Lake Superfund Site", "url": "https://semspub.epa.gov/work/05/980365.pdf"},
+      {"label": "Michigan EGLE - Torch Lake Abandoned Mining Wastes", "url": "https://www.michigan.gov/egle/about/organization/remediation-and-redevelopment/abandoned-mining-wastes/project-purpose"}
+    ]
+  },
+  {
+    "epa_id": "MID006007306",
+    "site_name": "Allied Paper/Portage Creek/Kalamazoo River Superfund Site",
+    "narrative": "This stretch of the Kalamazoo River carries two distinct contamination histories. First, PCBs: paper mills recycling carbonless copy paper discharged PCB-laden waste into Portage Creek and the river, and EPA placed the Allied Paper/Portage Creek/Kalamazoo River site on the National Priorities List in August 1990, with a study area covering about 3 miles of Portage Creek and 80 miles of the river from Morrow Lake Dam to Lake Michigan. In December 2019 EPA, the U.S. Department of Justice, EGLE, and the Kalamazoo River Natural Resource Trustee Council announced a proposed consent decree under which NCR Corporation would fund a major share of the cleanup, part of a roughly $245 million agreement announced by EPA and DOJ. Second, the 2010 Enbridge Line 6B oil spill: on July 26, 2010 Enbridge's Line 6B pipeline ruptured near Marshall, and EPA determined that at least 20,082 barrels of crude oil were discharged, reaching Talmadge Creek and then the Kalamazoo River. Under a July 2016 settlement with EPA and DOJ, Enbridge paid $62 million in Clean Water Act civil penalties ($61 million for the Marshall spill) and agreed to spend at least $110 million on spill-prevention and operational improvements across its Great Lakes-region pipelines.",
+    "refs": [
+      {"label": "EPA Superfund Site Profile - Allied Paper/Portage Creek/Kalamazoo River", "url": "https://cumulis.epa.gov/supercpad/SiteProfiles/index.cfm?fuseaction=second.cleanup&id=0502325"},
+      {"label": "EPA & DOJ - $245 million agreement for Kalamazoo River cleanup", "url": "https://www.epa.gov/newsreleases/epa-and-doj-announce-245-million-agreement-cleanup-allied-paper-incportage"},
+      {"label": "EPA - Enbridge Clean Water Act settlement (Line 6B)", "url": "https://www.epa.gov/enforcement/enbridge-clean-water-act-settlement"},
+      {"label": "U.S. DOJ - $177 million Enbridge settlement after 2010 Michigan oil spills", "url": "https://www.justice.gov/archives/opa/pr/united-states-enbridge-reach-177-million-settlement-after-2010-oil-spills-michigan-and"}
+    ]
   }
 ]

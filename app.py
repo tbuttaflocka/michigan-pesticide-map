@@ -1491,60 +1491,90 @@ def _search_places(cur, q: str, limit: int = 12) -> list[dict]:
     return out
 
 
+# Common aliases / nicknames -> canonical site-name substrings the DB actually
+# stores, so a search for how people KNOW a site ("green ooze", "Line 6B",
+# "stamp sands", "1,4-dioxane") still finds it. Matched when the alias phrase
+# appears in the query; the mapped term(s) are searched in addition to the query.
+_SEARCH_ALIASES = {
+    "green ooze":          ["Electro-Plating Services"],
+    "i-696 ooze":          ["Electro-Plating Services"],
+    "i696 ooze":           ["Electro-Plating Services"],
+    "line 6b":             ["Kalamazoo River"],
+    "line 6-b":            ["Kalamazoo River"],
+    "marshall oil spill":  ["Kalamazoo River"],
+    "enbridge":            ["Kalamazoo River"],
+    "dioxane":             ["Gelman"],
+    "1,4-dioxane":         ["Gelman"],
+    "pall corporation":    ["Gelman"],
+    "stamp sands":         ["Torch Lake"],
+    "crown vantage":       ["Crown Vantage"],
+}
+
+
 def _search_facilities(cur, q: str, limit: int = 10) -> list[dict]:
     """Named sites across TRI, Superfund/contamination, landfills, PFAS, UST and
     coal ash — so people who heard about Wurtsmith, Velsicol, Wolverine or Wayne
-    Disposal in the news can find them by name."""
+    Disposal in the news can find them by name (or by a common alias)."""
     qu = q.upper()
-    contains = f"%{qu}%"
+    # Expand the search with any alias whose phrase appears in the query.
+    ql = q.lower()
+    terms = [qu] + [t.upper() for phrase, mapped in _SEARCH_ALIASES.items()
+                    if phrase in ql for t in mapped]
+    seen_terms, uniq_terms = set(), []
+    for t in terms:
+        if t not in seen_terms:
+            seen_terms.add(t); uniq_terms.append(t)
     found: list[dict] = []
 
     def _rank(name: str) -> int:
         n = (name or "").upper()
         return 0 if n == qu else (1 if n.startswith(qu) else 2)
 
-    for table, name_col, alt_col, id_col, county_col, layer, type_label in _FACILITY_TABLES:
-        if not _table_exists(cur, table):
-            continue
-        where = f"UPPER({name_col}) LIKE ?"
-        params = [contains]
-        if alt_col:
-            where += f" OR UPPER({alt_col}) LIKE ?"
-            params.append(contains)
-        sql = (f"SELECT {name_col} AS name, {id_col} AS id, {county_col} AS county, "
-               f"latitude AS lat, longitude AS lng FROM {table} "
-               f"WHERE ({where}) AND latitude IS NOT NULL LIMIT 6")
-        for r in cur.execute(sql, params).fetchall():
-            found.append({
-                "name": r["name"], "id": r["id"], "county": r["county"],
-                "lat": r["lat"], "lng": r["lng"],
-                "layer": layer, "type_label": type_label,
-            })
+    def _collect(term: str):
+        contains = f"%{term}%"
+        for table, name_col, alt_col, id_col, county_col, layer, type_label in _FACILITY_TABLES:
+            if not _table_exists(cur, table):
+                continue
+            where = f"UPPER({name_col}) LIKE ?"
+            params = [contains]
+            if alt_col:
+                where += f" OR UPPER({alt_col}) LIKE ?"
+                params.append(contains)
+            sql = (f"SELECT {name_col} AS name, {id_col} AS id, {county_col} AS county, "
+                   f"latitude AS lat, longitude AS lng FROM {table} "
+                   f"WHERE ({where}) AND latitude IS NOT NULL LIMIT 6")
+            for r in cur.execute(sql, params).fetchall():
+                found.append({
+                    "name": r["name"], "id": r["id"], "county": r["county"],
+                    "lat": r["lat"], "lng": r["lng"],
+                    "layer": layer, "type_label": type_label,
+                })
+        # UST: category decides which focus layer (open leak vs other) to fly to.
+        if _table_exists(cur, "ust_sites"):
+            for r in cur.execute(
+                "SELECT facility_name AS name, site_key AS id, county, latitude AS lat, "
+                "longitude AS lng, category FROM ust_sites "
+                "WHERE UPPER(facility_name) LIKE ? AND latitude IS NOT NULL LIMIT 6",
+                (contains,),
+            ).fetchall():
+                found.append({
+                    "name": r["name"], "id": r["id"], "county": r["county"],
+                    "lat": r["lat"], "lng": r["lng"],
+                    "layer": "ust_open" if r["category"] == "leaking_open" else "ust_other",
+                    "type_label": "Storage-tank site",
+                })
+        # Coal ash lives in a curated Python module, not the DB.
+        for s in coal_ash_data.COAL_ASH_SITES:
+            nm = s.get("name", "")
+            if term in nm.upper():
+                found.append({
+                    "name": nm, "id": None, "county": s.get("county"),
+                    "lat": s.get("lat"), "lng": s.get("lon"),
+                    "layer": "coal_ash", "type_label": "Coal ash (CCR) site",
+                })
 
-    # UST: category decides which focus layer (open leak vs other) to fly to.
-    if _table_exists(cur, "ust_sites"):
-        for r in cur.execute(
-            "SELECT facility_name AS name, site_key AS id, county, latitude AS lat, "
-            "longitude AS lng, category FROM ust_sites "
-            "WHERE UPPER(facility_name) LIKE ? AND latitude IS NOT NULL LIMIT 6",
-            (contains,),
-        ).fetchall():
-            found.append({
-                "name": r["name"], "id": r["id"], "county": r["county"],
-                "lat": r["lat"], "lng": r["lng"],
-                "layer": "ust_open" if r["category"] == "leaking_open" else "ust_other",
-                "type_label": "Storage-tank site",
-            })
-
-    # Coal ash lives in a curated Python module, not the DB.
-    for s in coal_ash_data.COAL_ASH_SITES:
-        nm = s.get("name", "")
-        if qu in nm.upper():
-            found.append({
-                "name": nm, "id": None, "county": s.get("county"),
-                "lat": s.get("lat"), "lng": s.get("lon"),
-                "layer": "coal_ash", "type_label": "Coal ash (CCR) site",
-            })
+    for t in uniq_terms:
+        _collect(t)
 
     found.sort(key=lambda f: (_rank(f["name"]), len(f["name"] or "")))
     # de-dupe identical name+layer collisions, keep first (best-ranked)

@@ -226,6 +226,39 @@ PFAS_NARRATIVES: list[dict] = [
              "url": "https://www.waterworld.com/residential-commercial/news/14306792/119-million-settlement-reached-in-lawsuit-for-parchment-michigan-drinking-water-contaminated-with-pfas"},
         ],
     },
+    {
+        "key": "electro_plating_madison_heights",
+        "title": "Electro-Plating Services / I-696 “green ooze” (Madison Heights)",
+        "county_fips": "26125",  # Oakland
+        "match_names": ["Electro-Plating Services"],
+        "narrative": (
+            "Electro-Plating Services, a former metal-plating shop at 945 E. Ten Mile "
+            "Road in Madison Heights, left soil and groundwater heavily contaminated "
+            "with hexavalent chromium and other plating chemicals, as well as PFAS. "
+            "On December 20, 2019 a bright yellow-green seep of chromium-laden "
+            "groundwater — widely reported as the “green ooze” — emerged on the "
+            "shoulder of eastbound I-696. EGLE requested EPA assistance, and from "
+            "December 2019 through October 2020 EPA collected 353,879 gallons of "
+            "contaminated groundwater for off-site treatment and disposal."
+        ),
+        "peaks": [],
+        "advisories": [],
+        "status": (
+            "In June 2020 EPA and EGLE selected in-situ (in-place) treatment for the "
+            "groundwater, injecting chemicals near the I-696 embankment to break down "
+            "contaminants. EPA transferred the site to EGLE in February 2021 to "
+            "operate and maintain the system. EGLE also lists Electro-Plating "
+            "Services as a PFAS investigation site."
+        ),
+        "refs": [
+            {"label": "EPA — Electro-Plating Services / I-696 Release Site",
+             "url": "https://www.epa.gov/mi/electro-plating-services-i696-release-site"},
+            {"label": "Michigan EGLE — Electro-Plating Services / I-696 Incident",
+             "url": "https://www.michigan.gov/egle/0,9429,7-135-3312_4118-515339--,00.html"},
+            {"label": "MPART — Electro-Plating Services (Oakland County)",
+             "url": "https://www.michigan.gov/pfasresponse/investigations/sites-aoi/oakland-county/electro-plating-services"},
+        ],
+    },
 ]
 
 
