@@ -1811,6 +1811,15 @@ body.search-open .active-layer-badge { display: none; }
   margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line);
   font-size: 10.5px; font-style: italic; color: var(--muted);
 }
+/* Clean Water Act reporting-vs-discharge tag (the one typed distinction). */
+.echo-kind {
+  font-size: 10.5px; line-height: 1.45; margin: 3px 0 7px; padding: 5px 8px; border-radius: 6px;
+}
+.echo-kind.reporting { background: rgba(88,166,255,.10); border: 1px solid #58a6ff55; color: var(--text); }
+.echo-kind.discharge { background: rgba(248,81,73,.10); border: 1px solid #f8514955; color: var(--text); }
+.echo-kind-i { font-size: 10.5px; }
+.echo-kind-i.reporting { color: #8cc4ff; }
+.echo-kind-i.discharge { color: #ff9b94; }
 /* Multi-facility penalty caveat — shares the same value across sites (e.g. a
    national corporate settlement). Reads as a warning without hiding the number. */
 .echo-multi-note { margin-top: 3px !important; }

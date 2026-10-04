@@ -3328,8 +3328,8 @@
 
   function echoFlags(d) {
     const out = [];
-    if (d.snc_flag === 'Y') out.push('<span class="echo-flag snc" title="Significant Noncompliance — EPA\'s designation for the most serious or repeated violations (CWA/RCRA/SDWA)">SNC</span>');
-    if (d.caa_hpv_flag === 'Y') out.push('<span class="echo-flag hpv" title="Clean Air Act High Priority Violator">CAA HPV</span>');
+    if (d.snc_flag === 'Y') out.push('<span class="echo-flag snc gloss-term" data-gloss="SNC" tabindex="0">SNC</span>');
+    if (d.caa_hpv_flag === 'Y') out.push('<span class="echo-flag hpv gloss-term" data-gloss="HPV" tabindex="0">CAA HPV</span>');
     return out.join(' ');
   }
 
@@ -3342,23 +3342,72 @@
     sdwa: 'public drinking-water systems',
   };
 
+  // Attach data-gloss ONLY when the exact term has a live definition. Undefined
+  // keys fail silently (the bug this work fixes), so every attribute is gated on
+  // the glossary — no new dangling references can be introduced.
+  function glossDefined(term) {
+    return !!(window.PMGloss && PMGloss.GLOSSARY
+      && Object.prototype.hasOwnProperty.call(PMGloss.GLOSSARY, term));
+  }
+  // Wrap text as a tappable/hoverable glossary term when defined, else plain text.
+  function glossSpan(text, term) {
+    term = term == null ? text : term;
+    return glossDefined(term)
+      ? `<span class="gloss-term" data-gloss="${esc(term)}" tabindex="0">${esc(text)}</span>`
+      : esc(text);
+  }
+  // A trailing "?" info icon, only when the term is defined.
+  function glossIcon(term) {
+    return glossDefined(term) ? ' ' + PMGloss.infoIcon(term) : '';
+  }
+
+  // Clean Water Act violation TYPE is the ONLY ECHO field whose value encodes
+  // whether a finding is a reporting/paperwork failure or an actual discharge.
+  // NEVER inferred for the generic 'Violation Identified', the overall badge,
+  // the SNC/HPV flags, or the CAA/RCRA/SDWA fields — their data carries no type.
+  const _ECHO_CWA_REPORTING = new Set([
+    'Failure to Report DMR - Not Received', 'Compliance/Permit Schedule - Reporting']);
+  const _ECHO_CWA_DISCHARGE = new Set([
+    'Effluent - Monthly Average Limit', 'Effluent - Non-monthly Average Limit']);
+  function echoCwaKindTag(v) {
+    if (_ECHO_CWA_REPORTING.has(v))
+      return '<div class="echo-kind reporting">📄 <b>Reporting failure</b> — a required report wasn’t submitted. This does <b>not</b>, by itself, mean anything was discharged.</div>';
+    if (_ECHO_CWA_DISCHARGE.has(v))
+      return '<div class="echo-kind discharge">💧 <b>Discharge violation</b> — a permitted discharge limit was exceeded.</div>';
+    return '';
+  }
+  // Backend program labels (from /api/.../echo _echo_build) → acronym gloss key.
+  const _ECHO_LABEL_ACR = {
+    'Clean Air Act': 'CAA', 'Clean Water Act': 'CWA',
+    'RCRA (hazardous waste)': 'RCRA', 'Safe Drinking Water': 'SDWA',
+  };
+  function echoCwaKindInline(v) {
+    if (_ECHO_CWA_REPORTING.has(v)) return ' <span class="echo-kind-i reporting">(reporting failure — nothing shown as discharged)</span>';
+    if (_ECHO_CWA_DISCHARGE.has(v)) return ' <span class="echo-kind-i discharge">(discharge-limit exceedance)</span>';
+    return '';
+  }
+
   // Full ECHO facility popup (lazy-loaded detail `d`; `f` is the marker stub).
   function echoPopupHtml(d, f) {
     const color = d.status_color || (f && f.color) || '#9ca3af';
     const status = d.compliance_status || 'No status reported';
-    // Program row with a short plain-language explainer of what it regulates.
-    const prog = (label, desc, v) => v
-      ? `<div class="row"><span class="k">${label} <span class="muted">— ${desc}</span>:</span> ${esc(v)}</div>` : '';
+    // Program row with a short plain-language explainer of what it regulates. The
+    // program name links to its acronym gloss; the status VALUE links to its own
+    // gloss; the Clean Water Act row adds a reporting-vs-discharge tag when the
+    // value supports it.
+    const prog = (label, acr, desc, v, isCwa) => v
+      ? `<div class="row"><span class="k">${glossSpan(label, acr)} <span class="muted">— ${desc}</span>:</span> ${glossSpan(v, v)}</div>`
+        + (isCwa ? echoCwaKindTag(v) : '') : '';
     const pen = echoFmtPenalty(d.total_penalties);
     const fa = [];
     if (d.caa_formal_action_count) fa.push(`CAA ${d.caa_formal_action_count}`);
     if (d.cwa_formal_action_count) fa.push(`CWA ${d.cwa_formal_action_count}`);
     if (d.rcra_formal_action_count) fa.push(`RCRA ${d.rcra_formal_action_count}`);
     if (d.sdwa_formal_action_count) fa.push(`SDWA ${d.sdwa_formal_action_count}`);
-    const progs = [prog('Clean Air Act', ECHO_PROGRAM_DESC.caa, d.caa_status),
-                   prog('Clean Water Act', ECHO_PROGRAM_DESC.cwa, d.cwa_status),
-                   prog('RCRA', ECHO_PROGRAM_DESC.rcra, d.rcra_status),
-                   prog('Safe Drinking Water Act', ECHO_PROGRAM_DESC.sdwa, d.sdwa_status)].join('');
+    const progs = [prog('Clean Air Act', 'CAA', ECHO_PROGRAM_DESC.caa, d.caa_status),
+                   prog('Clean Water Act', 'CWA', ECHO_PROGRAM_DESC.cwa, d.cwa_status, true),
+                   prog('RCRA', 'RCRA', ECHO_PROGRAM_DESC.rcra, d.rcra_status),
+                   prog('Safe Drinking Water Act', 'SDWA', ECHO_PROGRAM_DESC.sdwa, d.sdwa_status)].join('');
     // County → navigate to that county (like the rest of the app).
     const county = d.county
       ? (d.county_fips
@@ -3382,22 +3431,22 @@
       : '';
     const noLoc = (d && d.no_location) || (f && f.no_location);
     return `<div class="echo-popup">
-      <div class="echo-status"><span class="echo-badge" style="background:${color}">${esc(status)}</span> ${echoFlags(d)}</div>
+      <div class="echo-status"><span class="echo-badge" style="background:${color}">${esc(status)}</span>${glossIcon(status)} ${echoFlags(d)}</div>
       <h4>${esc(d.name || (f && f.name) || 'Facility')}</h4>
       <div class="echo-meta">${county}FRS ${esc(d.registry_id)}</div>
       ${noLoc ? `<div class="echo-noloc">⚠ No verified location. EPA's FRS placed this record at a state/area centroid, not its actual site — it is a real enforcement record but its map position is not meaningful, so it is excluded from nearby-facility results.</div>` : ''}
       ${progs ? `<div class="echo-progs">${progs}</div>` : ''}
       <div class="echo-facts">
-        <div class="row"><span class="k">Quarters in noncompliance:</span> ${d.qtrs_with_nc != null ? d.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>
+        <div class="row"><span class="k">${glossSpan('Quarters in noncompliance', 'quarters in noncompliance')}:</span> ${d.qtrs_with_nc != null ? d.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>
         ${inspCount}
         ${inspDate}
         <div class="row"><span class="k" title="Total assessed or final MONETARY penalties from formal enforcement actions in the last 5 years (federal + state/local combined). Excludes injunctive relief, compliance costs, and Supplemental Environmental Projects. Source: EPA ECHO.">Penalties (last 5 yrs):</span> ${d.penalty_count || 0}${pen ? ` · ${pen}` : ''}</div>
         ${echoMultiFacilityNote(d)}
-        ${fa.length ? `<div class="row"><span class="k">Formal actions:</span> ${fa.join(' · ')}</div>` : ''}
+        ${fa.length ? `<div class="row"><span class="k">${glossSpan('Formal actions', 'formal action')}:</span> ${fa.join(' · ')}</div>` : ''}
       </div>
       ${xlinks ? `<div class="echo-xlinks">${xlinks}</div>` : ''}
       ${d.dfr_url ? `<div class="echo-links"><a href="${d.dfr_url}" target="_blank" rel="noopener">EPA Detailed Facility Report (full report) →</a></div>` : ''}
-      <div class="echo-note">Alleged violations — EPA/state determinations, not final adjudications. Status covers the last 12 federal fiscal quarters (~3&nbsp;yrs). Source: EPA ECHO.</div>
+      <div class="echo-note">${glossSpan('Alleged violations', 'alleged violations')} — EPA/state determinations, not final adjudications. Status covers the last 12 federal fiscal quarters (~3&nbsp;yrs). Source: EPA ECHO.</div>
     </div>`;
   }
 
@@ -3410,11 +3459,11 @@
     const status = e.compliance_status || 'No status reported';
     const pen = echoFmtPenalty(e.total_penalties);
     const bits = [
-      `<div class="row"><span class="k">EPA compliance:</span> <span class="echo-badge sm" style="background:${color}">${esc(status)}</span> ${echoFlags(e)}</div>`,
+      `<div class="row"><span class="k">EPA compliance:</span> <span class="echo-badge sm" style="background:${color}">${esc(status)}</span>${glossIcon(status)} ${echoFlags(e)}</div>`,
     ];
     if (e.date_last_inspection)
       bits.push(`<div class="row"><span class="k">Last inspection:</span> ${esc(e.date_last_inspection)}</div>`);
-    bits.push(`<div class="row"><span class="k">Quarters in noncompliance:</span> ${e.qtrs_with_nc != null ? e.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>`);
+    bits.push(`<div class="row"><span class="k">${glossSpan('Quarters in noncompliance', 'quarters in noncompliance')}:</span> ${e.qtrs_with_nc != null ? e.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>`);
     if (pen) {
       bits.push(`<div class="row"><span class="k" title="Total assessed or final MONETARY penalties from formal enforcement actions in the last 5 years (federal + state/local combined). Excludes injunctive relief, compliance costs, and Supplemental Environmental Projects. Source: EPA ECHO.">Total penalties (last 5 yrs):</span> ${pen}</div>`);
       const mf = echoMultiFacilityNote(e);
@@ -7317,20 +7366,21 @@
     }
     if (layer === 'echo') {
       const flags = [
-        it.snc ? '<span class="rpt-tag" style="background:#b91c1c;color:#fff" title="Significant Noncompliance">SNC</span>' : '',
-        it.hpv ? '<span class="rpt-tag" style="background:#d97706;color:#0d1117" title="Clean Air Act High Priority Violator">CAA HPV</span>' : '',
+        it.snc ? '<span class="rpt-tag gloss-term" style="background:#b91c1c;color:#fff" data-gloss="SNC" tabindex="0">SNC</span>' : '',
+        it.hpv ? '<span class="rpt-tag gloss-term" style="background:#d97706;color:#0d1117" data-gloss="HPV" tabindex="0">CAA HPV</span>' : '',
       ].filter(Boolean).join(' ');
       const progs = (it.programs || [])
-        .map((p) => `${_rEsc(p.label)}: ${_rEsc(p.status)}`).join(' · ');
+        .map((p) => `${glossSpan(p.label, _ECHO_LABEL_ACR[p.label] || p.label)}: ${glossSpan(p.status, p.status)}`
+          + (p.label === 'Clean Water Act' ? echoCwaKindInline(p.status) : '')).join(' · ');
       const pen = echoFmtPenalty(it.total_penalties);
       const meta = [
         `Inspections (last 5 yrs): ${it.inspection_count != null ? it.inspection_count : '—'}`,
         it.date_last_inspection ? `Most recent inspection: ${_rEsc(it.date_last_inspection)}` : '',
-        it.qtrs_with_nc != null ? `${it.qtrs_with_nc}/12 quarters in noncompliance` : '',
+        it.qtrs_with_nc != null ? `${it.qtrs_with_nc}/12 ${glossSpan('quarters in noncompliance', 'quarters in noncompliance')}` : '',
         `Penalties (last 5 yrs): ${it.penalty_count || 0}${pen ? ` · ${pen}` : ''}`,
-        (it.formal_actions && it.formal_actions.length) ? `Formal actions: ${it.formal_actions.join(' · ')}` : '',
+        (it.formal_actions && it.formal_actions.length) ? `${glossSpan('Formal actions', 'formal action')}: ${it.formal_actions.join(' · ')}` : '',
       ].filter(Boolean).join(' · ');
-      return `${flags ? flags + ' ' : ''}<b>${_rEsc(it.compliance_status || 'Status not reported')}</b>`
+      return `${flags ? flags + ' ' : ''}<b>${glossSpan(it.compliance_status || 'Status not reported', it.compliance_status || '')}</b>`
         + `${progs ? `<div class="rpt-echo-progs">${progs}</div>` : ''}`
         + `<div class="rpt-echo-meta">${meta}</div>`
         + (it.dfr_url ? `<div class="rpt-echo-dfr"><a href="${_rEsc(it.dfr_url)}" target="_blank" rel="noopener">EPA Detailed Facility Report →</a></div>` : '');

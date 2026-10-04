@@ -423,6 +423,139 @@
     'age-adjusted rate':
       'A rate rebalanced to a standard age mix so counties with different age profiles ' +
       'can be compared fairly.',
+
+    // ---- Fixes for previously-undefined gloss references ----
+    // (All sourced from EPA pages — see the audit commit message.)
+    'SDWA':
+      'The Safe Drinking Water Act — the federal law that protects the public\'s ' +
+      'drinking water. It lets the EPA set safety standards for the water that public ' +
+      'systems deliver to the tap.',
+    'CEMS':
+      'Continuous Emissions Monitoring System — equipment on a smokestack that keeps ' +
+      'sampling the exhaust and makes a permanent, measured record of how much pollution ' +
+      '(such as sulfur dioxide, nitrogen oxides, and carbon dioxide) is going out.',
+    'MATS':
+      'Mercury and Air Toxics Standards — limits the EPA issued in 2011 on the mercury ' +
+      'and other hazardous pollutants that coal- and oil-burning power plants may release ' +
+      'into the air.',
+    'CSAPR':
+      'Cross-State Air Pollution Rule — EPA rules requiring power plants in eastern states ' +
+      'to cut the pollution (sulfur dioxide and nitrogen oxides) that drifts across state ' +
+      'lines and worsens the air downwind.',
+    'Acid Rain Program':
+      'A federal program that began in 1995 and requires power plants to cut the pollution ' +
+      '(sulfur dioxide and nitrogen oxides) that is the main cause of acid rain.',
+    'Clean Air Markets':
+      'EPA\'s programs that cut air pollution from power plants — addressing acid rain, ' +
+      'soot and smog, and pollution that blows across state lines — and publish the plants\' ' +
+      'measured emissions.',
+    'FracFocus':
+      'The national public registry where oil-and-gas operators disclose the chemicals used ' +
+      'in hydraulic fracturing at individual wells. It is run by the Ground Water Protection ' +
+      'Council and the Interstate Oil and Gas Compact Commission (not by EPA).',
+    'biogenic':
+      'Emissions that come from living things rather than human activity — mainly trees, ' +
+      'plants, and soil microbes. In EPA\'s air-toxics model these natural sources give off ' +
+      'chemicals such as formaldehyde and acetaldehyde.',
+
+    // ---- EPA ECHO: enforcement & compliance vocabulary ----
+    // Programs the ECHO popup names (acronym keys; the visible label is the full name).
+    'CAA':
+      'The Clean Air Act — the federal law that regulates pollution released into the air ' +
+      'from sources like factories, power plants, and vehicles, and lets the EPA set limits ' +
+      'to protect public health.',
+    'CWA':
+      'The Clean Water Act — the federal law that controls what may be discharged into the ' +
+      'nation\'s lakes, rivers, and streams and sets quality standards for surface waters.',
+    'NPDES':
+      'A federal permit program that controls water pollution by setting limits on what a ' +
+      'facility may release from a pipe or other single outlet into lakes, rivers, and ' +
+      'streams, along with rules for monitoring and reporting those releases.',
+    'FRS':
+      'EPA\'s Facility Registry Service — a central database that identifies facilities and ' +
+      'places subject to environmental rules and gives each one a single EPA ID (a Registry ' +
+      'ID) so its records across EPA programs can be linked together.',
+    'DMR':
+      'Discharge Monitoring Report — the form a facility fills out to report the results of ' +
+      'the water-pollution monitoring its permit requires: how much of each pollutant it ' +
+      'released, and whether that went over the permit\'s limits.',
+    // Flags and tiers.
+    'SNC':
+      'Significant Noncompliance — EPA\'s label for the most serious water-pollution or ' +
+      'hazardous-waste violations: big enough, or lasting long enough, to be an enforcement ' +
+      'priority.',
+    'Significant Noncompliance':
+      'EPA\'s label for the most serious water-pollution or hazardous-waste violations — big ' +
+      'enough, or lasting long enough, to be an enforcement priority. Abbreviated SNC.',
+    'HPV':
+      'High Priority Violator — EPA\'s label for a Clean Air Act violation serious enough to ' +
+      'be an enforcement priority. A source stays a high priority violator until it is back ' +
+      'in full compliance and any penalties are paid.',
+    'High Priority Violator':
+      'EPA\'s label for a Clean Air Act violation serious enough to be an enforcement ' +
+      'priority. A source keeps this label until it is back in full compliance and any ' +
+      'penalties are paid. Abbreviated HPV.',
+    // Overall and per-program compliance-status values (shown verbatim from ECHO).
+    'Significant Violation':
+      'The most serious compliance tier in EPA\'s records — a high priority violation (air), ' +
+      'significant noncompliance (water or hazardous waste), or enforcement priority ' +
+      '(drinking water), depending on the program.',
+    'Violation Identified':
+      'EPA or a state has recorded that the facility is in violation of an environmental ' +
+      'regulation.',
+    'Violation':
+      'A recorded violation below the most serious ("significant") tier — one that isn\'t a ' +
+      'priority on its own but can become one if it is repeated.',
+    'No Violation Identified':
+      'No violation is recorded for this facility in EPA\'s national systems of record for ' +
+      'the period shown.',
+    'Significant Noncomplier':
+      'EPA\'s label for the most serious hazardous-waste violators — for example, a site ' +
+      'that has caused or is likely to cause exposure to hazardous waste, or that has strayed ' +
+      'far from what its permit or the rules require.',
+    'Enforcement Priority':
+      'For a public water system: unresolved serious, repeated, or continuing violations that ' +
+      'must be fixed or formally acted on within six months.',
+    'Unknown':
+      'No compliance determination is available in EPA\'s records for this facility.',
+    'Inactive':
+      'The facility is no longer active — for example, it has closed, gone out of business, ' +
+      'or merged into another system.',
+    'Terminated Permit':
+      'The facility\'s discharge permit has been ended and is no longer in effect, so there ' +
+      'is no current permit to comply with.',
+    'Not Applicable':
+      'A compliance status isn\'t tracked here because the permit is pending, not needed, or ' +
+      'terminated, or the activity isn\'t permitted.',
+    // Clean Water Act violation TYPES — reporting vs. actual discharge.
+    'Failure to Report DMR - Not Received':
+      'A reporting failure: a required water-monitoring report (a DMR) was not submitted. ' +
+      'This is a paperwork problem — on its own it does NOT mean anything was discharged.',
+    'Compliance/Permit Schedule - Reporting':
+      'A reporting failure: a report that the permit\'s compliance timetable requires was not ' +
+      'submitted on time. A paperwork problem, not a discharge.',
+    'Effluent - Monthly Average Limit':
+      'A discharge violation: the facility\'s released wastewater exceeded a permit limit ' +
+      'measured as a monthly average.',
+    'Effluent - Non-monthly Average Limit':
+      'A discharge violation: the released wastewater exceeded a permit limit measured over ' +
+      'a period other than a month (such as a daily or weekly limit).',
+    'Compliance/Permit Schedule - Violations':
+      'The facility missed a required step or deadline on the cleanup/compliance timetable ' +
+      'built into its permit.',
+    // Enforcement process terms.
+    'formal action':
+      'A formal enforcement action — an official legal step the government takes over a ' +
+      'violation, such as an order to fix it or an assessed penalty (as opposed to an ' +
+      'informal warning). The penalty figures shown come from these formal actions.',
+    'quarters in noncompliance':
+      'How many of the last 12 three-month periods (quarters) the facility had a recorded ' +
+      'violation or was in noncompliance. 12 of 12 means every quarter for the last three years.',
+    'alleged violations':
+      'These are violations as determined by EPA or a state while inspecting a facility or ' +
+      'reviewing the facility\'s own reports. They help track a case through the enforcement ' +
+      'process and are not a final court or administrative ruling — so they are considered ' +
+      'alleged.',
   };
 
   function gloss(term) { return GLOSSARY[term] || term; }
