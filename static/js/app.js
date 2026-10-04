@@ -482,6 +482,7 @@
       const isCluster = typeof group.getVisibleParent === 'function';
       group.eachLayer((m) => {
         if (!m.getLatLng) return;                 // skip polygons / non-point layers
+        if (m._noLocation) return;                // centroid-parked record: no real location
         const ll = m.getLatLng();
         if (!box.contains(ll)) return;
         if (isCluster) {
@@ -2907,10 +2908,12 @@
     const inspDate = d.date_last_inspection
       ? `<div class="row"><span class="k" title="Date of the most recent inspection on record — NOT limited to the last 5 years">Most recent inspection:</span> ${esc(d.date_last_inspection)}</div>`
       : '';
+    const noLoc = (d && d.no_location) || (f && f.no_location);
     return `<div class="echo-popup">
       <div class="echo-status"><span class="echo-badge" style="background:${color}">${esc(status)}</span> ${echoFlags(d)}</div>
       <h4>${esc(d.name || (f && f.name) || 'Facility')}</h4>
       <div class="echo-meta">${county}FRS ${esc(d.registry_id)}</div>
+      ${noLoc ? `<div class="echo-noloc">⚠ No verified location. EPA's FRS placed this record at a state/area centroid, not its actual site — it is a real enforcement record but its map position is not meaningful, so it is excluded from nearby-facility results.</div>` : ''}
       ${progs ? `<div class="echo-progs">${progs}</div>` : ''}
       <div class="echo-facts">
         <div class="row"><span class="k">Quarters in noncompliance:</span> ${d.qtrs_with_nc != null ? d.qtrs_with_nc : '—'} <span class="muted">of last 12</span></div>
@@ -3007,6 +3010,10 @@
           { maxWidth: 330, className: 'echo-popup-wrap' });
         bindEchoDetail(m, f);
         m._pickName = f.name;
+        // EPA FRS parked this record at a state/area centroid (no usable location).
+        // Keep it visible on the ECHO layer but out of the "what's here" picker,
+        // and label it in the popup.
+        m._noLocation = !!f.no_location;
         grp.addLayer(m);
       }
     }

@@ -3176,9 +3176,12 @@ def api_echo_sites():
         return jsonify({"filter": filt, "count": 0, "facilities": [],
                         "error": "unknown filter"}), 400
     rows = conn.execute(
-        f"""SELECT registry_id, facility_name, latitude, longitude,
+        f"""SELECT registry_id, facility_name, latitude, longitude, county_fips,
                    compliance_status, snc_flag, caa_hpv_flag
               FROM echo_facilities WHERE {where}""").fetchall()
+    # Centroid-parked rows (no usable location) — flagged so the UI can label them
+    # and keep them out of distance-based features (the "what's here" picker).
+    badcoords = _echo_no_location_coords(conn)
     conn.close()
     facs = [{
         "registry_id": r["registry_id"], "name": r["facility_name"],
@@ -3186,11 +3189,41 @@ def api_echo_sites():
         "status": r["compliance_status"],
         "color": _echo_status_color(r["compliance_status"]),
         "snc": r["snc_flag"] == "Y", "hpv": r["caa_hpv_flag"] == "Y",
+        "no_location": _echo_is_no_location(r, badcoords),
     } for r in rows]
     statuses = [{"label": k, "color": v} for k, v in ECHO_STATUS_COLORS.items()]
     statuses.append({"label": "No status reported", "color": ECHO_STATUS_NULL_COLOR})
     return jsonify({"filter": filt, "count": len(facs), "facilities": facs,
                     "statuses": statuses, "available": True})
+
+
+def _echo_no_location_coords(conn, min_cluster: int = 25) -> set:
+    """Coordinates where many ECHO rows WITHOUT a Michigan county_fips are stacked.
+    These are EPA FRS placeholders — facilities 'parked' at a state/area centroid
+    (non-physical, mobile, or multi-site registrations: city None/UNKNOWN/VARIOUS
+    LOCATIONS/GREAT LAKES, no county), not real locations. Detected by PATTERN
+    (no county + a large same-coordinate cluster), never by hardcoding a specific
+    coordinate, so any future centroid is caught automatically. Returns a set of
+    (round(lat,4), round(lng,4)). The dominant one is the Lower-Peninsula centroid
+    with ~8,783 rows; a few smaller agency-address stacks also qualify."""
+    rows = conn.execute(
+        "SELECT ROUND(latitude,4) la, ROUND(longitude,4) lo "
+        "FROM echo_facilities "
+        "WHERE latitude IS NOT NULL AND longitude IS NOT NULL "
+        "AND (county_fips IS NULL OR county_fips IN ('','0','00000')) "
+        "GROUP BY la, lo HAVING COUNT(*) >= ?", (min_cluster,)).fetchall()
+    return {(r["la"], r["lo"]) for r in rows}
+
+
+def _echo_is_no_location(r, badcoords: set) -> bool:
+    """True when this ECHO row has no usable location: no Michigan county AND its
+    coordinate sits on one of the detected centroid clusters (see above)."""
+    if r["county_fips"] not in (None, "", "0", "00000"):
+        return False
+    la, lo = r["latitude"], r["longitude"]
+    if la is None or lo is None:
+        return False
+    return (round(la, 4), round(lo, 4)) in badcoords
 
 
 def _echo_crosslinks(conn, r) -> list:
@@ -3237,8 +3270,9 @@ def api_echo_facility(registry_id: str):
         conn.close()
         return jsonify({"found": False}), 404
     r = conn.execute(
-        f"SELECT {_ECHO_COLS}, county, county_fips, matched_tri_ids, "
-        f"matched_sems_ids, matched_rcra_ids FROM echo_facilities WHERE registry_id=?",
+        f"SELECT {_ECHO_COLS}, county, county_fips, latitude, longitude, "
+        f"matched_tri_ids, matched_sems_ids, matched_rcra_ids "
+        f"FROM echo_facilities WHERE registry_id=?",
         (registry_id,)).fetchone()
     if not r:
         conn.close()
@@ -3247,6 +3281,7 @@ def api_echo_facility(registry_id: str):
     payload["found"] = True
     payload["county"] = r["county"]
     payload["county_fips"] = r["county_fips"]
+    payload["no_location"] = _echo_is_no_location(r, _echo_no_location_coords(conn))
     # EPA's Detailed Facility Report, keyed on the FRS Registry ID (verified live).
     payload["dfr_url"] = ("https://echo.epa.gov/detailed-facility-report?fid="
                           + str(r["registry_id"]))
@@ -3980,6 +4015,11 @@ _REPORT_DISCLAIMERS = [
     "This reflects only what is documented in public datasets. Many hazards are "
     "not publicly mapped, and each underlying dataset has its own coverage limits "
     "(see the layer caveats and Data Sources in the app).",
+    "Facility locations come from EPA's Facility Registry Service (FRS) and the "
+    "source feeds, whose geocoding varies in precision. A facility may be plotted "
+    "some distance from its actual site, and distances here are approximate. "
+    "Records EPA could not place are excluded from the distance results rather than "
+    "shown at a false location.",
 ]
 
 _REPORT_SOURCES = [

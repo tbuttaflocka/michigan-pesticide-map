@@ -1817,6 +1817,12 @@ body.search-open .active-layer-badge { display: none; }
 .echo-multi-note .muted {
   display: block; font-size: 10.5px; line-height: 1.35; color: #d9a441;
 }
+/* "No verified location" banner — FRS parked this record at a centroid. */
+.echo-noloc {
+  margin: 6px 0; padding: 6px 8px; border: 1px solid #d9a441; border-radius: 6px;
+  background: rgba(217,164,65,.12); color: #e8c37a;
+  font-size: 10.5px; line-height: 1.35;
+}
 .echo-county-link {
   font: inherit; color: #58a6ff; background: none; border: none; padding: 0;
   cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
