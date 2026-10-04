@@ -1047,6 +1047,12 @@ a:hover { text-decoration: underline; }
   letter-spacing: .6px;
   margin-right: 6px;
 }
+/* While the search results dropdown is open, hide the floating badge so it
+   never covers the first result (it sits in the map's stacking context and
+   otherwise paints over the dropdown). Restored when the dropdown closes. The
+   badge keeps updating underneath; only its visibility is toggled. Mirrors the
+   body.popup-open rule that hides the FABs. */
+body.search-open .active-layer-badge { display: none; }
 
 /* legend marker-key entries for stacked overlays */
 .legend-markers { margin-top: 8px; }

@@ -6181,8 +6181,18 @@
     let active = -1;
     let t = null;
 
-    function openList() { show(out); input.setAttribute('aria-expanded', 'true'); }
-    function closeList() { hide(out); input.setAttribute('aria-expanded', 'false'); }
+    // Mark the body while the results dropdown is open so CSS can hide the
+    // floating "Currently showing" map badge (which otherwise paints over the
+    // first result) — same approach as body.popup-open hiding the FABs. Both
+    // open/close go through these two functions, so every path is covered.
+    function openList() {
+      show(out); input.setAttribute('aria-expanded', 'true');
+      document.body.classList.add('search-open');
+    }
+    function closeList() {
+      hide(out); input.setAttribute('aria-expanded', 'false');
+      document.body.classList.remove('search-open');
+    }
 
     function setActive(i) {
       if (active >= 0 && items[active]) items[active].el.classList.remove('active');
