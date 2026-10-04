@@ -91,6 +91,12 @@
       noGeom: [],                  // the two AOCs with no boundary file
       _detail: {},                 // slug -> lazy-loaded /api/aoc/<slug>
     },
+    inspect: {                     // "what's here?" pin + query-radius circle
+      layer: null,                 // L.layerGroup holding the pin + circle
+      pin: null, circle: null,
+      latlng: null, radius: 3,     // current query point + radius (mi)
+      popup: null,
+    },
     contam: {
       loaded: false,
       sites: [],                   // all sites from /api/contamination/sites
@@ -387,6 +393,16 @@
       }
       whatsHere(e.latlng);
     });
+    // When the "what's here?" popup closes (×, map click, Esc, or another popup
+    // opening), clear its pin + circle. Guarded on identity so the close fired by
+    // openOn() replacing an old popup during a NEW right-click doesn't wipe the
+    // graphics we just drew for the new point.
+    state.map.on('popupclose', (e) => {
+      if (state.inspect.popup && e.popup === state.inspect.popup) {
+        state.inspect.popup = null;
+        clearInspectGraphics();
+      }
+    });
     showInspectHint();
 
     // Watershed polygons sit just above the county choropleth (overlayPane
@@ -399,6 +415,15 @@
     // overlays above the county choropleth, below the marker panes).
     state.map.createPane('aoc');
     state.map.getPane('aoc').style.zIndex = 415;
+
+    // "What's here?" pin + radius circle. pointer-events:none on the whole pane
+    // guarantees the pin and circle never intercept clicks on markers underneath
+    // and never reach the cross-layer picker's hit-test. Above markers (z600),
+    // below popups (z700).
+    state.map.createPane('inspect');
+    const _ipane = state.map.getPane('inspect');
+    _ipane.style.zIndex = 680;
+    _ipane.style.pointerEvents = 'none';
 
     // Dedicated pane for water-monitoring markers, above the choropleth
     // (overlayPane z400) and default markerPane (z600) so county polygons can
@@ -571,8 +596,6 @@
   // "What's here?" — quick look at records near a right-clicked / long-pressed
   // point (see /api/whats-here). A lighter companion to the full address report.
   // ========================================================================
-  let _whatsHerePopup = null;
-
   // Show the right-click/long-press hint once per browser (it's a discoverable-
   // -only-if-told gesture). Dismissed by click, timeout, or the first use.
   const INSPECT_HINT_KEY = 'pm_inspect_hint_v1';
@@ -593,36 +616,84 @@
     if (state.map) state.map.once('contextmenu', dismiss);
   }
 
-  async function whatsHere(latlng) {
-    const lat = latlng.lat, lng = latlng.lng;
-    // Anchor a popup at the point immediately with a loading state, so the
-    // gesture feels responsive while the radius query runs.
+  // The pin + query-radius circle. Both live in the 'inspect' pane, which has
+  // pointer-events:none, so neither intercepts clicks on markers underneath nor
+  // reaches the cross-layer picker. The pin is a centred crosshair (distinct from
+  // the 📍 place-pin at zIndexOffset 1500 and the 📍 report-pin at 1000).
+  function drawInspectGraphics(latlng, radiusMi) {
+    clearInspectGraphics();
+    const g = L.layerGroup();
+    L.circle(latlng, {
+      pane: 'inspect', interactive: false,
+      radius: radiusMi * 1609.34,
+      color: '#22d3ee', weight: 1.5, opacity: 0.9, dashArray: '4 4',
+      fillColor: '#22d3ee', fillOpacity: 0.06,
+    }).addTo(g);
+    const pin = L.marker(latlng, {
+      pane: 'inspect', interactive: false, keyboard: false, zIndexOffset: 2000,
+      icon: L.divIcon({ className: 'inspect-pin-icon',
+        html: '<div class="inspect-pin"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+    }).addTo(g);
+    g.addTo(state.map);
+    state.inspect.layer = g;
+    state.inspect.pin = pin;
+    state.inspect.latlng = latlng;
+    state.inspect.radius = radiusMi;
+  }
+
+  function clearInspectGraphics() {
+    if (state.inspect.layer) state.map.removeLayer(state.inspect.layer);
+    state.inspect.layer = null;
+    state.inspect.pin = null;
+    state.inspect.circle = null;
+  }
+
+  // A fresh right-click: drop the pin + circle, reset to the default 3-mi radius,
+  // and open the panel. The pin/circle clear automatically when the popup closes.
+  function whatsHere(latlng) {
+    state.inspect.radius = 3;                         // default stays 3 on a new point
     const popup = L.popup({ className: 'wh-popup-wrap', maxWidth: 320,
-                            minWidth: 260, autoPan: true, closeButton: true })
+                            minWidth: 264, autoPan: true, closeButton: true })
       .setLatLng(latlng)
-      .setContent('<div class="wh-popup"><div class="wh-loading">Looking around this point…</div></div>')
-      .openOn(state.map);
-    _whatsHerePopup = popup;
+      .setContent('<div class="wh-popup"><div class="wh-loading">Looking around this point…</div></div>');
+    popup.openOn(state.map);          // closes any prior popup (its popupclose nulls inspect.popup)
+    state.inspect.popup = popup;      // adopt the new popup AFTER the old one closed
+    inspectQuery(latlng, popup);
+  }
+
+  // Query (or re-query, on a radius change) the SAME point at the current radius,
+  // redraw the circle to match, and render into the existing popup. The pin does
+  // not move.
+  async function inspectQuery(latlng, popup) {
+    const radius = state.inspect.radius;
+    drawInspectGraphics(latlng, radius);
     let d;
     try {
-      d = await api('/api/whats-here', { lat: lat.toFixed(6), lng: lng.toFixed(6) });
+      d = await api('/api/whats-here', { lat: latlng.lat.toFixed(6),
+                                         lng: latlng.lng.toFixed(6), radius });
     } catch (e) {
-      if (_whatsHerePopup === popup) {
+      if (state.inspect.popup === popup) {
         popup.setContent('<div class="wh-popup"><p class="muted small">Could not look up this point.</p></div>');
       }
       return;
     }
-    if (_whatsHerePopup !== popup || !state.map.hasLayer(popup)) return;  // user moved on
+    if (state.inspect.popup !== popup || !state.map.hasLayer(popup)) return;  // moved on
     popup.setContent(whatsHereHtml(d));
     const el = popup.getElement();
-    if (el) {
-      const btn = el.querySelector('.wh-full');
-      if (btn) btn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        state.map.closePopup(popup);
-        openReportForPoint(Number(btn.dataset.lat), Number(btn.dataset.lng));
-      });
-    }
+    if (!el) return;
+    el.querySelectorAll('.wh-r').forEach((b) => b.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const r = Number(b.dataset.r);
+      if (r === state.inspect.radius) return;
+      state.inspect.radius = r;
+      inspectQuery(latlng, popup);     // same point, new radius → redraw + re-query
+    }));
+    const full = el.querySelector('.wh-full');
+    if (full) full.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      state.map.closePopup(popup);
+      openReportForPoint(Number(full.dataset.lat), Number(full.dataset.lng));
+    });
   }
 
   function _whRow(it) {
@@ -639,8 +710,7 @@
       let rows;
       if (within.length) {
         rows = within.map(_whRow).join('');
-        const more = (c.count_3mi || 0) - within.length;
-        if (more > 0) rows += `<div class="wh-more">+ ${more} more within ${d.radius_mi} mi</div>`;
+        if (c.more > 0) rows += `<div class="wh-more">+ ${c.more} more within ${d.radius_mi} mi</div>`;
       } else if (c.nearest_beyond) {
         rows = `<div class="wh-nearest">Nearest is ${_whRowInline(c.nearest_beyond)} `
           + `<span class="wh-beyond">(beyond ${d.radius_mi} mi)</span></div>`;
@@ -648,19 +718,30 @@
         continue;
       }
       body += `<div class="wh-cat"><div class="wh-cat-head">${esc(c.label)}`
-        + (within.length ? `<span class="wh-cat-n">${within.length}${(c.count_3mi||0) > within.length ? '+' : ''}</span>` : '')
+        + (within.length ? `<span class="wh-cat-n">${c.count_within}</span>` : '')
         + `</div>${rows}</div>`;
     }
+    const radii = d.allowed_radii || [3, 5, 10];
+    const radiusSel = `<div class="wh-radius"><span class="wh-radius-k">Radius</span>`
+      + radii.map((r) => `<button type="button" class="wh-r${r === d.radius_mi ? ' active' : ''}" data-r="${r}">${r} mi</button>`).join('')
+      + `</div>`;
     const headline = d.any_within
-      ? `${d.total_within} record${d.total_within === 1 ? '' : 's'} within ${d.radius_mi} miles of this point`
-      : `No records within ${d.radius_mi} miles of this point — showing the nearest in each category`;
+      ? `${d.total_within} shown within ${d.radius_mi} miles of this point`
+      : `Nothing within ${d.radius_mi} miles — showing the nearest in each category`;
+    // Only 3 mi lines up with a _report_near ring; say so, and don't claim parity
+    // for the wider radii.
+    const ringNote = d.matches_report_ring
+      ? `<div class="wh-ringnote">3 mi matches the full report’s ring — these counts line up with it.</div>`
+      : `<div class="wh-ringnote">${d.radius_mi} mi is this panel’s own radius (wider than the report’s 3-mi ring), so these counts don’t match the address report.</div>`;
     const framing =
       `<div class="wh-framing">Records near this point from the datasets in this app. `
       + `<b>Absence of nearby records does not mean an area is clean</b> — many places have never been `
       + `sampled or inspected. Facility locations come from EPA FRS and are approximate.</div>`;
     return `<div class="wh-popup">`
       + `<div class="wh-head">What’s near here</div>`
+      + radiusSel
       + `<div class="wh-headline">${headline}</div>`
+      + ringNote
       + (body || '<div class="wh-empty muted">No mapped records in any category.</div>')
       + framing
       + `<button type="button" class="wh-full" data-lat="${d.lat}" data-lng="${d.lng}">`

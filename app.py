@@ -4519,10 +4519,14 @@ def _bearing_deg(lat1, lon1, lat2, lon2):
 _RINGS_MI = (1, 3, 5)
 
 
-def _layer_block(sorted_pairs, alat, alng, layer, build):
+def _layer_block(sorted_pairs, alat, alng, layer, build, radius=5, cap=12):
     """sorted_pairs: [(distance_mi, row), ...] ascending. build(row,dist)->dict of
-    layer-specific fields. Returns {within(<=5mi, enriched), nearest(any dist),
-    rings{1,3,5 counts}, count_5mi}."""
+    layer-specific fields. Returns {within(<=radius mi, enriched, capped at `cap`),
+    nearest(any dist), rings{1,3,5 counts}, count_5mi, count_within, radius_mi}.
+
+    Defaults (radius=5, cap=12) keep the address report's behavior byte-for-byte;
+    the "what's here?" panel passes a wider radius + its own cap. The extra return
+    keys (count_within, radius_mi) are ignored by callers that don't read them."""
     def mk(dist, row):
         base = {"layer": layer, "distance_mi": round(dist, 1),
                 "direction": deg_to_dir16(_bearing_deg(alat, alng,
@@ -4530,11 +4534,17 @@ def _layer_block(sorted_pairs, alat, alng, layer, build):
                 "lat": row["latitude"], "lng": row["longitude"]}
         base.update(build(row, dist))
         return base
-    within = [mk(d, r) for d, r in sorted_pairs if d <= 5][:12]
+    # Slice to the cap BEFORE building — build() can run per-item subqueries
+    # (TRI trend, water aggregates), so building every within-radius row before
+    # trimming is what made a 10-mile dense-county query slow. sorted_pairs is
+    # ascending, so the first `cap` are the nearest `cap` (identical result).
+    within_pairs = [p for p in sorted_pairs if p[0] <= radius][:cap]
+    within = [mk(d, r) for d, r in within_pairs]
     nearest = mk(sorted_pairs[0][0], sorted_pairs[0][1]) if sorted_pairs else None
     rings = {str(k): sum(1 for d, _ in sorted_pairs if d <= k) for k in _RINGS_MI}
+    count_within = sum(1 for d, _ in sorted_pairs if d <= radius)
     return {"within": within, "nearest": nearest, "rings": rings,
-            "count_5mi": rings["5"]}
+            "count_5mi": rings["5"], "count_within": count_within, "radius_mi": radius}
 
 
 def _sorted_by_distance(rows, alat, alng):
@@ -4594,14 +4604,21 @@ _REPORT_SOURCES = [
 ]
 
 
-def _report_near(conn, lat, lng):
+def _report_near(conn, lat, lng, *, radius=5, cap=12):
     """Point-based section: real haversine distances to every layer that supports
-    genuine per-facility distance. Returns a dict of layer blocks."""
+    genuine per-facility distance. Returns a dict of layer blocks.
+
+    `radius`/`cap` default to the address report's 5-mile / 12-item behavior; the
+    "what's here?" panel passes a wider radius. `_lb` is a thin wrapper that injects
+    them into every _layer_block call so the call sites stay readable."""
+    def _lb(pairs, layer, build):
+        return _layer_block(pairs, lat, lng, layer, build, radius=radius, cap=cap)
+
     # --- Contamination / Superfund ---
     rows = conn.execute(
         "SELECT site_key, site_name, latitude, longitude, county, city, status, "
         "status_class, category, npl_listed, hrs_score FROM contamination_sites").fetchall()
-    contam = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "contamination",
+    contam = _lb(_sorted_by_distance(rows, lat, lng), "contamination",
         lambda r, d: {"id": r["site_key"], "name": r["site_name"], "county": r["county"],
                       "status": r["status"], "status_class": r["status_class"],
                       "npl": bool(r["npl_listed"]), "hrs_score": r["hrs_score"]})
@@ -4624,7 +4641,7 @@ def _report_near(conn, lat, lng):
                 "sector": r["industry_sector"],
                 "latest_release_lbs": round(vals[-1]) if vals else 0,
                 "latest_year": py[-1]["year"] if py else None, "trend": trend}
-    tri = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "tri", _tri_build)
+    tri = _lb(_sorted_by_distance(rows, lat, lng),"tri", _tri_build)
 
     # --- EPA ECHO enforcement & compliance. Only facilities with a CURRENT
     # violation determination (Significant Violation / SNC / HPV, or "Violation
@@ -4662,13 +4679,13 @@ def _report_near(conn, lat, lng):
                 "formal_actions": fa,
                 "dfr_url": "https://echo.epa.gov/detailed-facility-report?fid="
                            + str(r["registry_id"])}
-    echo = _layer_block(_sorted_by_distance(echo_rows, lat, lng), lat, lng, "echo", _echo_build)
+    echo = _lb(_sorted_by_distance(echo_rows, lat, lng), "echo", _echo_build)
 
     # --- Landfills & waste facilities ---
     rows = conn.execute(
         "SELECT site_key, name, latitude, longitude, county, category, type_label, "
         "status_class, status_label FROM landfill_sites").fetchall()
-    landfill = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "landfill",
+    landfill = _lb(_sorted_by_distance(rows, lat, lng),"landfill",
         lambda r, d: {"id": r["site_key"], "name": r["name"], "county": r["county"],
                       "category": r["category"], "type_label": r["type_label"],
                       "status": r["status_label"]})
@@ -4694,13 +4711,13 @@ def _report_near(conn, lat, lng):
                 "detections": agg["det"], "mcl_exceedances": agg["mcl"],
                 "benchmark_exceedances": agg["bench"], "latest_sample": agg["latest"],
                 "top_compounds": comps}
-    water = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "water", _water_build)
+    water = _lb(_sorted_by_distance(rows, lat, lng),"water", _water_build)
 
     # --- Golf courses ---
     rows = conn.execute(
         "SELECT course_key, name, latitude, longitude, county, ownership_class, "
         "ownership_label, acres FROM golf_courses").fetchall()
-    golf = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "golf",
+    golf = _lb(_sorted_by_distance(rows, lat, lng),"golf",
         lambda r, d: {"id": r["course_key"], "name": r["name"], "county": r["county"],
                       "ownership_class": r["ownership_class"], "acres": r["acres"]})
 
@@ -4709,7 +4726,7 @@ def _report_near(conn, lat, lng):
     rows = conn.execute(
         "SELECT feature_key, kind, name, latitude, longitude, county, site_type, "
         "residential_wells, hyperlink FROM pfas_features WHERE kind IN ('site','aoi')").fetchall()
-    pfas = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng, "pfas",
+    pfas = _lb(_sorted_by_distance(rows, lat, lng),"pfas",
         lambda r, d: {"id": r["feature_key"], "name": r["name"], "county": r["county"],
                       "kind": r["kind"], "site_type": r["site_type"],
                       "residential_wells": r["residential_wells"], "hyperlink": r["hyperlink"]})
@@ -4726,8 +4743,7 @@ def _report_near(conn, lat, lng):
         return {"id": r["feature_key"], "name": r["name"], "county": r["county"],
                 "max_ppt": r["max_ppt"], "sample_date": r["sample_date"],
                 "waterbody": p.get("waterbody"), "detected": p.get("detected")}
-    pfas_water = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
-                              "pfas_water", _pfas_water)
+    pfas_water = _lb(_sorted_by_distance(rows, lat, lng), "pfas_water", _pfas_water)
 
     # --- Underground storage tanks. Open leaking releases are called out
     # separately and prominently from closed/licensed tanks (the whole point:
@@ -4744,15 +4760,13 @@ def _report_near(conn, lat, lng):
         "address, city, open_release, total_release, current_classification, "
         "address_matched, regulatory_program FROM ust_sites "
         "WHERE category='leaking_open'").fetchall()
-    ust_open = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
-                            "ust_open", _ust_build)
+    ust_open = _lb(_sorted_by_distance(rows, lat, lng), "ust_open", _ust_build)
     rows = conn.execute(
         "SELECT site_key, facility_name, latitude, longitude, county, category, "
         "address, city, open_release, total_release, current_classification, "
         "address_matched, regulatory_program FROM ust_sites "
         "WHERE category IN ('leaking_closed','licensed')").fetchall()
-    ust_other = _layer_block(_sorted_by_distance(rows, lat, lng), lat, lng,
-                             "ust_other", _ust_build)
+    ust_other = _lb(_sorted_by_distance(rows, lat, lng), "ust_other", _ust_build)
 
     return {"contamination": contam, "tri": tri, "echo": echo, "landfill": landfill,
             "water": water, "golf": golf, "pfas": pfas, "pfas_water": pfas_water,
@@ -5149,7 +5163,9 @@ def api_address_report():
 # records are already excluded inside _report_near (its ECHO query filters them
 # with _echo_is_no_location), so they can never appear here.
 
-_WH_RADIUS_MI = 3          # short "nearby" radius; aligns with an existing ring tier
+_WH_ALLOWED_RADII = (3, 5, 10)   # miles the panel offers
+_WH_DEFAULT_RADIUS = 3           # default; aligns with _report_near's 3-mile ring
+_WH_CAP = 12                     # max records listed per category (then "+N more")
 
 # (layer key in _report_near) -> (display label, short-subtitle builder). The
 # builders read ONLY fields _report_near already put on each item.
@@ -5204,17 +5220,22 @@ _WH_CATEGORIES = [
 
 @app.route("/api/whats-here")
 def api_whats_here():
-    """Records within ~3 miles of a clicked point, grouped by category. Each
-    category also carries its single nearest record beyond the radius, so an
-    empty-map click is still informative. Reuses _report_near verbatim."""
+    """Records within a chosen radius (3/5/10 mi) of a clicked point, grouped by
+    category and capped per category (then "+N more"). Each empty category carries
+    its single nearest record beyond the radius, so an empty-map click is still
+    informative. Reuses _report_near (same radius queries) with the radius + cap
+    threaded in. No-location ECHO records are excluded at every radius."""
     lat = request.args.get("lat", type=float)
     lng = request.args.get("lng", type=float)
     if lat is None or lng is None or not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
         return jsonify({"error": "bad_point"}), 400
+    radius = request.args.get("radius", type=int)
+    if radius not in _WH_ALLOWED_RADII:
+        radius = _WH_DEFAULT_RADIUS
 
     conn = db()
     try:
-        near = _report_near(conn, lat, lng)
+        near = _report_near(conn, lat, lng, radius=radius, cap=_WH_CAP)
     finally:
         conn.close()
 
@@ -5223,20 +5244,23 @@ def api_whats_here():
     echo_no_location = 0
     for key, label in _WH_CATEGORIES:
         block = near.get(key) or {}
-        within_raw = [it for it in (block.get("within") or []) if it["distance_mi"] <= _WH_RADIUS_MI]
+        within_items = list(block.get("within") or [])   # already <= radius, capped at _WH_CAP
+        count_within = block.get("count_within", len(within_items))
         # Belt-and-suspenders: no-location ECHO rows are filtered upstream, but
         # verify here too so a bad coordinate can never leak into the panel.
         if key == "echo":
-            before = len(within_raw)
-            within_raw = [it for it in within_raw if not it.get("no_location")]
-            echo_no_location += before - len(within_raw)
+            before = len(within_items)
+            within_items = [it for it in within_items if not it.get("no_location")]
+            dropped = before - len(within_items)
+            echo_no_location += dropped
+            count_within = max(0, count_within - dropped)
         within = [{"name": it["name"], "sub": _wh_sub(key, it),
                    "distance_mi": it["distance_mi"], "direction": it["direction"]}
-                  for it in within_raw]
+                  for it in within_items]
         total_within += len(within)
         nearest_beyond = None
         nb = block.get("nearest")
-        if not within and nb and nb.get("distance_mi", 0) > _WH_RADIUS_MI:
+        if not within and nb and nb.get("distance_mi", 0) > radius:
             nearest_beyond = {"name": nb["name"], "sub": _wh_sub(key, nb),
                               "distance_mi": nb["distance_mi"], "direction": nb["direction"]}
         if not within and not nearest_beyond:
@@ -5245,11 +5269,17 @@ def api_whats_here():
         categories.append({
             "key": key, "label": label,
             "within": within, "nearest_beyond": nearest_beyond,
-            "count_1mi": rings.get("1", 0), "count_3mi": rings.get("3", 0),
+            "count_within": count_within,          # true total within the radius
+            "count_1mi": rings.get("1", 0),
+            "more": max(0, count_within - len(within)),
         })
 
     return jsonify({
-        "lat": lat, "lng": lng, "radius_mi": _WH_RADIUS_MI,
+        "lat": lat, "lng": lng, "radius_mi": radius,
+        # Only the 3-mi radius lines up with a _report_near ring tier; 5 and 10 are
+        # this panel's own wider queries, so the UI must not claim report parity.
+        "matches_report_ring": radius == _WH_DEFAULT_RADIUS,
+        "allowed_radii": list(_WH_ALLOWED_RADII),
         "categories": categories, "total_within": total_within,
         "any_within": total_within > 0,
         "echo_excluded_no_location": echo_no_location,
