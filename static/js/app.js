@@ -1811,7 +1811,7 @@
             if (r.benchmark) lim.push(`<span class="wq-meta wq-bench" data-gloss="aquatic-life benchmark">aq-life ${r.benchmark}</span>`);
             return `
             <tr class="${cls}">
-              <td>${chemLink(r.compound, { site: site.site_id, fips: site.county_fips })}${lim.length ? ` <span class="wq-lims">(${lim.join(' · ')} µg/L)</span>` : ''}</td>
+              <td>${chemLink(r.compound, { site: site.site_id, fips: site.county_fips })}${lim.length ? ` <span class="wq-lims">(${lim.join(' · ')} <span class="gloss-term" data-gloss="µg/L" tabindex="0">µg/L</span>)</span>` : ''}</td>
               <td class="right">${r.samples}</td>
               <td class="right">${r.detections}</td>
               <td class="right wq-mcl-c">${r.exceedances || '·'}</td>
@@ -1970,9 +1970,9 @@
   function _aocStatusChip(d) {
     if (d.status === 'delisted') {
       const when = d.delisting_date ? ` ${d.delisting_date}` : '';
-      return `<span class="aoc-chip aoc-chip-delisted">Delisted${when}</span>`;
+      return `<span class="aoc-chip aoc-chip-delisted" data-gloss="delisted" tabindex="0">Delisted${when}</span>`;
     }
-    return `<span class="aoc-chip aoc-chip-active">Active AOC</span>`;
+    return `<span class="aoc-chip aoc-chip-active" data-gloss="AOC" tabindex="0">Active AOC</span>`;
   }
 
   function _aocBuiList(items, kind) {
@@ -1984,7 +1984,7 @@
         ? `<span class="aoc-bui-date">${b.removal_date ? 'removed ' + esc(b.removal_date) : 'removed (date not published)'}</span>`
         : '';
       const note = b.note ? ` <span class="aoc-bui-note">(${esc(b.note)})</span>` : '';
-      return `<li>${esc(b.bui)}${date}${note}</li>`;
+      return `<li>${glossSpan(b.bui, b.bui)}${date}${note}</li>`;
     }).join('') + '</ul>';
   }
 
@@ -2016,7 +2016,7 @@
         ${caveat}
         ${basin}
         ${countyLine}
-        <div class="aoc-bui-head">Beneficial Use Impairments
+        <div class="aoc-bui-head"><span class="gloss-term" data-gloss="beneficial use impairment" tabindex="0">Beneficial Use Impairments</span>
           <span class="aoc-bui-counts">${imp.length} impaired · ${rem.length} removed</span></div>
         <div class="aoc-bui-split">
           <div class="aoc-bui-col"><div class="aoc-bui-sub impaired">Still impaired (${imp.length})</div>${_aocBuiList(imp, 'impaired')}</div>
@@ -4703,7 +4703,7 @@
           ${p.max_pfos_ppb != null ? `<div>Max PFOS in fish tissue: <b>${p.max_pfos_ppb} ppb</b></div>` : '<div>PFOS results on record for this water body.</div>'}
           ${(p.species || []).length ? `<div class="small">Species tested: ${p.species.map(esc).join(', ')}</div>` : ''}
         </div>
-        <div class="pfas-meta small">${f.sample_date ? `Latest sample ${esc(f.sample_date)}. ` : ''}Fish-tissue PFOS is measured in parts per billion (ppb). Consumption guidance is set by MDHHS.</div>
+        <div class="pfas-meta small">${f.sample_date ? `Latest sample ${esc(f.sample_date)}. ` : ''}Fish-tissue PFOS is measured in parts per billion (<span class="gloss-term" data-gloss="ppb" tabindex="0">ppb</span>). Consumption guidance is set by MDHHS.</div>
         ${url ? `<a class="pfas-cta" href="${esc(url)}" target="_blank" rel="noopener">MDHHS Eat Safe Fish guidance →</a>` : ''}
         <div class="pfas-src">Source: Michigan Fish Contaminant Monitoring Program (EGLE).</div>
       </div>`;
@@ -4854,7 +4854,7 @@
         + `<span class="atx-hi-v"${le1}>${fmt(v)}</span></div>`;
     }).join('');
     return `<div class="atx-hi">
-      <div class="atx-hi-head">Noncancer hazard index <span class="muted">— modeled, by organ system</span></div>
+      <div class="atx-hi-head">Noncancer <span class="gloss-term" data-gloss="hazard index" tabindex="0">hazard index</span> <span class="muted">— modeled, by organ system</span></div>
       <div class="atx-hi-rows">${rows}</div>
       ${note ? `<div class="atx-hi-note">${esc(note)}</div>` : ''}
     </div>`;
@@ -5763,7 +5763,7 @@
       if (w.mcl != null) limBits.push(`<span data-gloss="MCL">MCL ${w.mcl}</span>`);
       if (w.benchmark != null) limBits.push(`<span data-gloss="aquatic-life benchmark">aquatic-life ${w.benchmark}</span>`);
       const maxLine = (w.detections && w.max_value != null)
-        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${limBits.length ? ` · limits ${limBits.join(' / ')} µg/L` : ''}</span></div>`
+        ? `<div class="tci-row"><span class="tci-k">Highest detection</span><span class="tci-v">${w.max_value} ${w.unit || ''}${limBits.length ? ` · limits ${limBits.join(' / ')} <span class="gloss-term" data-gloss="µg/L" tabindex="0">µg/L</span>` : ''}</span></div>`
         : '';
       const mclWarn = w.mcl_exceedances
         ? `<div class="tci-carc">⚠ Exceeded the human <b>drinking-water limit (MCL)</b> in ${w.mcl_exceedances} sample${w.mcl_exceedances === 1 ? '' : 's'}</div>` : '';
@@ -5786,13 +5786,13 @@
     const chips = [];
     if (pc && pc.molecular_formula) chips.push(`<span class="tci-chip">${pc.molecular_formula}</span>`);
     if (pc && pc.molecular_weight) chips.push(`<span class="tci-chip">${(Math.round(pc.molecular_weight * 100) / 100)} g/mol</span>`);
-    if (d.cas) chips.push(`<span class="tci-chip">CAS ${d.cas}</span>`);
+    if (d.cas) chips.push(`<span class="tci-chip"><span class="gloss-term" data-gloss="CAS" tabindex="0">CAS</span> ${esc(d.cas)}</span>`);
     const chipRow = chips.length ? `<div class="tci-chips">${chips.join('')}</div>` : '';
     // Prefer PubChem's real plain-language description; fall back to the curated
     // hazard blurb if PubChem had none.
     const descText = (pc && pc.description) ? pc.description : (p.what || '');
     const pubLink = (pc && pc.cid && pc.url)
-      ? `<a href="${pc.url}" target="_blank" rel="noopener">Full profile on PubChem — CID ${pc.cid} ↗</a>` : '';
+      ? `<a href="${pc.url}" target="_blank" rel="noopener">Full profile on PubChem — <span class="gloss-term" data-gloss="PubChem CID" tabindex="0">CID</span> ${pc.cid} ↗</a>` : '';
 
     // PFAS drinking-water limits (2024 EPA rule + Michigan). Labelled honestly as
     // a DRINKING-WATER standard — a surface-water detection is shown for context,
@@ -5803,9 +5803,9 @@
       const bits = [];
       if (reg.epa_mcl_ppt != null) {
         bits.push(`U.S. EPA drinking-water limit (MCL): <b>${reg.epa_mcl_ppt} ppt</b> (2024)`
-          + (reg.hazard_index ? ', and part of EPA’s Hazard Index for mixtures' : ''));
+          + (reg.hazard_index ? ', and part of EPA’s <span class="gloss-term" data-gloss="PFAS Hazard Index" tabindex="0">Hazard Index</span> for mixtures' : ''));
       } else if (reg.hazard_index) {
-        bits.push('No individual EPA drinking-water limit; included in EPA’s 2024 <b>Hazard Index</b> for PFAS mixtures');
+        bits.push('No individual EPA drinking-water limit; included in EPA’s 2024 <b><span class="gloss-term" data-gloss="PFAS Hazard Index" tabindex="0">Hazard Index</span></b> for PFAS mixtures');
       } else {
         bits.push('No individual U.S. EPA drinking-water limit under the 2024 PFAS rule');
       }
@@ -5988,7 +5988,7 @@
     const chips = [];
     const pc = d.pubchem || {};
     if (pc.molecular_formula) chips.push(`<span class="tci-chip">${esc(pc.molecular_formula)}</span>`);
-    if (d.cas) chips.push(`<span class="tci-chip">CAS ${esc(d.cas)}</span>`);
+    if (d.cas) chips.push(`<span class="tci-chip"><span class="gloss-term" data-gloss="CAS" tabindex="0">CAS</span> ${esc(d.cas)}</span>`);
     chips.push(`<span class="tci-chip">PubChem CID ${d.cid}</span>`);
     const desc = pc.description
       ? `<p class="xc-desc">${esc(pc.description)}</p>` : '';
@@ -7660,7 +7660,7 @@
       `<div class="atx-hi-row"><span class="atx-hi-l">${_rEsc(h.label)}</span>`
       + `<span class="atx-hi-v">${fmtHi(h.value)}</span></div>`).join('');
     const hiBlock = (a.hazard && a.hazard.length) ? `<div class="atx-hi">
-      <div class="atx-hi-head">Noncancer hazard index <span class="muted">— modeled, by organ system</span></div>
+      <div class="atx-hi-head">Noncancer <span class="gloss-term" data-gloss="hazard index" tabindex="0">hazard index</span> <span class="muted">— modeled, by organ system</span></div>
       <div class="atx-hi-rows">${hiRows}</div>
       ${a.hazard_note ? `<div class="atx-hi-note">${_rEsc(a.hazard_note)}</div>` : ''}</div>` : '';
     return `<div class="rpt-section rpt-airtox">

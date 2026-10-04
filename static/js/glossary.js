@@ -556,6 +556,221 @@
       'reviewing the facility\'s own reports. They help track a case through the enforcement ' +
       'process and are not a final court or administrative ruling — so they are considered ' +
       'alleged.',
+
+    // ===================== Part 2 — remaining layers =====================
+    // Every definition below is drawn from the agency that owns the term
+    // (EPA, EGLE/Michigan, USGS, USDA, IARC, OSHA, NIH/PubChem); sources are in
+    // the commit message.
+
+    // ---- Contamination / Superfund (EPA) ----
+    'CERCLA':
+      'The 1980 federal law — nicknamed Superfund — that lets the government clean up ' +
+      'abandoned or uncontrolled hazardous-waste sites and spills, and make those ' +
+      'responsible pay for it.',
+    'Record of Decision':
+      'The document that explains which cleanup approach was chosen for a contaminated ' +
+      'site, and why.',
+    'remedial investigation':
+      'The study that maps how far contamination has spread at a site and what threat it ' +
+      'poses to people and the environment, before a cleanup is picked.',
+    'Five-Year Review':
+      'A recheck done every five years at a cleaned-up site where contamination was left ' +
+      'in place, to confirm the cleanup is still protecting people and the environment.',
+    'monitored natural recovery':
+      'Letting natural processes bury or break down contamination over time while the site ' +
+      'is watched to confirm it is actually getting better.',
+    'institutional controls':
+      'Legal or administrative limits on how a property can be used — such as banning well ' +
+      'water or digging — to keep people away from contamination left in the ground.',
+    'consent decree':
+      'A cleanup-or-penalty agreement between the government and a responsible party that a ' +
+      'federal judge approves and can enforce.',
+    'operations-and-maintenance phase':
+      'The long-term stage after a cleanup is built, when the remedy is operated, maintained, ' +
+      'and monitored to make sure it keeps working.',
+    'TCE':
+      'Trichloroethylene — a manufactured solvent used mainly to strip grease off metal ' +
+      'parts. It can contaminate groundwater and is linked to cancer and other harm; the ' +
+      'drinking-water limit is 5 parts per billion.',
+
+    // ---- Landfills (EPA federal rules + Michigan EGLE) ----
+    'Part 115':
+      'Michigan\'s state solid-waste law that governs landfills — how they are licensed, ' +
+      'operated, and monitored.',
+    'Part 111':
+      'Michigan\'s state hazardous-waste law governing how hazardous waste is handled, ' +
+      'treated, stored, and disposed of.',
+    'RCRA Subtitle C':
+      'The part of the federal waste law that sets the strict rules for hazardous waste, ' +
+      'from the moment it is produced through its disposal.',
+    '40 CFR Part 258':
+      'The federal rulebook of minimum safety standards for everyday-trash (municipal ' +
+      'solid waste) landfills — liners, leak collection, and groundwater monitoring.',
+    '40 CFR Part 257':
+      'The federal rulebook of minimum safety standards for certain non-household-waste ' +
+      'disposal, including coal-ash landfills and ponds.',
+
+    // ---- Water-quality units ----
+    'µg/L':
+      'Micrograms per liter — a concentration in water. One microgram per liter is about ' +
+      'one part per billion (a pinch of salt in a swimming pool).',
+    'ng/L':
+      'Nanograms per liter — a concentration a thousand times smaller than a microgram per ' +
+      'liter; in water it is about one part per trillion.',
+    'ppb':
+      'Parts per billion — one part in a billion. In water it is about one microgram per liter.',
+
+    // ---- Air monitors (EPA) ----
+    'NAAQS':
+      'National Ambient Air Quality Standards — the outdoor-air limits the EPA sets for a ' +
+      'handful of common pollutants to protect health and the environment.',
+    'AQS':
+      'Air Quality System — the EPA\'s national database of actual air-pollution readings ' +
+      'collected by monitors run by federal, state, local, and tribal agencies.',
+    'CAMD':
+      'The EPA\'s Clean Air Markets Division — the EPA group that runs programs cutting ' +
+      'power-plant pollution and collects plants\' measured emissions.',
+    'criteria pollutant':
+      'One of six common air pollutants the EPA sets nationwide health limits for: ozone, ' +
+      'particle pollution, carbon monoxide, sulfur dioxide, nitrogen dioxide, and lead.',
+    'exceedance count':
+      'How many times a monitor\'s readings went above the national outdoor-air limit ' +
+      'during the year.',
+    'PM2.5':
+      'Fine particle pollution — airborne specks small enough (2.5 micrometers or less) to ' +
+      'breathe deep into the lungs; linked to heart and lung harm and early death.',
+    'SO2':
+      'Sulfur dioxide — a gas given off mainly by burning fossil fuels at power plants and ' +
+      'industry; it irritates the airways.',
+    'O3':
+      'Ground-level ozone — the main part of smog. It forms when pollution reacts in ' +
+      'sunlight and it inflames the lungs, worsening asthma.',
+    'NO2':
+      'Nitrogen dioxide — a gas from burning fuel in vehicles, power plants, and gas ' +
+      'stoves; it irritates the airways.',
+    'Pb':
+      'Lead — a toxic metal; even low exposure can harm children\'s brain development. The ' +
+      'EPA limits it in outdoor air.',
+    'CO':
+      'Carbon monoxide — a colorless gas from burning fuel; at high levels it cuts the ' +
+      'oxygen the blood can carry, a particular risk for people with heart disease.',
+
+    // ---- Power plants ----
+    'ORIS':
+      'A unique power-plant ID number (the ORIS code) used to match a plant between the ' +
+      'EPA\'s and the U.S. Energy Information Administration\'s datasets.',
+    'EIA-860':
+      'The U.S. Energy Information Administration\'s yearly survey that inventories the ' +
+      'country\'s electric power plants and their generators (1 megawatt and larger).',
+    '40 CFR Part 75':
+      'The federal rule requiring power plants to continuously measure and report their ' +
+      'smokestack sulfur dioxide, nitrogen oxides, and carbon dioxide.',
+    'NOx':
+      'Nitrogen oxides — gases formed when fuel burns at high temperature; they help form ' +
+      'smog and soot.',
+    'CO2':
+      'Carbon dioxide — the main heat-trapping greenhouse gas released when fuel is burned.',
+
+    // ---- Air toxics ----
+    'HI':
+      'Hazard index — a measure of non-cancer health risk: the modeled amount of a pollutant ' +
+      'divided by the level the EPA considers safe, added up across pollutants that affect ' +
+      'the same organ. At or below 1 is the EPA\'s threshold for "negligible."',
+    'HAPs':
+      'Hazardous air pollutants — the air pollutants known or suspected to cause cancer or ' +
+      'other serious health effects (also called air toxics), regulated separately from ' +
+      'common pollutants like soot and smog.',
+
+    // ---- Oil & gas / FracFocus ----
+    'UIC':
+      'Underground Injection Control — the EPA program that regulates wells used to inject ' +
+      'fluids underground, to keep them from contaminating underground drinking water.',
+    'TENORM':
+      'Natural radioactive material from rock and soil that human activity — such as ' +
+      'oil-and-gas production or mining — has concentrated or brought to the surface, ' +
+      'raising the chance of exposure.',
+    'HVHF':
+      'High-volume hydraulic fracturing — in Michigan, a well "frack" job that uses more ' +
+      'than 100,000 gallons of primary carrier fluid.',
+    'Class II wells':
+      'Wells that inject fluids from oil-and-gas production — mostly salty brine — deep ' +
+      'underground, far below drinking-water sources.',
+    'CAS':
+      'CAS Registry Number — a unique ID number given to each chemical, so a substance can ' +
+      'be identified exactly even when it goes by many common names.',
+
+    // ---- Areas of Concern (EPA / IJC) ----
+    'AOC':
+      'Area of Concern — a Great Lakes place the U.S. and Canada have flagged where past ' +
+      'pollution seriously harmed the water and the ways people and wildlife can use it.',
+    'BUI':
+      'Beneficial Use Impairment — a specific way a polluted Great Lakes area can no longer ' +
+      'be used or enjoyed normally (for example, fish unsafe to eat, or beaches closed).',
+    'beneficial use impairment':
+      'A specific way a polluted Great Lakes area can no longer be used or enjoyed normally ' +
+      '(for example, fish unsafe to eat, or beaches closed). Abbreviated BUI.',
+    'delisted':
+      'Taken off the Great Lakes Areas of Concern list — which happens only after every ' +
+      'beneficial use impairment at the site has been restored. It does not mean the area ' +
+      'is pristine.',
+    'Degradation of Benthos':
+      'A beneficial use impairment: the community of bottom-dwelling creatures (insects, ' +
+      'worms, clams) is thrown off compared with clean reference sites — a sign of polluted ' +
+      'sediment.',
+    'Eutrophication or Undesirable Algae':
+      'A beneficial use impairment: too many nutrients drive algae blooms, low oxygen, and ' +
+      'murky water.',
+    'Degradation of Phytoplankton and Zooplankton Populations':
+      'A beneficial use impairment: the tiny drifting plants and animals at the base of the ' +
+      'food web are thrown off compared with clean reference sites.',
+
+    // ---- PFAS ----
+    'Part 201 cleanup criteria':
+      'Michigan\'s state limits for how much of a contaminant may remain in soil or ' +
+      'groundwater before a site counts as cleaned up.',
+    'PFAS Hazard Index':
+      'A way the EPA judges a mix of PFAS in drinking water: it adds up how close each of ' +
+      'several PFAS is to its own safe level; a total above 1 exceeds the federal limit. ' +
+      '(This is a drinking-water measure, different from the air-toxics hazard index.)',
+
+    // ---- Golf / Spraying ----
+    'ULV':
+      'Ultra-low-volume — a spraying method that puts out a very fine mist of tiny droplets, ' +
+      'using only a small amount of pesticide over a large area, to kill flying mosquitoes ' +
+      'on contact.',
+    'NREPA Part 83':
+      'Michigan\'s state pesticide law that regulates how pesticides are sold and applied, ' +
+      'and who is allowed to apply them.',
+
+    // ---- Chemical reference / cross-layer ----
+    'PubChem CID':
+      'PubChem Compound ID — the ID number a chemical is given in PubChem, the free public ' +
+      'chemical database run by the U.S. National Institutes of Health.',
+    'IARC Group 1':
+      'The World Health Organization\'s cancer-research agency classifies a substance as ' +
+      'Group 1 when there is convincing evidence it causes cancer in people.',
+    'IARC Group 2A':
+      'The World Health Organization\'s cancer agency uses Group 2A for a substance that is ' +
+      'probably able to cause cancer in people — strong evidence, but not yet conclusive ' +
+      'in humans.',
+    'IARC Group 2B':
+      'The World Health Organization\'s cancer agency uses Group 2B for a substance that is ' +
+      'possibly able to cause cancer in people — some evidence, but limited.',
+    'OSHA-designated carcinogen':
+      'A substance that the U.S. workplace-safety agency (OSHA), or the cancer bodies it ' +
+      'relies on, lists as causing or likely causing cancer.',
+
+    // ---- Crop map ----
+    'CDL':
+      'Cropland Data Layer — a yearly nationwide map, built from satellite images, that ' +
+      'labels which crop was most likely growing on each patch of land.',
+    'NASS':
+      'The U.S. Department of Agriculture\'s National Agricultural Statistics Service — the ' +
+      'agency that surveys farms and publishes crop and farming data.',
+    'NAWQA':
+      'The U.S. Geological Survey\'s National Water-Quality Assessment — a long-running ' +
+      'program that samples the nation\'s streams, rivers, and groundwater to track water ' +
+      'quality.',
   };
 
   function gloss(term) { return GLOSSARY[term] || term; }
