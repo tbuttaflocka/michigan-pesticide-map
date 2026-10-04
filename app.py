@@ -4965,17 +4965,27 @@ def api_address_report():
                         "message": "Too many lookups from your connection. Please wait "
                         "a few minutes and try again."}), 429
     body = request.get_json(silent=True) or {}
-    address = body.get("address")
-    if not isinstance(address, str) or not (3 <= len(address.strip()) <= 250):
-        return jsonify({"error": "bad_address",
-                        "message": "Please enter a street address, city, and ZIP."}), 400
-
-    geo = _geocode(address)
-    del address, body                      # drop the address ASAP; never persisted
-    if not geo:
-        return jsonify({"error": "geocode_failed",
-                        "message": "Couldn't find that address — try including the "
-                        "city and ZIP code."}), 422
+    # Two ways in: a typed address (geocoded), or a map point the user already
+    # clicked (lat/lng) — the "what's here?" panel's "full report" link passes the
+    # point so nobody re-types a location. Coordinates skip the geocoder entirely.
+    lat_in, lng_in = body.get("lat"), body.get("lng")
+    is_num = (lambda v: isinstance(v, (int, float)) and not isinstance(v, bool))
+    if is_num(lat_in) and is_num(lng_in) and -90 <= lat_in <= 90 and -180 <= lng_in <= 180:
+        geo = {"lat": float(lat_in), "lng": float(lng_in),
+               "matched": f"Pinned map location ({float(lat_in):.5f}, {float(lng_in):.5f})",
+               "source": "map pin"}
+        del body
+    else:
+        address = body.get("address")
+        if not isinstance(address, str) or not (3 <= len(address.strip()) <= 250):
+            return jsonify({"error": "bad_address",
+                            "message": "Please enter a street address, city, and ZIP."}), 400
+        geo = _geocode(address)
+        del address, body                  # drop the address ASAP; never persisted
+        if not geo:
+            return jsonify({"error": "geocode_failed",
+                            "message": "Couldn't find that address — try including the "
+                            "city and ZIP code."}), 422
 
     lat, lng = geo["lat"], geo["lng"]
     locate = _address_locator()
@@ -5126,6 +5136,124 @@ def api_address_report():
     finally:
         conn.close()
     return jsonify(report)
+
+
+# ========================================================================
+# "What's here?" — a lightweight look at records near ANY clicked point
+# ========================================================================
+# A quick-look companion to the full address report: right-click / long-press
+# anywhere (empty map included) and see what's within a short radius, grouped by
+# category. It REUSES _report_near (same radius queries, same haversine), so the
+# counts/distances are identical to the full report — this endpoint just trims to
+# a short radius and formats a compact per-category summary. No-location ECHO
+# records are already excluded inside _report_near (its ECHO query filters them
+# with _echo_is_no_location), so they can never appear here.
+
+_WH_RADIUS_MI = 3          # short "nearby" radius; aligns with an existing ring tier
+
+# (layer key in _report_near) -> (display label, short-subtitle builder). The
+# builders read ONLY fields _report_near already put on each item.
+def _wh_sub(layer, it):
+    if layer == "contamination":
+        return "NPL Superfund site" if it.get("npl") else (it.get("status") or "contamination site")
+    if layer == "ust_open":
+        return "open leaking release (Part 213)"
+    if layer == "ust_other":
+        return "licensed storage tank" if it.get("category") == "licensed" else "closed release"
+    if layer == "tri":
+        return it.get("sector") or "TRI-reporting facility"
+    if layer == "echo":
+        tags = []
+        if it.get("snc"):
+            tags.append("SNC")
+        if it.get("hpv"):
+            tags.append("CAA HPV")
+        base = it.get("compliance_status") or "under enforcement review"
+        return f"{base}" + (f" · {', '.join(tags)}" if tags else "")
+    if layer == "landfill":
+        return it.get("type_label") or it.get("category") or "waste facility"
+    if layer == "pfas":
+        return "PFAS area of interest" if it.get("kind") == "aoi" else (it.get("site_type") or "PFAS site")
+    if layer == "pfas_water":
+        return f"max {round(it['max_ppt'])} ppt PFAS" if it.get("max_ppt") else "PFAS surface-water sample"
+    if layer == "water":
+        return {"exceeds_mcl": "exceeds a drinking-water MCL",
+                "exceeds_benchmark": "exceeds an aquatic-life benchmark",
+                "detected": "pesticides detected, within limits",
+                "tested_no_detect": "tested, none detected",
+                "no_data": "monitoring site"}.get(it.get("severity"), "monitoring site")
+    if layer == "golf":
+        return (f"{it['ownership_class']} golf course" if it.get("ownership_class")
+                else "golf course")
+    return ""
+
+
+_WH_CATEGORIES = [
+    ("contamination", "Contamination & Superfund sites"),
+    ("ust_open",      "Leaking storage tanks (open releases)"),
+    ("pfas",          "PFAS sites & areas of interest"),
+    ("tri",           "Industrial toxic releases (TRI)"),
+    ("echo",          "Enforcement & compliance (ECHO)"),
+    ("landfill",      "Landfills & waste facilities"),
+    ("water",         "Water-quality monitoring sites"),
+    ("pfas_water",    "PFAS surface-water samples"),
+    ("ust_other",     "Other storage tanks (closed / licensed)"),
+    ("golf",          "Golf courses"),
+]
+
+
+@app.route("/api/whats-here")
+def api_whats_here():
+    """Records within ~3 miles of a clicked point, grouped by category. Each
+    category also carries its single nearest record beyond the radius, so an
+    empty-map click is still informative. Reuses _report_near verbatim."""
+    lat = request.args.get("lat", type=float)
+    lng = request.args.get("lng", type=float)
+    if lat is None or lng is None or not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify({"error": "bad_point"}), 400
+
+    conn = db()
+    try:
+        near = _report_near(conn, lat, lng)
+    finally:
+        conn.close()
+
+    categories = []
+    total_within = 0
+    echo_no_location = 0
+    for key, label in _WH_CATEGORIES:
+        block = near.get(key) or {}
+        within_raw = [it for it in (block.get("within") or []) if it["distance_mi"] <= _WH_RADIUS_MI]
+        # Belt-and-suspenders: no-location ECHO rows are filtered upstream, but
+        # verify here too so a bad coordinate can never leak into the panel.
+        if key == "echo":
+            before = len(within_raw)
+            within_raw = [it for it in within_raw if not it.get("no_location")]
+            echo_no_location += before - len(within_raw)
+        within = [{"name": it["name"], "sub": _wh_sub(key, it),
+                   "distance_mi": it["distance_mi"], "direction": it["direction"]}
+                  for it in within_raw]
+        total_within += len(within)
+        nearest_beyond = None
+        nb = block.get("nearest")
+        if not within and nb and nb.get("distance_mi", 0) > _WH_RADIUS_MI:
+            nearest_beyond = {"name": nb["name"], "sub": _wh_sub(key, nb),
+                              "distance_mi": nb["distance_mi"], "direction": nb["direction"]}
+        if not within and not nearest_beyond:
+            continue                        # category has no records at all — skip it
+        rings = block.get("rings") or {}
+        categories.append({
+            "key": key, "label": label,
+            "within": within, "nearest_beyond": nearest_beyond,
+            "count_1mi": rings.get("1", 0), "count_3mi": rings.get("3", 0),
+        })
+
+    return jsonify({
+        "lat": lat, "lng": lng, "radius_mi": _WH_RADIUS_MI,
+        "categories": categories, "total_within": total_within,
+        "any_within": total_within > 0,
+        "echo_excluded_no_location": echo_no_location,
+    })
 
 
 # ---------- entrypoint ----------

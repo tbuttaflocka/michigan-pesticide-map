@@ -376,6 +376,19 @@
       if (state.selectedFips) closeCountyPanel();
     });
 
+    // "What's here?" — right-click (desktop) or long-press (touch) ANY point,
+    // empty map included. Leaflet 1.9 routes a touch long-press to the same
+    // 'contextmenu' event, so one handler covers both. It fires on neither a
+    // plain click (deselect) nor a drag (pan), so it never hijacks normal use.
+    state.map.on('contextmenu', (e) => {
+      if (e.originalEvent) {
+        e.originalEvent.preventDefault();      // suppress the browser's own menu
+        e.originalEvent.stopPropagation();
+      }
+      whatsHere(e.latlng);
+    });
+    showInspectHint();
+
     // Watershed polygons sit just above the county choropleth (overlayPane
     // z400) so their fill is visible and they receive hover/click, but below
     // the marker panes so point overlays stay clickable on top.
@@ -552,6 +565,145 @@
         if (chosen && chosen.marker && chosen.marker.openPopup) chosen.marker.openPopup();
       });
     });
+  }
+
+  // ========================================================================
+  // "What's here?" — quick look at records near a right-clicked / long-pressed
+  // point (see /api/whats-here). A lighter companion to the full address report.
+  // ========================================================================
+  let _whatsHerePopup = null;
+
+  // Show the right-click/long-press hint once per browser (it's a discoverable-
+  // -only-if-told gesture). Dismissed by click, timeout, or the first use.
+  const INSPECT_HINT_KEY = 'pm_inspect_hint_v1';
+  function showInspectHint() {
+    let seen = false;
+    try { seen = !!localStorage.getItem(INSPECT_HINT_KEY); } catch (e) { /* noop */ }
+    if (seen) return;
+    const el = $('inspect-hint');
+    if (!el) return;
+    const dismiss = () => {
+      hide(el);
+      try { localStorage.setItem(INSPECT_HINT_KEY, '1'); } catch (e) { /* noop */ }
+    };
+    setTimeout(() => show(el), 1800);
+    setTimeout(dismiss, 10000);
+    const btn = el.querySelector('.ih-dismiss');
+    if (btn) btn.addEventListener('click', dismiss);
+    if (state.map) state.map.once('contextmenu', dismiss);
+  }
+
+  async function whatsHere(latlng) {
+    const lat = latlng.lat, lng = latlng.lng;
+    // Anchor a popup at the point immediately with a loading state, so the
+    // gesture feels responsive while the radius query runs.
+    const popup = L.popup({ className: 'wh-popup-wrap', maxWidth: 320,
+                            minWidth: 260, autoPan: true, closeButton: true })
+      .setLatLng(latlng)
+      .setContent('<div class="wh-popup"><div class="wh-loading">Looking around this point…</div></div>')
+      .openOn(state.map);
+    _whatsHerePopup = popup;
+    let d;
+    try {
+      d = await api('/api/whats-here', { lat: lat.toFixed(6), lng: lng.toFixed(6) });
+    } catch (e) {
+      if (_whatsHerePopup === popup) {
+        popup.setContent('<div class="wh-popup"><p class="muted small">Could not look up this point.</p></div>');
+      }
+      return;
+    }
+    if (_whatsHerePopup !== popup || !state.map.hasLayer(popup)) return;  // user moved on
+    popup.setContent(whatsHereHtml(d));
+    const el = popup.getElement();
+    if (el) {
+      const btn = el.querySelector('.wh-full');
+      if (btn) btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        state.map.closePopup(popup);
+        openReportForPoint(Number(btn.dataset.lat), Number(btn.dataset.lng));
+      });
+    }
+  }
+
+  function _whRow(it) {
+    const sub = it.sub ? `<span class="wh-sub">${esc(it.sub)}</span>` : '';
+    return `<div class="wh-row"><span class="wh-dist">${it.distance_mi} mi ${esc(it.direction || '')}</span>`
+      + `<span class="wh-main"><span class="wh-name">${esc(it.name)}</span>${sub}</span></div>`;
+  }
+
+  function whatsHereHtml(d) {
+    const cats = d.categories || [];
+    let body = '';
+    for (const c of cats) {
+      const within = c.within || [];
+      let rows;
+      if (within.length) {
+        rows = within.map(_whRow).join('');
+        const more = (c.count_3mi || 0) - within.length;
+        if (more > 0) rows += `<div class="wh-more">+ ${more} more within ${d.radius_mi} mi</div>`;
+      } else if (c.nearest_beyond) {
+        rows = `<div class="wh-nearest">Nearest is ${_whRowInline(c.nearest_beyond)} `
+          + `<span class="wh-beyond">(beyond ${d.radius_mi} mi)</span></div>`;
+      } else {
+        continue;
+      }
+      body += `<div class="wh-cat"><div class="wh-cat-head">${esc(c.label)}`
+        + (within.length ? `<span class="wh-cat-n">${within.length}${(c.count_3mi||0) > within.length ? '+' : ''}</span>` : '')
+        + `</div>${rows}</div>`;
+    }
+    const headline = d.any_within
+      ? `${d.total_within} record${d.total_within === 1 ? '' : 's'} within ${d.radius_mi} miles of this point`
+      : `No records within ${d.radius_mi} miles of this point — showing the nearest in each category`;
+    const framing =
+      `<div class="wh-framing">Records near this point from the datasets in this app. `
+      + `<b>Absence of nearby records does not mean an area is clean</b> — many places have never been `
+      + `sampled or inspected. Facility locations come from EPA FRS and are approximate.</div>`;
+    return `<div class="wh-popup">`
+      + `<div class="wh-head">What’s near here</div>`
+      + `<div class="wh-headline">${headline}</div>`
+      + (body || '<div class="wh-empty muted">No mapped records in any category.</div>')
+      + framing
+      + `<button type="button" class="wh-full" data-lat="${d.lat}" data-lng="${d.lng}">`
+      + `Full environmental report for this point →</button>`
+      + `</div>`;
+  }
+
+  function _whRowInline(it) {
+    const sub = it.sub ? ` — ${esc(it.sub)}` : '';
+    return `<b>${esc(it.name)}</b>${sub}, ${it.distance_mi} mi ${esc(it.direction || '')}`;
+  }
+
+  // Run the existing "Check an address" report for a clicked point, passing the
+  // coordinates so the user never re-types a location. Reuses the full renderer.
+  async function openReportForPoint(lat, lng) {
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+    loading(true);
+    try {
+      const res = await apiPost('/api/address-report', { lat, lng });
+      if (!res.ok || !res.data) {
+        const msg = (res.data && res.data.message)
+          || (res.status === 429 ? 'Too many lookups — please wait a few minutes.'
+              : 'Could not generate a report for this point.');
+        openAddressModal();
+        const errEl = $('address-error');
+        if (errEl) { errEl.textContent = msg; show(errEl); }
+        return;
+      }
+      const data = res.data;
+      if (data.in_michigan === false) {
+        openAddressModal();
+        const errEl = $('address-error');
+        if (errEl) { errEl.textContent = data.message || 'That point is outside Michigan.'; show(errEl); }
+        return;
+      }
+      _report = data;
+      hide($('address-modal'));
+      renderReport(data);
+    } catch (e) {
+      openAddressModal();
+    } finally {
+      loading(false);
+    }
   }
 
   // Detach a dedicated L.canvas RENDERER from the map. Vector layers that use a
