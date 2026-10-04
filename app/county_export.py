@@ -193,9 +193,19 @@ _SQL_DATASETS = [
          caveat="1967-2025; exceeds_mcl / exceeds_benchmark flag threshold exceedances."),
     dict(file="airtoxics_tracts", source_id="epa_airtoxics", param="fips",
          sql="SELECT * FROM airtoxics_tracts WHERE county_fips=?",
-         desc="EPA AirToxScreen air-toxics cancer-risk estimates by census tract.",
-         units="total_risk is chance-in-a-million (70-yr lifetime), MODELED.",
-         caveat="MODELED SCREENING estimate (2017) - not a measurement. Includes tract geometry."),
+         desc="EPA AirToxScreen (2019 assessment) air-toxics cancer risk + noncancer "
+              "hazard index by census tract.",
+         units="total_risk is chance-in-a-million (70-yr outdoor lifetime), MODELED; "
+               "hi_* are noncancer hazard indexes (hazard-quotient sums) per target organ "
+               "(respiratory/neurological/immunological/kidney/liver).",
+         caveat="MODELED SCREENING estimate (AirToxScreen 2019) - not a measurement. "
+                "Diesel PM cancer risk is excluded (no cancer dose-response value); 127 of "
+                "181 modeled air toxics have dose-response values. A hazard index <=1 is "
+                "EPA's threshold below which noncancer effects are considered negligible. "
+                "EPA cautions assessment years are NOT comparable (inventory/modeling/"
+                "background/benchmark changes). Distinct from measured EPA AQS "
+                "concentrations and CAMD stack emissions - do not rank across them. "
+                "Includes tract geometry."),
     dict(file="wind_data", source_id="iem_asos_wind", param="fips",
          sql="SELECT * FROM wind_data WHERE county_fips=?",
          desc="IEM ASOS growing-season wind roses by weather station.",

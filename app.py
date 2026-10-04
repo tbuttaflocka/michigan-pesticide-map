@@ -3693,8 +3693,9 @@ def api_airtoxics_features():
     fill stay consistent. The response is gzipped by the after_request hook."""
     conn = db()
     rows = conn.execute(
-        "SELECT tract_geoid, county_name, total_risk, sources, pollutants, geometry "
-        "FROM airtoxics_tracts").fetchall()
+        "SELECT tract_geoid, county_name, total_risk, sources, pollutants, "
+        "hi_respiratory, hi_neurological, hi_immunological, hi_kidney, hi_liver, "
+        "geometry FROM airtoxics_tracts").fetchall()
     stats = _airtoxics_stats(conn)
     conn.close()
     tracts, mx = [], 0.0
@@ -3712,6 +3713,9 @@ def api_airtoxics_features():
             "g": r["tract_geoid"], "c": r["county_name"], "r": risk,
             "src": json.loads(r["sources"] or "{}"),
             "poll": json.loads(r["pollutants"] or "[]"),
+            # Noncancer hazard index per target organ (new in the 2019 assessment).
+            "hi": {organ: r[f"hi_{organ}"]
+                   for organ, _lbl in airtoxics_data.HAZARD_ORGANS},
             "geometry": geom,
         })
     legend = airtoxics_data.legend_payload(stats.get("national_avg"), stats.get("mi_avg"))
@@ -4207,8 +4211,9 @@ def _atx_index():
     conn = db()
     try:
         rows = conn.execute(
-            "SELECT tract_geoid, county_name, total_risk, sources, pollutants, geometry "
-            "FROM airtoxics_tracts").fetchall()
+            "SELECT tract_geoid, county_name, total_risk, sources, pollutants, "
+            "hi_respiratory, hi_neurological, hi_immunological, hi_kidney, hi_liver, "
+            "geometry FROM airtoxics_tracts").fetchall()
     finally:
         conn.close()
     idx = []
@@ -4230,8 +4235,9 @@ def _atx_index():
             xs = [p[0] for p in ring]
             ys = [p[1] for p in ring]
             boxed.append((min(xs), min(ys), max(xs), max(ys), ring))
+        hi = {organ: r[f"hi_{organ}"] for organ, _lbl in airtoxics_data.HAZARD_ORGANS}
         idx.append((r["tract_geoid"], r["county_name"], r["total_risk"],
-                    r["sources"], r["pollutants"], boxed))
+                    r["sources"], r["pollutants"], hi, boxed))
     _ATX_INDEX = idx
     return idx
 
@@ -4242,16 +4248,16 @@ def _report_airtoxics(lat, lng, stats):
     national tract averages, and the dominant source category — framed as
     AREA-LEVEL context with EPA's screening caveats, never a property finding."""
     hit = None
-    for geoid, cty, total, srcjson, polljson, boxed in _atx_index():
+    for geoid, cty, total, srcjson, polljson, hi, boxed in _atx_index():
         for (minx, miny, maxx, maxy, ring) in boxed:
             if minx <= lng <= maxx and miny <= lat <= maxy and _pip(lng, lat, ring):
-                hit = (geoid, cty, total, srcjson, polljson)
+                hit = (geoid, cty, total, srcjson, polljson, hi)
                 break
         if hit:
             break
     if not hit:
         return None
-    geoid, cty, total, srcjson, polljson = hit
+    geoid, cty, total, srcjson, polljson, hi = hit
     try:
         sources = json.loads(srcjson or "{}")
     except (TypeError, ValueError):
@@ -4276,6 +4282,9 @@ def _report_airtoxics(lat, lng, stats):
         "vs_mi_pct": vs_mi, "dominant": dominant, "sources": src_list,
         "pollutants": polls, "assessment": airtoxics_data.ASSESSMENT_LABEL,
         "caveats": airtoxics_data.CAVEATS,
+        "hazard": [{"key": k, "label": lbl, "value": hi.get(k)}
+                   for k, lbl in airtoxics_data.HAZARD_ORGANS],
+        "hazard_note": airtoxics_data.HAZARD_INDEX_NOTE,
     }
 
 

@@ -170,12 +170,33 @@ def clean_pollutant_name(field: str, alias: str | None = None) -> str:
 # EPA is explicit; these are near-verbatim to their guidance.
 CAVEATS = [
     "These are MODELED estimates from emissions inventories and dispersion models, "
-    "not measured air quality at this location.",
+    "not measured air quality at this location. They are distinct from EPA AQS "
+    "measured monitor concentrations and CAMD measured stack emissions — the three "
+    "are different things and are never ranked or compared against each other.",
     "This is a SCREENING assessment designed to identify areas for further study — "
-    "not to determine risk at a specific address, home, or school.",
+    "not to determine risk at a specific address, home, or school, or for any "
+    "individual person.",
     "It assumes continuous OUTDOOR exposure at this location for 70 years. Indoor "
     "air, where people spend most of their time, is not included.",
+    "Assessment years are NOT comparable. EPA states it can be misleading to compare "
+    "AirToxScreen versions: the emissions inventory, modeling, background, and health "
+    "benchmarks all changed between releases. Only one year is shown and it is not "
+    "trended.",
+    "Diesel particulate matter cancer risk is NOT included — EPA has no cancer "
+    "dose-response value for diesel PM. Only its noncancer respiratory effects appear "
+    "(in the hazard index).",
+    "127 of the 181 modeled air toxics have dose-response values and contribute to "
+    "these totals; the rest lack adequate data to quantify.",
 ]
+
+# Shown with the hazard-index block. States EPA's threshold without ever using
+# "safe", "clean", or "healthy", and without implying the absence of risk.
+HAZARD_INDEX_NOTE = (
+    "A hazard index at or below 1 is EPA's screening threshold below which noncancer "
+    "effects are considered negligible; above 1 warrants a closer, case-by-case look. "
+    "Every Michigan tract in this assessment is at or below 1 for all five organ "
+    "systems. This is a modeled screening estimate, not a measurement and not a "
+    "statement about any individual's exposure.")
 
 LAYER_CAVEAT = (
     "EPA's air toxics assessment is a SCREENING tool: modeled cancer-risk estimates "
@@ -184,7 +205,9 @@ LAYER_CAVEAT = (
     "home or school — it is meant to flag areas for further study. Indoor air is not "
     "included. EPA also cautions against comparing across assessment years because "
     "the methods change, so only one assessment year is shown here and it is not "
-    "trended. Nothing here is fabricated."
+    "trended. It is distinct from EPA AQS measured monitor concentrations and CAMD "
+    "measured stack emissions, which are never ranked against it. Nothing here is "
+    "fabricated."
 )
 
 ASSESSMENT_LABEL = "EPA AirToxScreen (2019 assessment)"
@@ -216,5 +239,7 @@ def legend_payload(national_avg: float | None, mi_avg: float | None) -> dict:
         "mi_avg": mi_avg,
         "caveats": CAVEATS,
         "caveat": LAYER_CAVEAT,
+        "hazard_organs": [{"key": k, "label": lbl} for k, lbl in HAZARD_ORGANS],
+        "hazard_note": HAZARD_INDEX_NOTE,
         "source_url": SOURCE_URL,
     }

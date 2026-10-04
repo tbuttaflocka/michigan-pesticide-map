@@ -203,9 +203,11 @@
       'people over a lifetime — a modeled estimate, not a count of real cases.',
     'hazard index':
       'A measure of NON-cancer risk: the modeled concentration of a pollutant ' +
-      'divided by the level considered safe, summed across pollutants that affect ' +
-      'the same organ system (e.g. the respiratory tract). A hazard index above 1 ' +
-      'means the combined exposure exceeds the safe reference level.',
+      'divided by EPA\'s reference level for it, summed across pollutants that ' +
+      'affect the same organ system (e.g. the respiratory tract). A hazard index ' +
+      'at or below 1 is EPA\'s screening threshold below which noncancer effects ' +
+      'are considered negligible; above 1 warrants a closer, case-by-case look. ' +
+      'It is a modeled screening estimate, not a measurement.',
     'census block vs tract':
       'Two Census geographies. A census TRACT is a small statistical area of ' +
       'roughly 1,200–8,000 people (Michigan has ~2,800); a census BLOCK is much ' +
@@ -219,8 +221,9 @@
     'NATA':
       'EPA\'s National Air Toxics Assessment — the periodic nationwide screening ' +
       'study of air toxics health risk that this layer draws on. It was renamed ' +
-      'AirToxScreen starting with the 2019 assessment; the methods and caveats are ' +
-      'the same — modeled estimates, not measurements.',
+      'AirToxScreen starting with the 2017 data year; the methods and caveats are ' +
+      'the same — modeled estimates, not measurements. This layer shows the 2019 ' +
+      'assessment.',
     // ---- air toxics SOURCE categories (EPA AirToxScreen/NATA definitions) ----
     'point source':
       'A specific, identifiable facility with permitted emission points — a factory, ' +

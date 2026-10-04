@@ -107,7 +107,7 @@
       densityByFips: new Map(),    // county Site+AOI counts (choropleth)
       _densityMax: 1,
     },
-    airToxics: {                   // EPA air toxics (NATA) census-tract risk choropleth
+    airToxics: {                   // EPA AirToxScreen 2019 census-tract risk choropleth
       loaded: false,
       tracts: [],                  // from /api/airtoxics/features
       legend: null,
@@ -4196,7 +4196,7 @@
     </div>`;
   }
 
-  // ---------- EPA air toxics risk (NATA) census-tract choropleth ----------
+  // ---------- EPA AirToxScreen 2019 air toxics risk census-tract choropleth ----------
   // A fine-grained choropleth (~2,769 tracts) shaded by modeled cancer risk. It
   // reuses the PFAS hexbin performance recipe: ONE Canvas renderer draws all the
   // tract polygons in a single <canvas>, the layer is built once and cached, and
@@ -4312,6 +4312,26 @@
     }).join('');
   }
 
+  // Noncancer hazard-index block (new in AirToxScreen 2019). `hi` is a per-organ
+  // {key: value} map; organs/note come from the legend. Framed with EPA's HI<=1
+  // threshold — never "safe"/"clean"/"healthy", never implying absence of risk.
+  function _atxHazardHtml(hi, organs, note) {
+    if (!hi || !organs || !organs.length) return '';
+    const fmt = (v) => (v == null) ? '—'
+      : v === 0 ? '0' : (v < 0.01 ? '<0.01' : v.toFixed(2));
+    const rows = organs.map((o) => {
+      const v = hi[o.key];
+      const le1 = (v != null && v <= 1) ? ' title="at or below 1"' : '';
+      return `<div class="atx-hi-row"><span class="atx-hi-l">${esc(o.label)}</span>`
+        + `<span class="atx-hi-v"${le1}>${fmt(v)}</span></div>`;
+    }).join('');
+    return `<div class="atx-hi">
+      <div class="atx-hi-head">Noncancer hazard index <span class="muted">— modeled, by organ system</span></div>
+      <div class="atx-hi-rows">${rows}</div>
+      ${note ? `<div class="atx-hi-note">${esc(note)}</div>` : ''}
+    </div>`;
+  }
+
   function airToxicsPopupHtml(t) {
     const L = state.airToxics.legend || {};
     const s = state.airToxics.stats || {};
@@ -4336,6 +4356,7 @@
       <div class="atx-share-note">${ATX_SHARE_NOTE}</div>
       <div class="atx-bars">${bars}</div>
       ${polls ? `<div class="atx-poll"><span class="k">Top pollutants:</span> ${polls}</div>` : ''}
+      ${_atxHazardHtml(t.hi, L.hazard_organs, L.hazard_note)}
       <details class="atx-caveat">
         <summary>⚠ A screening estimate — what this is (and isn't)</summary>
         <ul>${(L.caveats || []).map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
@@ -6803,17 +6824,26 @@
     }).join('');
     const polls = (a.pollutants || []).slice(0, 5).map((p) => chemLink(p[0])).join(', ');
     const caveats = (a.caveats || []).map((c) => `<li>${_rEsc(c)}</li>`).join('');
+    const fmtHi = (v) => (v == null) ? '—' : v === 0 ? '0' : (v < 0.01 ? '<0.01' : v.toFixed(2));
+    const hiRows = (a.hazard || []).map((h) =>
+      `<div class="atx-hi-row"><span class="atx-hi-l">${_rEsc(h.label)}</span>`
+      + `<span class="atx-hi-v">${fmtHi(h.value)}</span></div>`).join('');
+    const hiBlock = (a.hazard && a.hazard.length) ? `<div class="atx-hi">
+      <div class="atx-hi-head">Noncancer hazard index <span class="muted">— modeled, by organ system</span></div>
+      <div class="atx-hi-rows">${hiRows}</div>
+      ${a.hazard_note ? `<div class="atx-hi-note">${_rEsc(a.hazard_note)}</div>` : ''}</div>` : '';
     return `<div class="rpt-section rpt-airtox">
       <h3>Modeled air toxics risk <span class="rpt-h-note">area-level screening estimate — NOT a measurement at this address</span></h3>
-      <div class="rpt-warn">⚠ This is a <b>modeled screening estimate</b> for the surrounding census tract, <b>not measured air</b> at this property. EPA designed it to identify areas for further study, <b>not</b> to determine risk at a specific home or school. It assumes 70 years of continuous <b>outdoor</b> exposure; indoor air, where people spend most of their time, is not included.</div>
+      <div class="rpt-warn">⚠ This is a <b>modeled screening estimate</b> for the surrounding census tract, <b>not measured air</b> at this property. EPA designed it to identify areas for further study, <b>not</b> to determine risk at a specific home or school. It assumes 70 years of continuous <b>outdoor</b> exposure; indoor air, where people spend most of their time, is not included. It is distinct from measured AQS monitor concentrations and CAMD stack emissions and is never ranked against them.</div>
       <div class="rpt-airtox-fig"><b>${a.total_risk}</b> in a million${vsTxt ? ` <span class="rpt-vs ${vs >= 0 ? 'hi' : 'lo'}">${vsTxt}</span>` : ''}</div>
       <p class="muted small">Census tract ${_rEsc(a.tract_geoid)} · Michigan average ${a.mi_avg} · national average ${a.national_avg}. ${_rEsc(a.assessment)}.</p>
       ${a.dominant ? `<p>Risk here is modeled as driven mostly by <b>${_rEsc(a.dominant.label)}</b> (${a.dominant.pct}% of the total)${_atxDriverClause(a.dominant.key)}.</p>` : ''}
       <div class="atx-share-note">${ATX_SHARE_NOTE}</div>
       <div class="atx-bars">${bars}</div>
       ${polls ? `<p class="small"><span class="muted">Top modeled pollutants:</span> ${polls}</p>` : ''}
+      ${hiBlock}
       <ul class="rpt-airtox-caveats">${caveats}</ul>
-      <p class="rpt-note muted small">EPA cautions against comparing across assessment years (methods change), so this reflects one assessment, not a trend. Source: EPA NATA / AirToxScreen.</p>
+      <p class="rpt-note muted small">EPA cautions against comparing across assessment years (methods change), so this reflects one assessment, not a trend. Source: EPA AirToxScreen.</p>
     </div>`;
   }
 
