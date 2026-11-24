@@ -162,9 +162,10 @@
       restrLoaded: false,
       restrictions: [],            // from /api/part201/restrictions
       layer: null,                 // L.layerGroup of canvas circleMarkers
-      _canvas: null,               // dedicated renderer — canvas rule applies
       restrLayer: null,            // L.layerGroup (polygons + points)
-      _restrCanvas: null,          // dedicated renderer — canvas rule applies
+      // ONE shared canvas renderer for BOTH sub-layers (canvas rule applies).
+      // Two stacked canvases made polygons unclickable — see part201Canvas().
+      _canvas: null,
     },
     spraying: {
       loaded: false,
@@ -377,7 +378,10 @@
       zoomControl: true,
       attributionControl: true,
       minZoom: 5,
-      maxZoom: 11,
+      // 19 matches the CARTO tile layer below. The old cap of 11 made the
+      // parcel-scale Part 201 restriction polygons (~1 px at z11) impossible
+      // to see or click at any permitted zoom.
+      maxZoom: 19,
     }).setView([44.7, -85.2], 6);
 
     // CARTO now requires an API key on its basemap tiles (keyless ones are
@@ -5284,27 +5288,19 @@
     }
     return 'part201';
   }
+  // ONE canvas for BOTH sub-layers (sites + restriction polygons). Two stacked
+  // sibling canvases broke polygon clicks: each L.canvas is a full-map element
+  // that eats pointer events over its whole surface but hit-tests only its own
+  // paths, so the upper (sites) canvas swallowed every click aimed at a polygon
+  // on the lower one. On a shared canvas Leaflet hit-tests topmost-first across
+  // everything drawn: dots (added last, drawn on top) win where they cover a
+  // polygon, and the polygon takes the click anywhere else on its area.
   function part201Canvas() {
     if (!state.part201._canvas) {
       part201Pane();
       state.part201._canvas = L.canvas({ pane: 'part201', padding: 0.5 });
     }
     return state.part201._canvas;
-  }
-  // Restriction polygons sit just UNDER the site dots so a dot is always
-  // clickable on top of its parcel polygon.
-  function part201LurPane() {
-    if (!state.map.getPane('part201lur')) {
-      state.map.createPane('part201lur').style.zIndex = 641;
-    }
-    return 'part201lur';
-  }
-  function part201LurCanvas() {
-    if (!state.part201._restrCanvas) {
-      part201LurPane();
-      state.part201._restrCanvas = L.canvas({ pane: 'part201lur', padding: 0.5 });
-    }
-    return state.part201._restrCanvas;
   }
 
   async function loadPart201Sites() {
@@ -5388,20 +5384,53 @@
     </div>`;
   }
 
+  // Rebuilds BOTH sub-layers, restrictions first then dots, so the shared
+  // canvas draws dots on top (draw order = add order) and hit-tests them first.
+  // Any change to either sub-layer re-runs this whole function — re-adding only
+  // the restrictions after the dots would paint parcels OVER the dots.
   function renderPart201() {
     if (state.part201.layer) { state.part201.layer.remove(); state.part201.layer = null; }
+    if (state.part201.restrLayer) { state.part201.restrLayer.remove(); state.part201.restrLayer = null; }
     if (!state.part201.showSites) {
-      // Hidden: detach + null BOTH canvases (ghost-canvas guard).
+      // Hidden: detach + null the (single, shared) canvas — ghost-canvas guard.
       removeCanvasRenderer(state.part201._canvas);
       state.part201._canvas = null;
-      renderPart201Restrictions();     // tears itself down via showSites check
       updatePart201Stats(); renderMarkerKeys();
       return;
     }
     const pane = part201Pane();
     const renderer = part201Canvas();
-    const grp = L.layerGroup();
     let n = 0;
+
+    // --- restrictions first (drawn under the dots) ---
+    if (state.part201.showRestrictions && state.part201.restrLoaded) {
+      const rgrp = L.layerGroup();
+      for (const r of state.part201.restrictions) {
+        let lyr = null;
+        if (r.geom) {
+          lyr = L.geoJSON({ type: 'Feature', geometry: r.geom, properties: {} }, {
+            pane, style: { renderer, color: P201_LUR_COLOR, weight: 1.5,
+                           fillColor: P201_LUR_COLOR, fillOpacity: 0.25 },
+          });
+        } else if (r.lat != null && r.lng != null) {
+          // The 161 point-only restrictions: small gold dot.
+          lyr = L.circleMarker([r.lat, r.lng], {
+            pane, renderer, radius: 4, weight: 1.2, color: P201_LUR_COLOR,
+            opacity: 0.95, fillColor: P201_LUR_COLOR, fillOpacity: 0.4,
+          });
+          lyr._pickName = (r.n || 'Land use restriction');
+        }
+        if (!lyr) continue;
+        lyr.bindPopup(p201RestrPopupHtml(r), { maxWidth: 360, className: 'ust-popup-wrap' });
+        rgrp.addLayer(lyr);
+        n += 1;
+      }
+      rgrp.addTo(state.map);
+      state.part201.restrLayer = rgrp;
+    }
+
+    // --- site dots last (drawn on top, hit-tested first) ---
+    const grp = L.layerGroup();
     for (const f of state.part201.sites) {
       if (!state.part201.filters[f.rc]) continue;
       if (f.lat == null || f.lng == null) continue;
@@ -5418,52 +5447,12 @@
     }
     grp.addTo(state.map);
     state.part201.layer = grp;
+
     if (n === 0) {      // empty render: drop the canvas so no blank <canvas> lingers
       removeCanvasRenderer(state.part201._canvas);
       state.part201._canvas = null;
     }
-    renderPart201Restrictions();
     updatePart201Stats(); renderMarkerKeys();
-  }
-
-  function renderPart201Restrictions() {
-    if (state.part201.restrLayer) { state.part201.restrLayer.remove(); state.part201.restrLayer = null; }
-    if (!state.part201.showSites || !state.part201.showRestrictions
-        || !state.part201.restrLoaded) {
-      removeCanvasRenderer(state.part201._restrCanvas);
-      state.part201._restrCanvas = null;
-      return;
-    }
-    const pane = part201LurPane();
-    const renderer = part201LurCanvas();
-    const grp = L.layerGroup();
-    let n = 0;
-    for (const r of state.part201.restrictions) {
-      let lyr = null;
-      if (r.geom) {
-        lyr = L.geoJSON({ type: 'Feature', geometry: r.geom, properties: {} }, {
-          pane, style: { renderer, color: P201_LUR_COLOR, weight: 1.5,
-                         fillColor: P201_LUR_COLOR, fillOpacity: 0.25 },
-        });
-      } else if (r.lat != null && r.lng != null) {
-        // The 161 point-only restrictions: small gold square-ish dot.
-        lyr = L.circleMarker([r.lat, r.lng], {
-          pane, renderer, radius: 4, weight: 1.2, color: P201_LUR_COLOR,
-          opacity: 0.95, fillColor: P201_LUR_COLOR, fillOpacity: 0.4,
-        });
-        lyr._pickName = (r.n || 'Land use restriction');
-      }
-      if (!lyr) continue;
-      lyr.bindPopup(p201RestrPopupHtml(r), { maxWidth: 360, className: 'ust-popup-wrap' });
-      grp.addLayer(lyr);
-      n += 1;
-    }
-    grp.addTo(state.map);
-    state.part201.restrLayer = grp;
-    if (n === 0) {
-      removeCanvasRenderer(state.part201._restrCanvas);
-      state.part201._restrCanvas = null;
-    }
   }
 
   function updatePart201Stats() {
@@ -6769,7 +6758,10 @@
         if (e.target.checked && state.part201.showSites && !state.part201.restrLoaded) {
           loading(true); await loadPart201Restrictions(); loading(false);
         }
-        renderPart201Restrictions(); updatePart201Stats();
+        // Full re-render, not restrictions-only: both sub-layers share one
+        // canvas, and dots must always be (re-)added AFTER the polygons so
+        // they stay drawn on top and win hit-testing.
+        renderPart201();
       });
     }
 
