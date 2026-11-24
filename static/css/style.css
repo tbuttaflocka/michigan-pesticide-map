@@ -3187,3 +3187,15 @@ body.search-open .active-layer-badge { display: none; }
   font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .inspect-hint .ih-dismiss:hover { color: var(--text); }
 @media (max-width: 768px) { .inspect-hint { bottom: 76px; font-size: 12px; } }
+
+/* ---------- Part 201 state cleanup sites ---------- */
+/* Sub-toggle group headings: the "verbatim, not a severity scale" framing lives
+   in the control itself so it is visible before anyone reads a popup. */
+.p201-subhead { display: block; margin: 7px 0 2px; font-size: 11px; color: var(--muted);
+  text-transform: none; letter-spacing: 0; line-height: 1.35; }
+.p201-subhead b { color: var(--text); }
+#part201-subtoggles label.small { display: block; margin: 2px 0; }
+/* Restriction callout inside popups — the "capped, waste still in place" line. */
+.p201-popup .p201-restr { margin: 8px 0 2px; padding: 7px 9px; border-radius: 7px;
+  background: rgba(212, 167, 44, 0.12); border: 1px solid rgba(212, 167, 44, 0.45);
+  font-size: 12px; line-height: 1.45; }

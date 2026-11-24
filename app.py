@@ -289,7 +289,8 @@ def _sublayer_label_counts() -> dict:
     hardcoded number. The oil-gas counts use the SAME category CASE the map
     filters by (_OGW_CATEGORY_SQL), so each label matches the markers its toggle
     actually shows. Returns preformatted strings (empty if a table is absent)."""
-    counts = {"injection": "", "orphan": "", "plugged": "", "echo_all": ""}
+    counts = {"injection": "", "orphan": "", "plugged": "", "echo_all": "",
+              "part201": ""}
     conn = db()
     cur = conn.cursor()
     try:
@@ -300,6 +301,8 @@ def _sublayer_label_counts() -> dict:
                     counts[cat] = f"{n:,}"
         if _table_exists(cur, "echo_facilities"):
             counts["echo_all"] = f"{cur.execute('SELECT COUNT(*) FROM echo_facilities').fetchone()[0]:,}"
+        if _table_exists(cur, "part201_sites"):
+            counts["part201"] = f"{cur.execute('SELECT COUNT(*) FROM part201_sites').fetchone()[0]:,}"
     finally:
         conn.close()
     return counts
@@ -4416,6 +4419,165 @@ def api_ust_density():
                               "total_sites": sum(vals)}})
 
 
+# ---------------------------------------------------------------------------
+# Part 201 state cleanup sites (EGLE RRD). RiskCondition is EGLE's own cleanup-
+# status wording and is NEVER recoded, ranked, or collapsed into a severity
+# scale — the slug keys below exist only so sub-toggles/URLs stay compact, and
+# the verbatim string always travels with them. Three values are explicitly
+# NOT risk determinations (EGLE recorded no assessment) and are grouped apart.
+# ---------------------------------------------------------------------------
+
+# (slug key, verbatim EGLE RiskCondition, group). Order here is the DISPLAY
+# order of the sub-toggles; within each group it follows EGLE's own wording
+# families, not any ranking of ours.
+_P201_RISK_KEYS = [
+    ("immediate",          "Risks Present and Immediate",                    "determination"),
+    ("short_term",         "Risks Present and Require Action in Short-term", "determination"),
+    ("long_term",          "Risks Present and Require Action in Long-term",  "determination"),
+    ("controlled_interim", "Risks Controlled-Interim",                       "determination"),
+    ("risk_controlled",    "Risk Controlled",                                "determination"),
+    ("res_closure",        "Residential Closure (under Section 20101(1)(tt))", "determination"),
+    ("inadequate_data",    "Inadequate Data to Assign Risk",                 "not_assessed"),
+    ("contact_lead",       "Contact Lead Division",                          "not_assessed"),
+    ("not_determined",     "Risks Not Determined",                           "not_assessed"),
+]
+_P201_KEY_BY_VALUE = {v: k for k, v, _g in _P201_RISK_KEYS}
+
+# Plain-language meaning of the three non-determinations (what each actually
+# says — not what the site's risk is, which EGLE has not stated).
+_P201_NOT_ASSESSED_PLAIN = {
+    "inadequate_data": "EGLE does not have enough data on this site to assign "
+                       "a risk condition.",
+    "contact_lead":    "EGLE's record directs inquiries to the division leading "
+                       "this site for its current status.",
+    "not_determined":  "No risk determination is recorded for this site.",
+}
+
+# EGLE's own completeness caveat, verbatim from the dataset description
+# (ArcGIS item 2bb7f2d4a9b4459bac03d7f73a7fc399, owner EgleAdmin).
+_P201_EGLE_CAVEAT = (
+    'This data layer does not include all of the facilities that are subject '
+    'to regulation under Part 201 because owners are not required to inform '
+    'EGLE about the facilities and can pursue cleanup independently. '
+    'Facilities that are not known to EGLE are not on the Inventory, nor are '
+    'locations with releases that resulted in low environmental impact.'
+)
+
+
+def _p201_risk_key(value):
+    """Verbatim RiskCondition -> compact slug. Unknown/new EGLE values fall into
+    'other' so they are never silently dropped (the legend shows them)."""
+    if not value:
+        return "other"
+    return _P201_KEY_BY_VALUE.get(value.strip(), "other")
+
+
+def _p201_restriction_index(conn) -> dict:
+    """site_id -> list of that site's land-use-restriction summaries (Part 201
+    program rows only — the ID join documented in the schema: location_id =
+    site_id for ProgramType 'Part 201')."""
+    idx: dict = {}
+    for r in conn.execute(
+            """SELECT location_id, land_use_restriction_type, deed_date, acres, layer
+                 FROM part201_restrictions
+                WHERE program_type = 'Part 201' AND location_id IS NOT NULL"""):
+        idx.setdefault(r["location_id"], []).append({
+            "lur": r["land_use_restriction_type"], "deed": r["deed_date"],
+            "acres": r["acres"], "layer": r["layer"]})
+    return idx
+
+
+@app.route("/api/part201/sites")
+def api_part201_sites():
+    """All Part 201 sites in one payload (the layer is off by default and the
+    fetch is lazy; 19k compact rows cluster well under the canvas renderer).
+    RiskCondition travels as a slug key + the verbatim string in the legend."""
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "part201_sites"):
+        conn.close()
+        return jsonify({"available": False, "sites": [], "legend": None})
+    restr = _p201_restriction_index(conn)
+    rows = cur.execute(
+        """SELECT site_key, site_id, site_name, address, city, county,
+                  county_fips, latitude, longitude, business_type,
+                  risk_condition, contaminants, has_bea_or_nom, last_updated
+             FROM part201_sites ORDER BY site_name""").fetchall()
+    counts: dict = {}
+    sites = []
+    for r in rows:
+        key = _p201_risk_key(r["risk_condition"])
+        counts[key] = counts.get(key, 0) + 1
+        rr = restr.get(r["site_id"]) if r["site_id"] else None
+        sites.append({
+            "k": r["site_key"], "id": r["site_id"], "n": r["site_name"],
+            "a": r["address"], "ci": r["city"], "co": r["county"],
+            "cf": r["county_fips"], "lat": r["latitude"], "lng": r["longitude"],
+            "bt": r["business_type"], "rc": key,
+            # Verbatim EGLE strings — the popup shows these untouched.
+            "rcv": r["risk_condition"], "cont": r["contaminants"],
+            "bea": r["has_bea_or_nom"], "lu": r["last_updated"],
+            "r": rr,
+        })
+    conn.close()
+    legend = {
+        "groups": [
+            {"key": g, "label": ("EGLE risk condition — their wording, verbatim"
+                                 if g == "determination" else
+                                 "No determination recorded"),
+             "values": [{"key": k, "label": v, "count": counts.get(k, 0),
+                         "plain": _P201_NOT_ASSESSED_PLAIN.get(k)}
+                        for k, v, gg in _P201_RISK_KEYS if gg == g]}
+            for g in ("determination", "not_assessed")],
+        "other_count": counts.get("other", 0),
+        "caveat": _P201_EGLE_CAVEAT,
+    }
+    return jsonify({"available": True, "count": len(sites),
+                    "legend": legend, "sites": sites})
+
+
+@app.route("/api/part201/restrictions")
+def api_part201_restrictions():
+    """Land Resource Use Restriction points + polygons (institutional controls /
+    deed restrictions), all programs, geometry included. Where a Part 201 row's
+    location_id matches a loaded site, the site's name/ID ride along so the
+    popup can say which site the restriction is recorded against."""
+    conn = db()
+    cur = conn.cursor()
+    if not _table_exists(cur, "part201_restrictions"):
+        conn.close()
+        return jsonify({"available": False, "restrictions": []})
+    site_by_id = {r["site_id"]: r["site_name"] for r in cur.execute(
+        "SELECT site_id, site_name FROM part201_sites WHERE site_id IS NOT NULL")}
+    out = []
+    for r in cur.execute(
+            """SELECT restriction_key, layer, restriction_type,
+                      land_use_restriction_type, restriction_status,
+                      facility_name, address, city, egle_reference_number,
+                      program_type, deed_date, acres, location_id,
+                      latitude, longitude, geometry
+                 FROM part201_restrictions"""):
+        geom = None
+        if r["geometry"]:
+            try:
+                geom = json.loads(r["geometry"])
+            except (TypeError, ValueError):
+                geom = None
+        linked = (site_by_id.get(r["location_id"])
+                  if r["program_type"] == "Part 201" else None)
+        out.append({
+            "k": r["restriction_key"], "ly": r["layer"],
+            "rt": r["restriction_type"], "lur": r["land_use_restriction_type"],
+            "rs": r["restriction_status"], "n": r["facility_name"],
+            "a": r["address"], "ci": r["city"], "ref": r["egle_reference_number"],
+            "pg": r["program_type"], "deed": r["deed_date"], "ac": r["acres"],
+            "loc": r["location_id"], "site": linked,
+            "lat": r["latitude"], "lng": r["longitude"], "geom": geom,
+        })
+    conn.close()
+    return jsonify({"available": True, "count": len(out), "restrictions": out})
+
+
 # ==========================================================================
 # "Check an address" — homebuyer environmental report
 # ==========================================================================
@@ -4768,9 +4930,29 @@ def _report_near(conn, lat, lng, *, radius=5, cap=12):
         "WHERE category IN ('leaking_closed','licensed')").fetchall()
     ust_other = _lb(_sorted_by_distance(rows, lat, lng), "ust_other", _ust_build)
 
+    # --- Part 201 state cleanup sites. RiskCondition is passed through verbatim
+    # (a cleanup-status record, not a measurement) and the land-use-restriction
+    # ID join (own dataset only) flags "deed restriction on file". ---
+    p201_restr = _p201_restriction_index(conn)
+
+    def _p201_build(r, d):
+        rr = p201_restr.get(r["site_id"]) if r["site_id"] else None
+        return {"id": r["site_key"], "site_id": r["site_id"], "name": r["site_name"],
+                "county": r["county"], "city": r["city"], "address": r["address"],
+                "risk_condition": r["risk_condition"],
+                "risk_key": _p201_risk_key(r["risk_condition"]),
+                "not_assessed": _p201_risk_key(r["risk_condition"]) in _P201_NOT_ASSESSED_PLAIN,
+                "contaminants": r["contaminants"], "bea": r["has_bea_or_nom"],
+                "restrictions": rr}
+    rows = conn.execute(
+        "SELECT site_key, site_id, site_name, latitude, longitude, county, city, "
+        "address, risk_condition, contaminants, has_bea_or_nom FROM part201_sites "
+        "WHERE latitude IS NOT NULL AND longitude IS NOT NULL").fetchall()
+    part201 = _lb(_sorted_by_distance(rows, lat, lng), "part201", _p201_build)
+
     return {"contamination": contam, "tri": tri, "echo": echo, "landfill": landfill,
             "water": water, "golf": golf, "pfas": pfas, "pfas_water": pfas_water,
-            "ust_open": ust_open, "ust_other": ust_other}
+            "ust_open": ust_open, "ust_other": ust_other, "part201": part201}
 
 
 def _report_spraying(alat, alng, fips, locate):
@@ -5172,6 +5354,9 @@ _WH_CAP = 12                     # max records listed per category (then "+N mor
 def _wh_sub(layer, it):
     if layer == "contamination":
         return "NPL Superfund site" if it.get("npl") else (it.get("status") or "contamination site")
+    if layer == "part201":
+        base = it.get("risk_condition") or "state cleanup site"
+        return base + (" · land use restriction on file" if it.get("restrictions") else "")
     if layer == "ust_open":
         return "open leaking release (Part 213)"
     if layer == "ust_other":
@@ -5206,6 +5391,7 @@ def _wh_sub(layer, it):
 
 _WH_CATEGORIES = [
     ("contamination", "Contamination & Superfund sites"),
+    ("part201",       "State cleanup sites (EGLE Part 201)"),
     ("ust_open",      "Leaking storage tanks (open releases)"),
     ("pfas",          "PFAS sites & areas of interest"),
     ("tri",           "Industrial toxic releases (TRI)"),

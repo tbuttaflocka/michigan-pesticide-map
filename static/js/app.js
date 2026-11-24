@@ -145,6 +145,27 @@
       densityByFips: new Map(),    // county open-release counts (choropleth)
       _densityMax: 1,
     },
+    part201: {                     // EGLE Part 201 state cleanup sites (19k) +
+                                   // land use restrictions (institutional controls)
+      loaded: false,
+      sites: [],                   // from /api/part201/sites (single lazy fetch)
+      legend: null,                // risk-condition groups, verbatim labels, caveat
+      showSites: false,
+      // One filter per VERBATIM EGLE RiskCondition value (slug keys only for
+      // compactness — never a ranking). All on by default; 'other' catches any
+      // value EGLE adds later so nothing is silently dropped.
+      filters: { immediate: true, short_term: true, long_term: true,
+                 controlled_interim: true, risk_controlled: true,
+                 res_closure: true, inadequate_data: true, contact_lead: true,
+                 not_determined: true, other: true },
+      showRestrictions: true,      // land-use-restriction sub-layer (lazy)
+      restrLoaded: false,
+      restrictions: [],            // from /api/part201/restrictions
+      layer: null,                 // L.layerGroup of canvas circleMarkers
+      _canvas: null,               // dedicated renderer — canvas rule applies
+      restrLayer: null,            // L.layerGroup (polygons + points)
+      _restrCanvas: null,          // dedicated renderer — canvas rule applies
+    },
     spraying: {
       loaded: false,
       programs: [],                // from /api/spraying/programs
@@ -503,6 +524,7 @@
       ['Enforcement & compliance (ECHO)', state.echo.layer],
       ['TRI industrial facilities', state.tri.markers],
       ['Contamination sites', state.contam.markers],
+      ['Part 201 cleanup sites', state.part201.layer],
       ['PFAS sites', state.pfas.markers],
       ['Landfills & waste', state.landfill.markers],
       ['Underground storage tanks', state.ust.markers],
@@ -1540,6 +1562,15 @@
           `<div class="mk"><span class="mk-dot" style="background:${o.color}"></span>${o.glyph} ${o.label}</div>`
         ).join('') +
         '<div class="mk mk-sub">Footprint = land under turf management · locations only, no pesticide amounts</div>';
+    }
+    // Part 201 key — ONE color for all EGLE determinations (their wording is a
+    // status, not a scale) + grey for "no determination" + the restriction gold.
+    if (state.part201.showSites) {
+      html += '<div class="mk-title" style="margin-top:8px">Part 201 state cleanup sites</div>' +
+        `<div class="mk"><span class="mk-dot" style="background:${P201_COLOR}"></span>EGLE risk condition recorded (verbatim in popup — not a severity scale)</div>` +
+        `<div class="mk"><span class="mk-dot" style="background:${P201_NA_COLOR}"></span>no determination recorded</div>` +
+        (state.part201.showRestrictions
+          ? `<div class="mk"><span class="mk-dot" style="background:${P201_LUR_COLOR}"></span>🔒 land use restriction (deed restriction on file)</div>` : '');
     }
     // PFAS key — confirmed Sites vs Areas of Interest and the sampling kinds.
     if (state.pfas.showSites && state.pfas.legend) {
@@ -5202,6 +5233,260 @@
     if (fips) openCounty(fips);
   });
 
+  // ---------- Part 201 state cleanup sites (EGLE RRD) ----------
+  //
+  // 19,051 sites, so: single lazy fetch, canvas circleMarkers on a DEDICATED
+  // renderer (the oil & gas pattern — proven at 92k points), client-side
+  // filters over EGLE's verbatim RiskCondition values. RISK CONDITION IS NOT
+  // A SEVERITY SCALE: every value renders in the SAME two colors — violet for
+  // sites where EGLE recorded a determination, grey for the three values that
+  // mean "no determination recorded" — so nothing reads as hot-to-cold.
+  // Canvas rule: keep the renderer attached across ordinary re-renders; detach
+  // AND null the ref only when the layer is hidden or ends up empty.
+  const P201_COLOR = '#9d7bd8';        // all determinations — one color, no ramp
+  const P201_NA_COLOR = '#8a93a6';     // "no determination recorded" — grey
+  const P201_LUR_COLOR = '#d4a72c';    // land-use-restriction polygons (gold)
+  const P201_NA_KEYS = ['inadequate_data', 'contact_lead', 'not_determined'];
+
+  // EGLE's published key for LandUseRestrictionType abbreviations, verbatim
+  // from the LRUR dataset description/metadata (ArcGIS items
+  // db8af5ca0b6041238f5a800bc35ea2b3 / 6bfc773ae55241ce85736528fb21a0cd).
+  const P201_LUR_KEY = {
+    'RC': 'Restrictive Covenant', 'NCA': 'Notice of Corrective Action',
+    'NAI': 'Notice of Aesthetic Impairment',
+    'NAER': 'Notice of Approved Environmental Remediation',
+    'NER': 'Notice of Environmental Remediation',
+    'Ordinance': 'Local Ordinance',
+    'MDOT': 'Michigan Department of Transportation, Environmental License Agreement',
+    'Other IC': 'Other Institutional Control',
+  };
+  // Expansions published by EGLE in RRD program documents but NOT in the
+  // dataset's own key — labeled as such when shown.
+  const P201_LUR_PROGRAM_DOCS = {
+    'CNTS': 'Covenant Not to Sue',
+    'AOC': 'Administrative Order by Consent',
+    'IRDC': 'Interim Response Designed to Meet Criteria',
+  };
+  // Any other code (e.g. DENAER): EGLE publishes no expansion — shown raw.
+
+  function p201LurLabel(code) {
+    if (!code) return '';
+    if (P201_LUR_KEY[code]) return `${esc(code)} — ${esc(P201_LUR_KEY[code])}`;
+    if (P201_LUR_PROGRAM_DOCS[code]) {
+      return `${esc(code)} — ${esc(P201_LUR_PROGRAM_DOCS[code])} <span class="muted">(per EGLE program documents; not in the dataset key)</span>`;
+    }
+    return `${esc(code)} <span class="muted">(EGLE publishes no expansion for this code)</span>`;
+  }
+
+  function part201Pane() {
+    if (!state.map.getPane('part201')) {
+      state.map.createPane('part201').style.zIndex = 642;
+    }
+    return 'part201';
+  }
+  function part201Canvas() {
+    if (!state.part201._canvas) {
+      part201Pane();
+      state.part201._canvas = L.canvas({ pane: 'part201', padding: 0.5 });
+    }
+    return state.part201._canvas;
+  }
+  // Restriction polygons sit just UNDER the site dots so a dot is always
+  // clickable on top of its parcel polygon.
+  function part201LurPane() {
+    if (!state.map.getPane('part201lur')) {
+      state.map.createPane('part201lur').style.zIndex = 641;
+    }
+    return 'part201lur';
+  }
+  function part201LurCanvas() {
+    if (!state.part201._restrCanvas) {
+      part201LurPane();
+      state.part201._restrCanvas = L.canvas({ pane: 'part201lur', padding: 0.5 });
+    }
+    return state.part201._restrCanvas;
+  }
+
+  async function loadPart201Sites() {
+    if (state.part201.loaded) return;
+    const d = await api('/api/part201/sites');
+    state.part201.sites = d.sites || [];
+    state.part201.legend = d.legend || null;
+    state.part201.loaded = true;
+  }
+  async function loadPart201Restrictions() {
+    if (state.part201.restrLoaded) return;
+    const d = await api('/api/part201/restrictions');
+    state.part201.restrictions = d.restrictions || [];
+    state.part201.restrLoaded = true;
+  }
+
+  // Plain-language meaning of the three "no determination" values (what the
+  // record SAYS — not an assessment of the site, which EGLE has not stated).
+  const P201_NA_PLAIN = {
+    inadequate_data: "EGLE doesn't have enough data on this site to assign a risk condition.",
+    contact_lead: "EGLE's record directs inquiries to the division leading this site for its current status.",
+    not_determined: 'No risk determination is recorded for this site.',
+  };
+
+  function part201PopupHtml(f) {
+    const notAssessed = P201_NA_KEYS.includes(f.rc);
+    const loc = [f.a, f.ci].filter(Boolean).join(', ');
+    const restr = (f.r || []).length ? f.r : null;
+    const restrHtml = restr ? `<div class="p201-restr">🔒 <b>A land use restriction is
+      recorded against this site</b> — ${restr.map((x) => {
+        const bits = [];
+        if (x.lur) bits.push(p201LurLabel(x.lur));
+        if (x.deed) bits.push(`deed dated ${esc(x.deed)}`);
+        if (x.acres != null) bits.push(`${x.acres.toFixed(2)} acres`);
+        return bits.join(', ');
+      }).join('; ')}. Contamination can lawfully remain in place under such a
+      restriction — "closed" or "controlled" does not mean removed.</div>` : '';
+    const rcPlain = notAssessed && P201_NA_PLAIN[f.rc]
+      ? ` <span class="muted">— ${esc(P201_NA_PLAIN[f.rc])}</span>` : '';
+    return `<div class="ust-popup p201-popup">
+      <div class="ust-type" style="background:${notAssessed ? P201_NA_COLOR : P201_COLOR}">
+        ${notAssessed ? 'No determination recorded' : 'Part 201 state cleanup site'}</div>
+      <h4>${esc(f.n || 'Part 201 site')}</h4>
+      ${loc ? `<div class="ust-meta">${esc(loc)}${f.co ? ' · ' + esc(f.co) + ' Co.' : ''}</div>` : (f.co ? `<div class="ust-meta">${esc(f.co)} County</div>` : '')}
+      <div class="ust-body">
+        ${f.id ? `<div><span class="k">EGLE SiteID:</span> ${esc(f.id)}</div>` : ''}
+        ${f.bt ? `<div><span class="k">Business type:</span> ${esc(f.bt)}</div>` : ''}
+        ${f.cont ? `<div><span class="k">Contaminants (EGLE's list, verbatim):</span> ${esc(f.cont)}</div>` : ''}
+        <div><span class="k">Risk condition (EGLE's wording, verbatim):</span> <b>${esc(f.rcv || 'not recorded')}</b>${rcPlain}</div>
+        <div class="ust-gloss">This is EGLE's cleanup-status wording, shown exactly as published — it is a status record, <b>not</b> a measurement, and not a severity score.</div>
+        ${f.bea ? `<div><span class="k">BEA or notice on file:</span> ${esc(f.bea)}${f.bea === 'YES' ? ' <span class="muted">— a Baseline Environmental Assessment or notice is on file (typically documents contamination known at purchase)</span>' : ''}</div>` : ''}
+      </div>
+      ${restrHtml}
+      <a class="ust-cta" href="https://www.michigan.gov/egle/maps-data/ride" target="_blank" rel="noopener">EGLE RIDE — search SiteID ${esc(f.id || '')} for site documents →</a>
+      <div class="ust-src">Source: Michigan EGLE Part 201 inventory${f.lu ? ` · record updated ${esc(f.lu)}` : ''}. EGLE: this layer “does not include all of the facilities that are subject to regulation under Part 201” — absence from it proves nothing about a property.</div>
+    </div>`;
+  }
+
+  function p201RestrPopupHtml(r) {
+    const loc = [r.a, r.ci].filter(Boolean).join(', ');
+    const siteLine = r.site
+      ? `<div class="p201-restr">Recorded against Part 201 site <b>${esc(r.site)}</b> (SiteID ${esc(r.loc)}).</div>`
+      : (r.pg && r.pg !== 'Part 201'
+        ? `<div class="ust-gloss">A ${esc(r.pg)} restriction — recorded under that program, not the Part 201 site inventory.</div>` : '');
+    return `<div class="ust-popup p201-popup">
+      <div class="ust-type" style="background:${P201_LUR_COLOR};color:#0d1117">🔒 Land use restriction</div>
+      <h4>${esc(r.n || 'Restricted parcel')}</h4>
+      ${loc ? `<div class="ust-meta">${esc(loc)}</div>` : ''}
+      <div class="ust-body">
+        ${r.lur ? `<div><span class="k">Restriction:</span> ${p201LurLabel(r.lur)}</div>` : ''}
+        ${r.rt != null ? `<div><span class="k">RestrictionType code:</span> ${esc(String(r.rt))} <span class="muted">(EGLE's raw code)</span></div>` : ''}
+        ${r.rs != null ? `<div><span class="k">RestrictionStatus code:</span> ${esc(String(r.rs))} <span class="muted">(EGLE's raw code)</span></div>` : ''}
+        ${r.pg ? `<div><span class="k">Program:</span> ${esc(r.pg)}</div>` : ''}
+        ${r.deed ? `<div><span class="k">Deed date:</span> ${esc(r.deed)}</div>` : ''}
+        ${r.ac != null ? `<div><span class="k">Area:</span> ${r.ac.toFixed(2)} acres</div>` : ''}
+        ${r.ref ? `<div><span class="k">EGLE reference:</span> ${esc(r.ref)}</div>` : ''}
+      </div>
+      ${siteLine}
+      <div class="ust-gloss">An institutional control: contamination was allowed to stay in place, with this legal restriction on how the land may be used. The deed date is when the instrument was recorded.</div>
+      <div class="ust-src">Source: Michigan EGLE Land/Resource Use Restriction open data (RRDOpenData layers 4–5).</div>
+    </div>`;
+  }
+
+  function renderPart201() {
+    if (state.part201.layer) { state.part201.layer.remove(); state.part201.layer = null; }
+    if (!state.part201.showSites) {
+      // Hidden: detach + null BOTH canvases (ghost-canvas guard).
+      removeCanvasRenderer(state.part201._canvas);
+      state.part201._canvas = null;
+      renderPart201Restrictions();     // tears itself down via showSites check
+      updatePart201Stats(); renderMarkerKeys();
+      return;
+    }
+    const pane = part201Pane();
+    const renderer = part201Canvas();
+    const grp = L.layerGroup();
+    let n = 0;
+    for (const f of state.part201.sites) {
+      if (!state.part201.filters[f.rc]) continue;
+      if (f.lat == null || f.lng == null) continue;
+      const na = P201_NA_KEYS.includes(f.rc);
+      const m = L.circleMarker([f.lat, f.lng], {
+        pane, renderer, radius: na ? 4 : 5, weight: 0.8, color: '#0d1117',
+        opacity: 0.85, fillColor: na ? P201_NA_COLOR : P201_COLOR,
+        fillOpacity: na ? 0.55 : 0.85,
+      });
+      m.bindPopup(part201PopupHtml(f), { maxWidth: 360, className: 'ust-popup-wrap' });
+      m._pickName = f.n || 'Part 201 site';
+      grp.addLayer(m);
+      n += 1;
+    }
+    grp.addTo(state.map);
+    state.part201.layer = grp;
+    if (n === 0) {      // empty render: drop the canvas so no blank <canvas> lingers
+      removeCanvasRenderer(state.part201._canvas);
+      state.part201._canvas = null;
+    }
+    renderPart201Restrictions();
+    updatePart201Stats(); renderMarkerKeys();
+  }
+
+  function renderPart201Restrictions() {
+    if (state.part201.restrLayer) { state.part201.restrLayer.remove(); state.part201.restrLayer = null; }
+    if (!state.part201.showSites || !state.part201.showRestrictions
+        || !state.part201.restrLoaded) {
+      removeCanvasRenderer(state.part201._restrCanvas);
+      state.part201._restrCanvas = null;
+      return;
+    }
+    const pane = part201LurPane();
+    const renderer = part201LurCanvas();
+    const grp = L.layerGroup();
+    let n = 0;
+    for (const r of state.part201.restrictions) {
+      let lyr = null;
+      if (r.geom) {
+        lyr = L.geoJSON({ type: 'Feature', geometry: r.geom, properties: {} }, {
+          pane, style: { renderer, color: P201_LUR_COLOR, weight: 1.5,
+                         fillColor: P201_LUR_COLOR, fillOpacity: 0.25 },
+        });
+      } else if (r.lat != null && r.lng != null) {
+        // The 161 point-only restrictions: small gold square-ish dot.
+        lyr = L.circleMarker([r.lat, r.lng], {
+          pane, renderer, radius: 4, weight: 1.2, color: P201_LUR_COLOR,
+          opacity: 0.95, fillColor: P201_LUR_COLOR, fillOpacity: 0.4,
+        });
+        lyr._pickName = (r.n || 'Land use restriction');
+      }
+      if (!lyr) continue;
+      lyr.bindPopup(p201RestrPopupHtml(r), { maxWidth: 360, className: 'ust-popup-wrap' });
+      grp.addLayer(lyr);
+      n += 1;
+    }
+    grp.addTo(state.map);
+    state.part201.restrLayer = grp;
+    if (n === 0) {
+      removeCanvasRenderer(state.part201._restrCanvas);
+      state.part201._restrCanvas = null;
+    }
+  }
+
+  function updatePart201Stats() {
+    const el = $('part201-stats');
+    if (!el) return;
+    if (!state.part201.showSites || !state.part201.loaded) { el.textContent = ''; return; }
+    let n = 0;
+    for (const f of state.part201.sites) if (state.part201.filters[f.rc]) n += 1;
+    const lur = state.part201.showRestrictions && state.part201.restrLoaded
+      ? ` · ${state.part201.restrictions.length.toLocaleString()} land use restrictions` : '';
+    el.textContent = `${n.toLocaleString()} sites shown${lur}`;
+    // Fill the per-value counts into the sub-toggle labels once (from legend).
+    if (state.part201.legend && !state.part201._countsFilled) {
+      state.part201._countsFilled = true;
+      for (const g of state.part201.legend.groups) {
+        for (const v of g.values) {
+          const span = $(`part201-n-${v.key}`);
+          if (span) span.textContent = `(${v.count.toLocaleString()})`;
+        }
+      }
+    }
+  }
+
   // ---------- Spraying Programs directory overlay ----------
   // A curated directory of Michigan's organized spraying programs (spongy moth,
   // mosquito abatement, state arbovirus response). Each marker links out to the
@@ -6455,6 +6740,39 @@
         renderUst();
       });
     }
+    // Part 201 state cleanup sites: one lazy fetch, then client-side filters
+    // over EGLE's verbatim risk-condition values + the restrictions sub-layer.
+    const p201Toggle = $('part201-sites');
+    if (p201Toggle) {
+      p201Toggle.addEventListener('change', async (e) => {
+        state.part201.showSites = e.target.checked;
+        if (e.target.checked) {
+          loading(true);
+          await loadPart201Sites();
+          if (state.part201.showRestrictions) await loadPart201Restrictions();
+          loading(false);
+        }
+        renderPart201();
+      });
+    }
+    Object.keys(state.part201.filters).forEach((k) => {
+      const cb = $(`part201-f-${k}`);
+      if (cb) cb.addEventListener('change', (e) => {
+        state.part201.filters[k] = e.target.checked;
+        renderPart201();
+      });
+    });
+    const p201Lur = $('part201-f-lur');
+    if (p201Lur) {
+      p201Lur.addEventListener('change', async (e) => {
+        state.part201.showRestrictions = e.target.checked;
+        if (e.target.checked && state.part201.showSites && !state.part201.restrLoaded) {
+          loading(true); await loadPart201Restrictions(); loading(false);
+        }
+        renderPart201Restrictions(); updatePart201Stats();
+      });
+    }
+
     ['leaking_open', 'leaking_closed', 'licensed'].forEach((k) => {
       const cb = $(`ust-f-${k}`);
       if (cb) cb.addEventListener('change', async (e) => {
@@ -7283,6 +7601,7 @@
     ust_open: { cb: 'ust-sites', grp: () => state.ust.markers },
     ust_other: { cb: 'ust-sites', grp: () => state.ust.markers,
                  subCbs: ['ust-f-leaking_closed', 'ust-f-licensed'] },
+    part201: { cb: 'part201-sites', grp: () => state.part201.layer },
   };
 
   function _openInGroup(group, lat, lng) {
@@ -7385,6 +7704,16 @@
         + `<div class="rpt-echo-meta">${meta}</div>`
         + (it.dfr_url ? `<div class="rpt-echo-dfr"><a href="${_rEsc(it.dfr_url)}" target="_blank" rel="noopener">EPA Detailed Facility Report →</a></div>` : '');
     }
+    if (layer === 'part201') {
+      const tag = it.not_assessed
+        ? `<span class="rpt-tag" style="background:${P201_NA_COLOR};color:#0d1117">No determination recorded</span>`
+        : `<span class="rpt-tag" style="background:${P201_COLOR};color:#0d1117">State cleanup site</span>`;
+      const restr = (it.restrictions && it.restrictions.length)
+        ? ` · <b>🔒 land use restriction on file</b>${it.restrictions[0].deed ? ` (deed ${_rEsc(it.restrictions[0].deed)})` : ''}` : '';
+      return `${tag} <b>${_rEsc(it.risk_condition || 'no risk condition recorded')}</b>`
+        + ` <span class="muted">(EGLE's wording, verbatim — a status, not a measurement)</span>`
+        + `${it.contaminants ? `<div class="rpt-comps">EGLE lists: ${_rEsc(it.contaminants)}</div>` : ''}${restr}`;
+    }
     if (layer === 'landfill') {
       return `${_rEsc(it.type_label || it.category || '')}${it.status ? ` · ${_rEsc(it.status)}` : ''}`;
     }
@@ -7458,6 +7787,26 @@
     }
     return `<div class="rpt-layer"><div class="rpt-layer-h"><span>${icon} ${label}</span>`
       + `${_ringChips(block.rings)}</div>${body}</div>`;
+  }
+
+  // Required framing for the Part 201 section: these are the state's own
+  // cleanup-status records (not measurements), EGLE's completeness caveat in
+  // EGLE's words, and the capped-not-removed reality behind restrictions.
+  function _p201ReportNote(block) {
+    if (!block) return '';
+    const hasAny = (block.within && block.within.length) || block.nearest;
+    return `<details class="rpt-ustnote"${hasAny ? ' open' : ''}>
+      <summary><span class="rpt-ustnote-tag">How to read this</span> About Michigan's Part 201 cleanup list</summary>
+      <div class="rpt-ustnote-body">
+        <p>These are sites in EGLE's <b>Part 201</b> inventory — Michigan's state contaminated-sites program. A listing is a <b>cleanup-status record, not a measurement</b>: the "risk condition" shown is EGLE's own wording about where the site stands administratively, and it must not be ranked against TRI release amounts, ECHO violations, or measured air and water data.</p>
+        <ul>
+          <li>Under the 1995 Part 201 amendments, cleanups can meet criteria by <b>capping or restricting contamination in place</b> rather than removing it. Where a 🔒 <b>land use restriction</b> is noted, a deed instrument limits how the parcel may be used — contamination may lawfully remain under it.</li>
+          <li>Some sites show <b>no determination</b> ("Inadequate Data to Assign Risk", "Contact Lead Division", "Risks Not Determined") — that means EGLE has not stated a risk condition, not that the site is fine.</li>
+          <li><b>EGLE's own caveat, in their words:</b> this layer "does not include all of the facilities that are subject to regulation under Part 201 because owners are not required to inform EGLE about the facilities and can pursue cleanup independently." <b>Absence from this list proves nothing about a property.</b></li>
+        </ul>
+        <p class="rpt-note muted small">Source: Michigan EGLE Part 201 Environmental Contamination Sites open data. Per-site documents: EGLE RIDE (search by SiteID).</p>
+      </div>
+    </details>`;
   }
 
   // Required framing for the ECHO section: what the list is, that violations are
@@ -7693,6 +8042,9 @@
     const nearHtml =
       _nearBlock('contamination', 'Contamination / Superfund sites', '☣', near.contamination,
         'No contamination sites within 5 miles.')
+      + _nearBlock('part201', 'State cleanup sites (EGLE Part 201)', '🏚', near.part201,
+        'No EGLE Part 201 sites within 5 miles.')
+      + _p201ReportNote(near.part201)
       + _nearBlock('tri', 'TRI industrial facilities', '🏭', near.tri,
         'No TRI facilities within 5 miles.')
       + _nearBlock('echo', 'EPA enforcement & compliance (ECHO)', '⚖', near.echo,
@@ -7851,6 +8203,12 @@
     { c: 'ao',  cb: 'aoc-areas' },
     { c: 'ct',  cb: 'contam-sites', def: 'ns',
       subs: [['n', 'contam-f-npl'], ['s', 'contam-f-state'], ['d', 'contam-f-deleted']] },
+    { c: 'p201', cb: 'part201-sites', def: 'abcdefghiu',
+      subs: [['a', 'part201-f-immediate'], ['b', 'part201-f-short_term'],
+             ['c', 'part201-f-long_term'], ['d', 'part201-f-controlled_interim'],
+             ['e', 'part201-f-risk_controlled'], ['f', 'part201-f-res_closure'],
+             ['g', 'part201-f-inadequate_data'], ['h', 'part201-f-contact_lead'],
+             ['i', 'part201-f-not_determined'], ['u', 'part201-f-lur']] },
     { c: 'ctz', cb: 'contam-zones' },
     { c: 'tri', cb: 'tri-sites' },
     { c: 'lf',  cb: 'landfill-sites', def: 'mich',

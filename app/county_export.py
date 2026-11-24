@@ -165,6 +165,31 @@ _SQL_DATASETS = [
          desc="Superfund/NPL and compiled state contamination sites.",
          units="hrs_score is the EPA Hazard Ranking Score (0-100) where available.",
          caveat="Curated + EPA SEMS; not an exhaustive list of every state cleanup."),
+    dict(file="part201_sites", source_id="egle_part201", param="fips",
+         sql="SELECT * FROM part201_sites WHERE county_fips=? ORDER BY site_name",
+         desc="EGLE Part 201 state contamination sites (cleanup-status inventory).",
+         units="risk_condition / contaminants are EGLE's verbatim strings - a "
+               "cleanup-status record, NOT a measurement or severity score.",
+         caveat="EGLE's own caveat: the layer 'does not include all of the "
+                "facilities that are subject to regulation under Part 201 "
+                "because owners are not required to inform EGLE about the "
+                "facilities and can pursue cleanup independently.' Absence "
+                "from this list proves nothing about a property."),
+    dict(file="part201_restrictions", source_id="egle_part201", param="fips",
+         sql="SELECT restriction_key, layer, kermit_id, restriction_type, "
+             "land_use_restriction_type, restriction_status, facility_name, "
+             "address, city, zip, county_fips, egle_reference_number, "
+             "mg_entity_cd, program_type, deed_date, acres, square_miles, "
+             "location_id, latitude, longitude, last_edited, source "
+             "FROM part201_restrictions WHERE county_fips=? ORDER BY deed_date",
+         desc="EGLE land/resource use restrictions (institutional controls: "
+              "restrictive covenants, deed notices) in the county.",
+         units="acres; deed_date is the recorded instrument date. Polygon "
+               "geometry is omitted from the CSV (available from EGLE's "
+               "RRDOpenData ArcGIS service, layers 4-5).",
+         caveat="location_id equals the Part 201 SiteID only for ProgramType "
+                "'Part 201' rows (Part 213 rows reference UST facility IDs). "
+                "restriction_type/restriction_status are EGLE's raw codes."),
     dict(file="landfill_sites", source_id="egle_landfills", param="fips",
          sql="SELECT * FROM landfill_sites WHERE county_fips=?",
          desc="EGLE Part 115 landfills and Part 111 hazardous-waste disposal facilities.",
