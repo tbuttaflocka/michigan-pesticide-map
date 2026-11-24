@@ -582,6 +582,20 @@
     'institutional controls':
       'Legal or administrative limits on how a property can be used — such as banning well ' +
       'water or digging — to keep people away from contamination left in the ground.',
+    'restrictive covenant':
+      'A restriction recorded on a property\'s deed that legally limits how the land can be ' +
+      'used — for example no homes, no digging, or no drinking-water wells — because ' +
+      'contamination remains in place. It binds every future owner of the property.',
+    'Part 201':
+      'Michigan\'s state cleanup law for contaminated sites (Part 201 of the Natural ' +
+      'Resources and Environmental Protection Act, 1994). It is the state counterpart to ' +
+      'the federal Superfund program and covers thousands of sites that never appear on ' +
+      'the federal list.',
+    'BEA':
+      'Baseline Environmental Assessment — a study a buyer files with Michigan when ' +
+      'purchasing a property already known to be contaminated. It documents the existing ' +
+      'contamination so the new owner is not liable for it; it is a paperwork record, ' +
+      'not a cleanup.',
     'consent decree':
       'A cleanup-or-penalty agreement between the government and a responsible party that a ' +
       'federal judge approves and can enforce.',

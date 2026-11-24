@@ -4478,12 +4478,13 @@ def _p201_restriction_index(conn) -> dict:
     site_id for ProgramType 'Part 201')."""
     idx: dict = {}
     for r in conn.execute(
-            """SELECT location_id, land_use_restriction_type, deed_date, acres, layer
+            """SELECT location_id, land_use_restriction_type, deed_date, acres,
+                      layer, kermit_id
                  FROM part201_restrictions
                 WHERE program_type = 'Part 201' AND location_id IS NOT NULL"""):
         idx.setdefault(r["location_id"], []).append({
             "lur": r["land_use_restriction_type"], "deed": r["deed_date"],
-            "acres": r["acres"], "layer": r["layer"]})
+            "acres": r["acres"], "layer": r["layer"], "kid": r["kermit_id"]})
     return idx
 
 
@@ -4555,7 +4556,7 @@ def api_part201_restrictions():
                       land_use_restriction_type, restriction_status,
                       facility_name, address, city, egle_reference_number,
                       program_type, deed_date, acres, location_id,
-                      latitude, longitude, geometry
+                      latitude, longitude, geometry, kermit_id
                  FROM part201_restrictions"""):
         geom = None
         if r["geometry"]:
@@ -4571,7 +4572,7 @@ def api_part201_restrictions():
             "rs": r["restriction_status"], "n": r["facility_name"],
             "a": r["address"], "ci": r["city"], "ref": r["egle_reference_number"],
             "pg": r["program_type"], "deed": r["deed_date"], "ac": r["acres"],
-            "loc": r["location_id"], "site": linked,
+            "loc": r["location_id"], "site": linked, "kid": r["kermit_id"],
             "lat": r["latitude"], "lng": r["longitude"], "geom": geom,
         })
     conn.close()

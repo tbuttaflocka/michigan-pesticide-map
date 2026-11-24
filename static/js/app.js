@@ -5273,6 +5273,39 @@
   };
   // Any other code (e.g. DENAER): EGLE publishes no expansion — shown raw.
 
+  // The two NUMERIC codes are also keyed in the same EGLE item descriptions
+  // ("RestrictionType — Numeric Code for the type of restriction: 1 = ...";
+  // "RestrictionStatus — Status of the restriction: 2 = Filed, Effective,
+  // Issued, or Recorded"). Verbatim from EGLE; codes outside the key are
+  // shown as "not in EGLE's published key", never guessed.
+  const P201_RTYPE_KEY = {
+    0: 'Other Institutional Control (incl. SLHC, PHIC, NOC)',
+    1: 'Restrictive Covenant (RC)',
+    2: 'Notice of Corrective Action (NCA)',
+    3: 'Notice of Aesthetic Impairment (NAI)',
+    4: 'Ordinance',
+    5: 'Notice of Approved Environmental Remediation (NAER)',
+    6: 'Notice of Environmental Remediation (NER)',
+    7: 'Rescission of a Notice of Approved Environmental Remediation',
+    9: 'Michigan Department of Transportation, Environmental License Agreement (MDOT)',
+  };
+  const P201_STATUS_KEY = { 2: 'Filed, Effective, Issued, or Recorded' };
+  function p201NumCode(code, key) {
+    if (code == null) return null;
+    const meaning = key[code];
+    return meaning
+      ? `${esc(String(code))} — ${esc(meaning)}`
+      : `${esc(String(code))} <span class="muted">(not in EGLE's published key)</span>`;
+  }
+  // The KermitId links to a scan of the actual recorded instrument — pattern
+  // verified live (returns application/pdf for real deeds, e.g. the Lower
+  // Ecorse Creek covenant).
+  function p201DeedPdfUrl(kid) {
+    if (!kid) return null;
+    return 'https://www.egle.state.mi.us/environmentalmapper/'
+      + encodeURIComponent(String(kid)) + '.pdf';
+  }
+
   function p201LurLabel(code) {
     if (!code) return '';
     if (P201_LUR_KEY[code]) return `${esc(code)} — ${esc(P201_LUR_KEY[code])}`;
@@ -5328,6 +5361,25 @@
   function part201PopupHtml(f) {
     const notAssessed = P201_NA_KEYS.includes(f.rc);
     const loc = [f.a, f.ci].filter(Boolean).join(', ');
+
+    // Plain-meaning lead: what EGLE concluded, in their words, explained —
+    // BEFORE any record metadata. Never an assessment of risk or safety.
+    const lead = notAssessed
+      ? `This property is on <span data-gloss="Part 201">Michigan's state list of
+        contaminated sites</span>, but EGLE has <b>not stated a risk condition</b>
+        for it. Its record says: <b>“${esc(f.rcv || 'Risks Not Determined')}”</b>
+        — ${esc(P201_NA_PLAIN[f.rc] || 'no determination is recorded.')}
+        That is a gap in the record, not a clean bill.`
+      : `This property is on <span data-gloss="Part 201">Michigan's state list of
+        contaminated sites</span>. EGLE's status for it, in their own words:
+        <b>“${esc(f.rcv || 'not recorded')}”</b>. That wording is a
+        <b>cleanup-status record, not a measurement</b> — it says where the site
+        stands administratively, not what anyone is exposed to, and it is not a
+        severity score.`;
+    const meansLine = `<div class="ust-gloss">This record documents contamination
+      at <b>this site</b>. It does not measure current exposure here, and it says
+      nothing about neighboring properties either way.</div>`;
+
     const restr = (f.r || []).length ? f.r : null;
     const restrHtml = restr ? `<div class="p201-restr">🔒 <b>A land use restriction is
       recorded against this site</b> — ${restr.map((x) => {
@@ -5335,25 +5387,27 @@
         if (x.lur) bits.push(p201LurLabel(x.lur));
         if (x.deed) bits.push(`deed dated ${esc(x.deed)}`);
         if (x.acres != null) bits.push(`${x.acres.toFixed(2)} acres`);
+        const pdf = p201DeedPdfUrl(x.kid);
+        if (pdf) bits.push(`<a href="${pdf}" target="_blank" rel="noopener">read the recorded instrument (PDF) →</a>`);
         return bits.join(', ');
-      }).join('; ')}. Contamination can lawfully remain in place under such a
-      restriction — "closed" or "controlled" does not mean removed.</div>` : '';
-    const rcPlain = notAssessed && P201_NA_PLAIN[f.rc]
-      ? ` <span class="muted">— ${esc(P201_NA_PLAIN[f.rc])}</span>` : '';
+      }).join('; ')}. Contamination can lawfully remain in place under such an
+      <span data-gloss="institutional controls">institutional control</span> —
+      “closed” or “controlled” does not mean removed.</div>` : '';
+
     return `<div class="ust-popup p201-popup">
       <div class="ust-type" style="background:${notAssessed ? P201_NA_COLOR : P201_COLOR}">
         ${notAssessed ? 'No determination recorded' : 'Part 201 state cleanup site'}</div>
       <h4>${esc(f.n || 'Part 201 site')}</h4>
       ${loc ? `<div class="ust-meta">${esc(loc)}${f.co ? ' · ' + esc(f.co) + ' Co.' : ''}</div>` : (f.co ? `<div class="ust-meta">${esc(f.co)} County</div>` : '')}
-      <div class="ust-body">
-        ${f.id ? `<div><span class="k">EGLE SiteID:</span> ${esc(f.id)}</div>` : ''}
-        ${f.bt ? `<div><span class="k">Business type:</span> ${esc(f.bt)}</div>` : ''}
-        ${f.cont ? `<div><span class="k">Contaminants (EGLE's list, verbatim):</span> ${esc(f.cont)}</div>` : ''}
-        <div><span class="k">Risk condition (EGLE's wording, verbatim):</span> <b>${esc(f.rcv || 'not recorded')}</b>${rcPlain}</div>
-        <div class="ust-gloss">This is EGLE's cleanup-status wording, shown exactly as published — it is a status record, <b>not</b> a measurement, and not a severity score.</div>
-        ${f.bea ? `<div><span class="k">BEA or notice on file:</span> ${esc(f.bea)}${f.bea === 'YES' ? ' <span class="muted">— a Baseline Environmental Assessment or notice is on file (typically documents contamination known at purchase)</span>' : ''}</div>` : ''}
-      </div>
+      <div class="ust-plain">${lead}</div>
+      ${meansLine}
       ${restrHtml}
+      <div class="ust-body">
+        ${f.cont ? `<div><span class="k">Contaminants (EGLE's list, verbatim):</span> ${esc(f.cont)}</div>` : ''}
+        ${f.bt ? `<div><span class="k">Business type:</span> ${esc(f.bt)}</div>` : ''}
+        ${f.bea === 'YES' ? `<div><span class="k">On file:</span> a <span data-gloss="BEA">Baseline Environmental Assessment</span> or notice — typically filed by a buyer to document contamination already known at purchase.</div>` : ''}
+        ${f.id ? `<div><span class="k">EGLE SiteID:</span> ${esc(f.id)}</div>` : ''}
+      </div>
       <a class="ust-cta" href="https://www.michigan.gov/egle/maps-data/ride" target="_blank" rel="noopener">EGLE RIDE — search SiteID ${esc(f.id || '')} for site documents →</a>
       <div class="ust-src">Source: Michigan EGLE Part 201 inventory${f.lu ? ` · record updated ${esc(f.lu)}` : ''}. EGLE: this layer “does not include all of the facilities that are subject to regulation under Part 201” — absence from it proves nothing about a property.</div>
     </div>`;
@@ -5361,26 +5415,56 @@
 
   function p201RestrPopupHtml(r) {
     const loc = [r.a, r.ci].filter(Boolean).join(', ');
+    const isRC = r.lur === 'RC';
+
+    // Plain meaning FIRST: what this record says about this place, in words.
+    // Describes the record only — never an assessment of risk or safety.
+    const kind = isRC
+      ? `a <span data-gloss="restrictive covenant">restrictive covenant</span>`
+      : `a legal restriction (an <span data-gloss="institutional controls">institutional control</span>)`;
+    const lead = `<div class="ust-plain">Contamination was documented at this
+      property and left in place, and ${kind} is recorded on the deed limiting
+      how this land can be used.</div>`;
+    const meansLine = `<div class="ust-gloss">What this record tells you:
+      contamination is <b>documented</b> here and the property's use is
+      <b>legally restricted</b>. What it does not tell you: anything about
+      current exposure at this spot, or anything about neighboring properties
+      either way.</div>`;
+
     const siteLine = r.site
-      ? `<div class="p201-restr">Recorded against Part 201 site <b>${esc(r.site)}</b> (SiteID ${esc(r.loc)}).</div>`
+      ? `<div class="p201-restr">Recorded against <span data-gloss="Part 201">Part 201</span> site <b>${esc(r.site)}</b> (SiteID ${esc(r.loc)}) — its purple/grey dot carries the site's own record.</div>`
       : (r.pg && r.pg !== 'Part 201'
         ? `<div class="ust-gloss">A ${esc(r.pg)} restriction — recorded under that program, not the Part 201 site inventory.</div>` : '');
+    const pdf = p201DeedPdfUrl(r.kid);
+
+    // The numeric RestrictionType/RestrictionStatus codes live in a collapsed
+    // raw-record section WITH their meanings — both keys are EGLE's own,
+    // published in the LRUR dataset item descriptions on EGLE Open Data.
+    const raw = `<details class="ust-more"><summary>Raw record fields (EGLE's codes, with EGLE's key)</summary>
+      <div class="ust-more-body">
+        ${r.rt != null ? `<div><span class="k">RestrictionType:</span> ${p201NumCode(r.rt, P201_RTYPE_KEY)}</div>` : ''}
+        ${r.rs != null ? `<div><span class="k">RestrictionStatus:</span> ${p201NumCode(r.rs, P201_STATUS_KEY)}</div>` : ''}
+        ${r.ref ? `<div><span class="k">EGLE reference:</span> ${esc(r.ref)}</div>` : ''}
+        ${r.kid ? `<div><span class="k">Document id (KermitId):</span> ${esc(String(r.kid))}</div>` : ''}
+        <p class="ust-fine">Code meanings are EGLE's own, from the "Land or Resource Use Restriction" dataset descriptions on EGLE Open Data — nothing here is interpreted by this app.</p>
+      </div></details>`;
+
     return `<div class="ust-popup p201-popup">
       <div class="ust-type" style="background:${P201_LUR_COLOR};color:#0d1117">🔒 Land use restriction</div>
       <h4>${esc(r.n || 'Restricted parcel')}</h4>
       ${loc ? `<div class="ust-meta">${esc(loc)}</div>` : ''}
+      ${lead}
+      ${meansLine}
       <div class="ust-body">
         ${r.lur ? `<div><span class="k">Restriction:</span> ${p201LurLabel(r.lur)}</div>` : ''}
-        ${r.rt != null ? `<div><span class="k">RestrictionType code:</span> ${esc(String(r.rt))} <span class="muted">(EGLE's raw code)</span></div>` : ''}
-        ${r.rs != null ? `<div><span class="k">RestrictionStatus code:</span> ${esc(String(r.rs))} <span class="muted">(EGLE's raw code)</span></div>` : ''}
+        ${r.deed ? `<div><span class="k">Recorded (deed date):</span> ${esc(r.deed)}</div>` : ''}
+        ${r.ac != null ? `<div><span class="k">Area restricted:</span> ${r.ac.toFixed(2)} acres</div>` : ''}
         ${r.pg ? `<div><span class="k">Program:</span> ${esc(r.pg)}</div>` : ''}
-        ${r.deed ? `<div><span class="k">Deed date:</span> ${esc(r.deed)}</div>` : ''}
-        ${r.ac != null ? `<div><span class="k">Area:</span> ${r.ac.toFixed(2)} acres</div>` : ''}
-        ${r.ref ? `<div><span class="k">EGLE reference:</span> ${esc(r.ref)}</div>` : ''}
       </div>
       ${siteLine}
-      <div class="ust-gloss">An institutional control: contamination was allowed to stay in place, with this legal restriction on how the land may be used. The deed date is when the instrument was recorded.</div>
-      <div class="ust-src">Source: Michigan EGLE Land/Resource Use Restriction open data (RRDOpenData layers 4–5).</div>
+      ${pdf ? `<a class="ust-cta" href="${pdf}" target="_blank" rel="noopener">Read the recorded instrument (PDF) →</a>` : ''}
+      ${raw}
+      <div class="ust-src">Source: Michigan EGLE Land/Resource Use Restriction open data (RRDOpenData layers 4–5). The deed date is when the instrument was recorded.</div>
     </div>`;
   }
 
