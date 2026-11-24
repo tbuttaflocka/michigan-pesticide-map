@@ -118,6 +118,10 @@ from .config import (
     UST_URL,
     EGLE_RIDE_URL,
     EGLE_UST_HOME_URL,
+    PART201_SITES_URL,
+    PART201_LUR_POINTS_URL,
+    PART201_LUR_POLYS_URL,
+    PART201_HOME_URL,
     AIRTOXICS_RISK_URL,
     AIRTOXICS_HOME_URL,
     AIRTOXICS_YEAR,
@@ -1456,11 +1460,13 @@ def load_contamination_data(conn: sqlite3.Connection) -> int:
     )
     record_source(
         conn, "egle_rrd",
-        "Michigan EGLE — Remediation & Redevelopment Division (Part 201 sites)",
+        "Michigan EGLE — Remediation & Redevelopment Division (Part 201 program)",
         "https://www.michigan.gov/egle/about/organization/remediation-and-redevelopment",
         "reference", 0,
         "State-level contaminated-sites program (thousands of sites beyond the "
-        "federal NPL); Environmental Mapper is portal-only, not a bulk feed.",
+        "federal NPL). Bulk data IS published — a live ArcGIS layer on EGLE's "
+        "open-data hub, ingested here as egle_part201 (part201_sites table); "
+        "Environmental Mapper/RIDE remain the per-site document viewers.",
     )
     record_source(
         conn, "mpart",
@@ -4061,6 +4067,196 @@ def load_ust(conn: sqlite3.Connection) -> int:
         "EGLE's interactive viewer for per-site release status, classification, "
         "and corrective-action detail behind the UST layer.")
     return total
+
+
+# ---------- Part 201 contamination sites + land use restrictions (EGLE RRD) ----------
+
+def load_part201(conn: sqlite3.Connection) -> int:
+    """Load Michigan's Part 201 contaminated-sites inventory (EGLE RRD layer 0)
+    and the Land Resource Use Restriction points/polygons (layers 4 and 5).
+
+    Everything is stored as EGLE publishes it: RiskCondition, Contaminants and
+    the restriction type/status codes are verbatim — never recoded, ranked or
+    collapsed into a severity scale. No joins to contamination_sites /
+    echo_facilities / tri_facility / ust_sites: EGLE's SiteID is a state-only
+    key with no federal counterpart, so overlapping places stay separate
+    records. Restrictions DO link to sites by ID (location_id = site_id for
+    ProgramType 'Part 201'); that link is stored, not resolved into a join."""
+    log("Loading Part 201 contamination sites (EGLE RRD, live)...")
+    cur = conn.cursor()
+
+    def _ckey(name):
+        return (name or "").replace(".", "").strip().lower()
+    fips_by_lname = {_ckey(name): fips for fips, name in _county_fips_list(conn)}
+    locate = _build_county_locator()
+
+    try:
+        feats = _arcgis_all(PART201_SITES_URL)
+    except Exception as e:                       # noqa: BLE001
+        log(f"  Part 201 fetch failed: {e}", level="warn")
+        record_source(conn, "egle_part201",
+                      "Michigan EGLE — Part 201 Environmental Contamination Sites",
+                      PART201_HOME_URL, "unavailable", 0,
+                      "EGLE RRD Part 201 fetch failed this run; keeping prior data.")
+        return 0
+
+    rows, fips_by_name, fips_by_pip = [], 0, 0
+    seen_keys: set[str] = set()
+    for f in feats:
+        a = f.get("attributes", {})
+        # Layer geometry is multipoint in a projected CRS, but EGLE publishes
+        # Latitude/Longitude as plain attributes — use those, never the shape.
+        lat, lng = _to_float(a.get("Latitude")), _to_float(a.get("Longitude"))
+        cname = a.get("County")
+        fips = fips_by_lname.get(_ckey(cname))
+        cty = (cname or "").strip() or None
+        if fips:
+            fips_by_name += 1
+        elif lat is not None and lng is not None:
+            fips, nm = locate(lng, lat)
+            cty = cty or nm
+            if fips:
+                fips_by_pip += 1
+        sid = (a.get("SiteID") or "").strip() or None
+        key = f"part201:{sid or a.get('OBJECTID')}"
+        if key in seen_keys:                     # duplicate SiteID — keep both rows
+            key = f"part201:{sid}:{a.get('OBJECTID')}"
+        seen_keys.add(key)
+        rows.append({
+            "site_key": key, "site_id": sid,
+            "site_name": (a.get("SiteName") or "").strip() or None,
+            "address": (a.get("Address") or "").strip() or None,
+            "city": (a.get("City") or "").strip() or None,
+            "zip": (str(a.get("ZipCode")) if a.get("ZipCode") is not None else "").strip() or None,
+            "county": cty, "county_fips": fips,
+            "latitude": lat, "longitude": lng,
+            "business_type": (a.get("BusinessType") or "").strip() or None,
+            "risk_condition": (a.get("RiskCondition") or "").strip() or None,
+            "contaminants": (a.get("Contaminants") or "").strip() or None,
+            "has_bea_or_nom": (a.get("HasBeaOrNom") or "").strip() or None,
+            "horizontal_datum": (a.get("HorizontalReferenceDatum") or "").strip() or None,
+            "collection_method": (a.get("HorizontalCollectionMethod") or "").strip() or None,
+            "horizontal_accuracy": _to_float(a.get("HorizontalAccuracy")),
+            "reference_point": (a.get("ReferencePoint") or "").strip() or None,
+            "source_map_scale": a.get("SourceMapScale"),
+            # yes, EGLE's service really spells the field 'ProjectManaager'
+            "project_manager": (a.get("ProjectManaager") or "").strip() or None,
+            "last_updated": pfas_data.epoch_to_iso(a.get("LastUpdated")),
+        })
+
+    cur.execute("DELETE FROM part201_sites")
+    cur.executemany(
+        """INSERT OR REPLACE INTO part201_sites(
+             site_key, site_id, site_name, address, city, zip, county,
+             county_fips, latitude, longitude, business_type, risk_condition,
+             contaminants, has_bea_or_nom, horizontal_datum, collection_method,
+             horizontal_accuracy, reference_point, source_map_scale,
+             project_manager, last_updated, source)
+           VALUES (:site_key,:site_id,:site_name,:address,:city,:zip,:county,
+             :county_fips,:latitude,:longitude,:business_type,:risk_condition,
+             :contaminants,:has_bea_or_nom,:horizontal_datum,:collection_method,
+             :horizontal_accuracy,:reference_point,:source_map_scale,
+             :project_manager,:last_updated,'EGLE_RRD_PART201')""", rows)
+    conn.commit()
+    unresolved = len(rows) - fips_by_name - fips_by_pip
+    log(f"  Part 201 sites: {len(rows)} (county FIPS: {fips_by_name} by name, "
+        f"{fips_by_pip} by point-in-polygon, {unresolved} unresolved)",
+        level="ok" if rows else "warn")
+
+    # --- layers 4/5: Land Resource Use Restrictions (institutional controls) ---
+    lur_rows = []
+    seen_lur: set[str] = set()
+    for url, layer in ((PART201_LUR_POINTS_URL, "point"),
+                       (PART201_LUR_POLYS_URL, "polygon")):
+        try:
+            lfeats = _arcgis_all(url, geometry=True)
+        except Exception as e:                   # noqa: BLE001
+            log(f"  LUR {layer} fetch failed: {e}", level="warn")
+            continue
+        for f in lfeats:
+            a = f.get("attributes", {})
+            g = f.get("geometry") or {}
+            if layer == "point":
+                lat, lng, gj = _to_float(g.get("y")), _to_float(g.get("x")), None
+            else:
+                geom = _arcgis_rings_to_geojson(g.get("rings"))
+                gj = json.dumps(geom) if geom else None
+                lng, lat = _poly_centroid(g.get("rings"))
+            fips = None
+            if lat is not None and lng is not None:
+                fips, _nm = locate(lng, lat)
+            kid = a.get("KermitId")
+            kid = str(int(kid)) if kid is not None else None
+            key = f"lur:{'pt' if layer == 'point' else 'poly'}:{kid or a.get('OBJECTID')}"
+            if key in seen_lur:
+                key = f"{key}:{a.get('OBJECTID')}"
+            seen_lur.add(key)
+            lur_rows.append({
+                "restriction_key": key, "layer": layer, "kermit_id": kid,
+                "restriction_type": a.get("RestrictionType"),
+                "land_use_restriction_type":
+                    (a.get("LandUseRestrictionType") or "").strip() or None,
+                "restriction_status": a.get("RestrictionStatus"),
+                "facility_name": (a.get("FacilityName") or "").strip() or None,
+                "address": (a.get("Address") or "").strip() or None,
+                "city": (a.get("City") or "").strip() or None,
+                "zip": (str(a.get("ZipCode")) if a.get("ZipCode") is not None else "").strip() or None,
+                "county_fips": fips,
+                "egle_reference_number":
+                    (a.get("EgleReferenceNumber") or "").strip() or None,
+                "mg_entity_cd": (a.get("MgEntityCd") or "").strip() or None,
+                "program_type": (a.get("ProgramType") or "").strip() or None,
+                "deed_date": pfas_data.epoch_to_iso(a.get("DeedDate")),
+                "acres": _to_float(a.get("Acres")),
+                "square_miles": _to_float(a.get("SquareMiles")),
+                "location_id": (a.get("LocationId") or "").strip() or None,
+                "latitude": lat, "longitude": lng, "geometry": gj,
+                "last_edited": pfas_data.epoch_to_iso(a.get("LastEditedDate")),
+            })
+
+    cur.execute("DELETE FROM part201_restrictions")
+    cur.executemany(
+        """INSERT OR REPLACE INTO part201_restrictions(
+             restriction_key, layer, kermit_id, restriction_type,
+             land_use_restriction_type, restriction_status, facility_name,
+             address, city, zip, county_fips, egle_reference_number,
+             mg_entity_cd, program_type, deed_date, acres, square_miles,
+             location_id, latitude, longitude, geometry, last_edited, source)
+           VALUES (:restriction_key,:layer,:kermit_id,:restriction_type,
+             :land_use_restriction_type,:restriction_status,:facility_name,
+             :address,:city,:zip,:county_fips,:egle_reference_number,
+             :mg_entity_cd,:program_type,:deed_date,:acres,:square_miles,
+             :location_id,:latitude,:longitude,:geometry,:last_edited,
+             'EGLE_RRD_LUR')""", lur_rows)
+    conn.commit()
+
+    # Link stats (reported, not joined): Part 201 restrictions reference sites
+    # via location_id = site_id; Part 213 rows carry UST facility IDs instead.
+    site_ids = {r["site_id"] for r in rows if r["site_id"]}
+    p201_lur = [r for r in lur_rows if r["program_type"] == "Part 201"]
+    linked = [r for r in p201_lur if r["location_id"] in site_ids]
+    sites_restricted = len({r["location_id"] for r in linked})
+    log(f"  Land use restrictions: {len(lur_rows)} "
+        f"({sum(1 for r in lur_rows if r['layer'] == 'point')} points, "
+        f"{sum(1 for r in lur_rows if r['layer'] == 'polygon')} polygons); "
+        f"{len(p201_lur)} are Part 201, {len(linked)} resolve to a loaded site "
+        f"({sites_restricted} distinct sites)", level="ok" if lur_rows else "warn")
+
+    record_source(
+        conn, "egle_part201",
+        "Michigan EGLE — Part 201 Environmental Contamination Sites",
+        PART201_HOME_URL, "ok" if rows else "unavailable", len(rows),
+        f"{len(rows)} Part 201 sites + {len(lur_rows)} land-use-restriction "
+        f"records (institutional controls) from EGLE's RRD open-data ArcGIS "
+        f"service, stored verbatim (RiskCondition/Contaminants never recoded). "
+        f"EGLE's own caveat: this layer \"does not include all of the "
+        f"facilities that are subject to regulation under Part 201 because "
+        f"owners are not required to inform EGLE about the facilities and can "
+        f"pursue cleanup independently. Facilities that are not known to EGLE "
+        f"are not on the Inventory, nor are locations with releases that "
+        f"resulted in low environmental impact.\" Absence from this layer "
+        f"proves nothing about a property.")
+    return len(rows)
 
 
 # ---------- EPA Toxics Release Inventory (TRI) ----------

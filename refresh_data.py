@@ -359,6 +359,18 @@ SOURCES: list[Source] = [
         seed_extra=("contamination_sites",),
     ),
     Source(
+        id="part201",
+        label="Michigan EGLE — Part 201 contamination sites + land use restrictions",
+        loaders=[dl.load_part201],
+        targets=["part201_sites", "part201_restrictions"],
+        primary_target="part201_sites", primary_source_id="egle_part201",
+        # Same RRDOpenData service as the UST layer; EGLE updates it regularly.
+        # Deliberately NO seed_extra: this source never joins to contamination/
+        # ECHO/TRI/UST records (no shared identifier exists).
+        interval_months=3, min_abs=10000, floor_frac=0.7,
+        coverage=lambda conn: (None, None),
+    ),
+    Source(
         id="airtoxics",
         label="EPA AirToxScreen (2019) — census-tract cancer risk + noncancer hazard index",
         loaders=[dl.load_airtoxics],

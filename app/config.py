@@ -400,6 +400,25 @@ EGLE_RIDE_URL = "https://www.egle.state.mi.us/RIDE/"
 EGLE_UST_HOME_URL = ("https://www.michigan.gov/egle/about/organization/"
                      "remediation-and-redevelopment/storage-tanks")
 
+# ---- Part 201 contaminated sites (EGLE RRD, live ArcGIS) ----
+#
+# The state-level contaminated-sites inventory (NREPA Part 201) — thousands of
+# sites beyond the federal NPL. Same RRDOpenData service as the UST layer:
+# layer 0 = sites (multipoint, but Latitude/Longitude attributes are published,
+# so geometry is never requested), layers 4/5 = Land Resource Use Restriction
+# points/polygons (institutional controls: restrictive covenants etc.).
+# Restrictions link to sites by ID, not spatially: LocationId on layers 4/5
+# equals the layer-0 SiteID when ProgramType is 'Part 201' (Part 213 rows
+# carry UST facility IDs instead).
+PART201_SITES_URL = ("https://gisagoegle.state.mi.us/arcgis/rest/services/"
+                     "EGLE/RRDOpenData/MapServer/0")
+PART201_LUR_POINTS_URL = ("https://gisagoegle.state.mi.us/arcgis/rest/services/"
+                          "EGLE/RRDOpenData/MapServer/4")
+PART201_LUR_POLYS_URL = ("https://gisagoegle.state.mi.us/arcgis/rest/services/"
+                         "EGLE/RRDOpenData/MapServer/5")
+PART201_HOME_URL = ("https://gis-michigan.opendata.arcgis.com/datasets/"
+                    "egle::part-201-environmental-contamination-sites/about")
+
 # ---- PFAS (Michigan PFAS Action Response Team / EGLE, live ArcGIS) ----
 #
 # Michigan runs the most aggressive state PFAS program in the country; MPART

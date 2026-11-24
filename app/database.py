@@ -427,6 +427,80 @@ CREATE TABLE IF NOT EXISTS ust_sites (
 CREATE INDEX IF NOT EXISTS ix_ust_category ON ust_sites(category);
 CREATE INDEX IF NOT EXISTS ix_ust_county   ON ust_sites(county_fips);
 
+-- ===== Part 201 contamination sites (EGLE RRD, live) =====
+-- Michigan's state contaminated-sites inventory (NREPA Part 201) — the layer
+-- behind EGLE's Environmental Mapper / RIDE. Everything is stored AS PUBLISHED:
+-- risk_condition and contaminants are EGLE's verbatim strings, never recoded,
+-- ranked, or collapsed into a severity scale. EGLE's own completeness caveat
+-- (owners are not required to notify, so absence proves nothing) is recorded
+-- in data_sources under 'egle_part201'.
+-- NOT joined to contamination_sites / echo_facilities / tri_facility /
+-- ust_sites: no shared exact identifier exists (EGLE SiteID is a state-only
+-- key), so overlapping places stay separate records by design.
+CREATE TABLE IF NOT EXISTS part201_sites (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_key               TEXT UNIQUE NOT NULL,  -- part201:<SiteID>
+    site_id                TEXT,                  -- EGLE SiteID (county-prefixed, e.g. 82000205)
+    site_name              TEXT,
+    address                TEXT,
+    city                   TEXT,
+    zip                    TEXT,
+    county                 TEXT,
+    county_fips            TEXT,
+    latitude               REAL,                  -- published attribute (not geometry)
+    longitude              REAL,
+    business_type          TEXT,
+    risk_condition         TEXT,                  -- verbatim EGLE value
+    contaminants           TEXT,                  -- verbatim comma-separated EGLE string
+    has_bea_or_nom         TEXT,                  -- 'YES'/'NO' — BEA or Notice on file
+    horizontal_datum       TEXT,
+    collection_method      TEXT,                  -- verbatim HorizontalCollectionMethod
+    horizontal_accuracy    REAL,
+    reference_point        TEXT,
+    source_map_scale       INTEGER,
+    project_manager        TEXT,                  -- service field is 'ProjectManaager' [sic]
+    last_updated           TEXT,
+    source                 TEXT DEFAULT 'EGLE_RRD_PART201'
+);
+CREATE INDEX IF NOT EXISTS ix_p201_county ON part201_sites(county_fips);
+CREATE INDEX IF NOT EXISTS ix_p201_siteid ON part201_sites(site_id);
+
+-- Land Resource Use Restriction points (layer 4) + polygons (layer 5):
+-- institutional controls / deed restrictions. The link to part201_sites is an
+-- ID JOIN, not spatial: location_id = part201_sites.site_id when program_type
+-- is 'Part 201'. Part 213 rows carry UST facility IDs in location_id instead.
+-- restriction_type / restriction_status are EGLE's raw numeric codes and
+-- land_use_restriction_type its raw abbreviation (RC, NAER, ...) — the service
+-- publishes no coded-value domains, so nothing is decoded or interpreted here.
+CREATE TABLE IF NOT EXISTS part201_restrictions (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    restriction_key           TEXT UNIQUE NOT NULL,  -- lur:<pt|poly>:<KermitId or OBJECTID>
+    layer                     TEXT NOT NULL,         -- 'point' | 'polygon'
+    kermit_id                 TEXT,
+    restriction_type          INTEGER,               -- raw EGLE code
+    land_use_restriction_type TEXT,                  -- raw EGLE abbreviation
+    restriction_status        INTEGER,               -- raw EGLE code
+    facility_name             TEXT,
+    address                   TEXT,
+    city                      TEXT,
+    zip                       TEXT,
+    county_fips               TEXT,                  -- point-in-polygon (no County field published)
+    egle_reference_number     TEXT,
+    mg_entity_cd              TEXT,
+    program_type              TEXT,                  -- 'Part 201' | 'Part 213' | ...
+    deed_date                 TEXT,
+    acres                     REAL,
+    square_miles              REAL,
+    location_id               TEXT,                  -- = part201_sites.site_id for Part 201 rows
+    latitude                  REAL,                  -- point, or polygon centroid
+    longitude                 REAL,
+    geometry                  TEXT,                  -- GeoJSON polygon (layer 5 only)
+    last_edited               TEXT,
+    source                    TEXT DEFAULT 'EGLE_RRD_LUR'
+);
+CREATE INDEX IF NOT EXISTS ix_p201r_location ON part201_restrictions(location_id);
+CREATE INDEX IF NOT EXISTS ix_p201r_county   ON part201_restrictions(county_fips);
+
 -- ===== Wind / pesticide-drift modeling =====
 
 CREATE TABLE IF NOT EXISTS wind_data (
