@@ -1,0 +1,18 @@
+{
+ "bounds": [
+  [
+   41.99216,
+   -83.265381
+  ],
+  [
+   42.504503,
+   -82.990723
+  ]
+ ],
+ "min_zoom": 9,
+ "max_zoom": 15,
+ "sources": [
+  "https://prd-tnm.s3.amazonaws.com/StagedProducts/Maps/HistoricalTopo/GeoTIFF/MI/MI_Wyandotte_278613_1906_62500_geo.tif",
+  "https://prd-tnm.s3.amazonaws.com/StagedProducts/Maps/HistoricalTopo/GeoTIFF/MI/MI_Detroit_278077_1905_62500_geo.tif"
+ ]
+}

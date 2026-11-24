@@ -279,6 +279,11 @@
       markers: null,               // L.markerClusterGroup / layerGroup (centroid pins)
       polys: null,                 // L.layerGroup of course footprint polygons
     },
+    historicTopo: {               // USGS 1905-1906 sheets, self-hosted tiles
+      on: false,
+      opacity: 0.7,
+      layer: null,                // L.tileLayer over /static/tiles/historic_topo
+    },
     cdl: {
       on: false,                   // USDA Cropland Data Layer WMS overlay
       layer: null,                 // L.tileLayer.wms instance
@@ -1165,6 +1170,53 @@
       return { weight: 2.0, color: '#f0b429', fillOpacity: 0 };
     }
     return { weight: 2.2, color: '#f0b429', fillOpacity: 0.92 };
+  }
+
+  // ---------- Historic topographic maps (USGS HTMC, 1905-1906) ----------
+  //
+  // Self-hosted XYZ tiles built from two public-domain USGS Historical
+  // Topographic Map Collection GeoTIFFs (Wyandotte 1906, Detroit 1905) by
+  // scripts/build_historic_topo_tiles.py — collar-clipped to the quad
+  // neatlines and reprojected to the slippy grid. Deliberately NOT Esri's
+  // USGS_Historical_Topographic_Maps ImageServer: it answers anonymously
+  // today but its item is tagged "Requires Subscription", so we never ship
+  // a dependency on it.
+  //
+  // FRAMING (load-bearing): these sheets show where water WAS in 1905-1906.
+  // That is ALL this layer shows. It is not a contamination layer; nothing
+  // here may imply fill, dumping, or an inferred link between historic water
+  // and any modern record. The pane sits below every polygon/marker pane and
+  // never receives pointer events.
+  const HTOPO_URL = '/static/tiles/historic_topo/{z}/{x}/{y}.png';
+  // Exact extent of the clipped two-quad mosaic (from the build's meta.json);
+  // Leaflet requests no tiles outside it.
+  const HTOPO_BOUNDS = L.latLngBounds([[41.99216, -83.265381], [42.504503, -82.990723]]);
+  const HTOPO_ATTR = 'Historic topo: <a href="https://www.usgs.gov/programs/national-geospatial-program/historical-topographic-maps-preserving-past" target="_blank" rel="noopener">USGS HTMC</a> (Wyandotte 1906, Detroit 1905), public domain';
+
+  function historicTopoPane() {
+    if (!state.map.getPane('historictopo')) {
+      const p = state.map.createPane('historictopo');
+      p.style.zIndex = 350;             // above basemap (200), below the county
+                                        // overlay pane (400) and all marker panes
+      p.style.pointerEvents = 'none';   // never intercept a click
+    }
+    return 'historictopo';
+  }
+
+  function renderHistoricTopo() {
+    if (state.historicTopo.layer) {
+      state.historicTopo.layer.remove();
+      state.historicTopo.layer = null;
+    }
+    if (!state.historicTopo.on) return;
+    state.historicTopo.layer = L.tileLayer(HTOPO_URL, {
+      pane: historicTopoPane(),
+      bounds: HTOPO_BOUNDS,
+      minNativeZoom: 9, maxNativeZoom: 15,    // z15 ≈ the sheets' ~5 m/px scan
+      minZoom: 5, maxZoom: 19,
+      opacity: state.historicTopo.opacity,
+      attribution: HTOPO_ATTR,
+    }).addTo(state.map);
   }
 
   // ---------- persistent selected-county outline ----------
@@ -6723,6 +6775,23 @@
       refreshAllWaterLayers();
     });
 
+    // Historic topographic maps (USGS 1905-1906): toggle + opacity slider,
+    // same pattern as the CDL layer below.
+    const htToggle = $('historic-topo');
+    if (htToggle) {
+      htToggle.addEventListener('change', (e) => {
+        state.historicTopo.on = e.target.checked;
+        renderHistoricTopo();
+      });
+      const htOp = $('historic-topo-opacity');
+      if (htOp) htOp.addEventListener('input', (e) => {
+        state.historicTopo.opacity = Math.max(0, Math.min(1, Number(e.target.value) / 100));
+        const v = $('historic-topo-opacity-val');
+        if (v) v.textContent = `${e.target.value}%`;
+        if (state.historicTopo.layer) state.historicTopo.layer.setOpacity(state.historicTopo.opacity);
+      });
+    }
+
     // USDA Cropland Data Layer (CDL) WMS overlay — populate the year selector
     // (newest first, default newest) and wire the toggle / year / opacity.
     const cdlYearSel = $('cdl-year');
@@ -8316,6 +8385,7 @@
     { c: 'wd',  cb: 'wind-drift' },
     { c: 'wz',  cb: 'wind-driftzone' },
     { c: 'cdl', cb: 'cdl-crop' },
+    { c: 'ht',  cb: 'historic-topo' },
   ];
   const SHARE_LAYER_BY_CODE = Object.fromEntries(SHARE_LAYERS.map((l) => [l.c, l]));
 
