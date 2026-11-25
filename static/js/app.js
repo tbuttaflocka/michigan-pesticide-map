@@ -3191,7 +3191,10 @@
     }
 
     return `<div class="contam-popup">
-      <div class="cp-status" style="background:${s.status_color}">${s.status_label}</div>
+      <div class="cp-status" style="background:${s.status_color}">${
+        // Deleted pill carries the glossary definition (gated — plain text if
+        // the entry were ever missing, never a silent dangling reference).
+        s.status_class === 'deleted' ? glossSpan(s.status_label, 'Deleted from NPL') : s.status_label}</div>
       ${s.company ? `<div class="cp-company">${s.company}</div>` : ''}
       <h4>${s.site_name}</h4>
       <div class="cp-meta">${s.category_label}${s.city ? ' · ' + s.city : ''}${s.county ? ', ' + s.county + ' Co.' : ''}${s.epa_id ? ' · ' + s.epa_id : ''}</div>
@@ -7874,8 +7877,12 @@
 
   function _itemFigures(layer, it) {
     if (layer === 'contamination') {
+      // Deleted-NPL status gets the glossary definition (gated via glossSpan)
+      // so "Deleted" is never read as "clean" in the report either.
+      const st = /delet/i.test(it.status || '')
+        ? glossSpan(it.status, 'Deleted from NPL') : _rEsc(it.status || '');
       return `${it.npl ? '<span class="rpt-tag npl">NPL Superfund</span> ' : ''}`
-        + `${_rEsc(it.status || '')}${it.hrs_score ? ` · HRS ${it.hrs_score}` : ''}`;
+        + `${st}${it.hrs_score ? ` · HRS ${it.hrs_score}` : ''}`;
     }
     if (layer === 'tri') {
       return `${it.latest_release_lbs != null ? `<b>${fmtLbs(it.latest_release_lbs)}</b> released`

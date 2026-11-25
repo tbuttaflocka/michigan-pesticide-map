@@ -1288,8 +1288,14 @@ def _epa_structured_description(rec) -> str:
     loc = ", ".join(p for p in (city, f"{county} County" if county else None) if p)
 
     if "delet" in status:
+        # Deletion is administrative — never render it as "clean". Generic EPA
+        # fact only; no cross-reference to any state record is made here.
         listing = ("was placed on and has since been deleted from the National "
-                   "Priorities List, indicating EPA considers cleanup goals met")
+                   "Priorities List. Deletion is an administrative step — EPA "
+                   "removed the site from its federal cleanup list — and does "
+                   "not by itself mean all contamination is gone or the land "
+                   "is unrestricted; deleted sites can remain capped, under "
+                   "deed restrictions, or subject to periodic reviews")
     elif "propos" in status:
         listing = "has been proposed for the National Priorities List"
     else:

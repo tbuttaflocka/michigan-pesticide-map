@@ -322,6 +322,12 @@
     'NPL':
       'National Priorities List — the EPA\'s list of the most seriously contaminated ' +
       'sites in the country, eligible for long-term "Superfund" cleanup.',
+    'Deleted from NPL':
+      'EPA took the site off its National Priorities List — a paperwork status, not a ' +
+      'health finding. It means EPA decided no further federal cleanup response is ' +
+      'needed, NOT that all the contamination is gone: sites can be deleted with waste ' +
+      'capped in place under the ground, restrictions recorded on the deed, and ' +
+      'check-ups still required every five years.',
     'Superfund':
       'The federal program (and its list, the NPL) for cleaning up the country\'s most ' +
       'hazardous contaminated sites.',

@@ -38,7 +38,10 @@ CATEGORY_META = {
 STATUS_COLORS = {
     "npl":      ("#f85149", "Active NPL (Superfund)"),
     "proposed": ("#f0b429", "Proposed for NPL"),
-    "deleted":  ("#3fb950", "Deleted from NPL (cleaned up)"),
+    # "Deleted" is EPA's ADMINISTRATIVE status — removed from the federal
+    # list. It must never be labeled "cleaned up": sites can be deleted with
+    # waste capped in place, deed restrictions, and five-year reviews running.
+    "deleted":  ("#3fb950", "Deleted from NPL — off the federal list, not necessarily clean"),
     "state":    ("#e8873c", "State cleanup / PFAS investigation"),
     "unknown":  ("#9aa4b2", "Status unknown"),
 }
@@ -275,7 +278,7 @@ MICHIGAN_INDUSTRIAL_CONTAMINATION = {
         "site_name": "Anderson Development Co. Superfund Site",
         "lat": 41.8975, "lng": -84.0372,
         "county": "Lenawee", "county_fips": "26091", "city": "Adrian",
-        "epa_id": "MID006019814", "status": "Deleted from NPL (cleaned up 1993)",
+        "epa_id": "MID006019814", "status": "Deleted from NPL",
         "years_active": "1970-1979",
         "contaminants": ["MBOCA (4,4'-methylene-bis(2-chloroaniline))",
                          "Chlorinated aromatic amines", "VOCs"],
