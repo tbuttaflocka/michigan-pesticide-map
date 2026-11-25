@@ -284,6 +284,11 @@
       opacity: 0.7,
       layer: null,                // L.tileLayer over /static/tiles/historic_topo
     },
+    historicWater: {              // water ink only, color-extracted from the
+      on: false,                  // same sheets — independent of historicTopo
+      opacity: 0.9,
+      layer: null,                // L.tileLayer over /static/tiles/historic_water
+    },
     cdl: {
       on: false,                   // USDA Cropland Data Layer WMS overlay
       layer: null,                 // L.tileLayer.wms instance
@@ -1216,6 +1221,39 @@
       minZoom: 5, maxZoom: 19,
       opacity: state.historicTopo.opacity,
       attribution: HTOPO_ATTR,
+    }).addTo(state.map);
+  }
+
+  // Water-only companion layer: the blue ink color-extracted from the same
+  // sheets (graded alpha, tinted cyan — the actual lithography, nothing
+  // traced). Fully independent of the topo layer: its own tiles, pane,
+  // toggle, opacity and deep-link code, and it works with the sheets off.
+  const HWATER_URL = '/static/tiles/historic_water/{z}/{x}/{y}.png';
+  const HWATER_ATTR = 'Historic water: color-extracted from <a href="https://www.usgs.gov/programs/national-geospatial-program/historical-topographic-maps-preserving-past" target="_blank" rel="noopener">USGS HTMC</a> sheets (1905–1906), public domain';
+
+  function historicWaterPane() {
+    if (!state.map.getPane('historicwater')) {
+      const p = state.map.createPane('historicwater');
+      p.style.zIndex = 360;             // above the topo sheets (350), still far
+                                        // below overlay polygons (400) + markers
+      p.style.pointerEvents = 'none';   // never intercept a click
+    }
+    return 'historicwater';
+  }
+
+  function renderHistoricWater() {
+    if (state.historicWater.layer) {
+      state.historicWater.layer.remove();
+      state.historicWater.layer = null;
+    }
+    if (!state.historicWater.on) return;
+    state.historicWater.layer = L.tileLayer(HWATER_URL, {
+      pane: historicWaterPane(),
+      bounds: HTOPO_BOUNDS,             // same two-quad mosaic grid as the sheets
+      minNativeZoom: 9, maxNativeZoom: 15,
+      minZoom: 5, maxZoom: 19,
+      opacity: state.historicWater.opacity,
+      attribution: HWATER_ATTR,
     }).addTo(state.map);
   }
 
@@ -6792,6 +6830,22 @@
       });
     }
 
+    // Historic water (1905-06): independent toggle + opacity, same pattern.
+    const hwToggle = $('historic-water');
+    if (hwToggle) {
+      hwToggle.addEventListener('change', (e) => {
+        state.historicWater.on = e.target.checked;
+        renderHistoricWater();
+      });
+      const hwOp = $('historic-water-opacity');
+      if (hwOp) hwOp.addEventListener('input', (e) => {
+        state.historicWater.opacity = Math.max(0, Math.min(1, Number(e.target.value) / 100));
+        const v = $('historic-water-opacity-val');
+        if (v) v.textContent = `${e.target.value}%`;
+        if (state.historicWater.layer) state.historicWater.layer.setOpacity(state.historicWater.opacity);
+      });
+    }
+
     // USDA Cropland Data Layer (CDL) WMS overlay — populate the year selector
     // (newest first, default newest) and wire the toggle / year / opacity.
     const cdlYearSel = $('cdl-year');
@@ -8386,6 +8440,7 @@
     { c: 'wz',  cb: 'wind-driftzone' },
     { c: 'cdl', cb: 'cdl-crop' },
     { c: 'ht',  cb: 'historic-topo' },
+    { c: 'hw',  cb: 'historic-water' },
   ];
   const SHARE_LAYER_BY_CODE = Object.fromEntries(SHARE_LAYERS.map((l) => [l.c, l]));
 
